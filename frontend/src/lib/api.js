@@ -1,8 +1,12 @@
 import axios from 'axios';
 
-const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL + '/api',
-});
+// No servidor (SSR) chama o backend diretamente via localhost.
+// No browser chama via /api que o Next.js redireciona para o backend.
+const baseURL = typeof window === 'undefined'
+  ? 'http://localhost:3001/api'
+  : '/api';
+
+const api = axios.create({ baseURL });
 
 api.interceptors.request.use((config) => {
   if (typeof window !== 'undefined') {
