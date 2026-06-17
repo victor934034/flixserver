@@ -56,17 +56,56 @@ router.post('/import/:tmdbId', async (req, res) => {
   }
 });
 
-// Busca no TMDB sem salvar (para o admin pré-visualizar)
+// Busca no TMDB sem salvar (para o admin pré-visualizar) — retorna 1 resultado completo
 router.get('/search', async (req, res) => {
-  const { q, type = 'movie' } = req.query;
+  const { q, type = 'movie', year } = req.query;
   if (!q) return res.status(400).json({ error: 'q é obrigatório' });
 
   try {
-    const result = await searchTMDB(q, type);
+    const result = await searchTMDB(q, type, year || null);
     if (!result) return res.json(null);
 
     const details = await getDetails(result.id, type);
     res.json(details);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Busca múltipla no TMDB — retorna lista de resultados para o usuário escolher
+router.get('/search-multiple', async (req, res) => {
+  const { q, type = 'movie', year } = req.query;
+  if (!q) return res.status(400).json({ error: 'q é obrigatório' });
+
+  const axios = require('axios');
+  const TMDB_BASE = 'https://api.themoviedb.org/3';
+  const TMDB_IMG = 'https://image.tmdb.org/t/p/w300';
+
+  try {
+    const endpoint = type === 'movie' ? 'search/movie' : 'search/tv';
+    const params = { api_key: process.env.TMDB_API_KEY, query: q, language: 'pt-BR' };
+    if (year) params.year = year;
+
+    const { data } = await axios.get(`${TMDB_BASE}/${endpoint}`, { params });
+    let results = data.results || [];
+
+    if (results.length === 0) {
+      params.language = 'en-US';
+      const retry = await axios.get(`${TMDB_BASE}/${endpoint}`, { params });
+      results = retry.data.results || [];
+    }
+
+    const mapped = results.slice(0, 8).map(r => ({
+      id: r.id,
+      title: r.title || r.name,
+      original_title: r.original_title || r.original_name,
+      year: (r.release_date || r.first_air_date || '').split('-')[0] || null,
+      poster_url: r.poster_path ? `${TMDB_IMG}${r.poster_path}` : null,
+      rating: r.vote_average ? parseFloat(r.vote_average.toFixed(1)) : null,
+      overview: r.overview,
+    }));
+
+    res.json(mapped);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
