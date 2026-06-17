@@ -47,7 +47,7 @@ export default function Navbar() {
 
         {user ? (
           <div className={styles.userMenu}>
-            <span className={styles.userName}>{user.name?.split(' ')[0]}</span>
+            <Link href="/perfil" className={styles.userName}>{user.name?.split(' ')[0]}</Link>
             {user.is_admin && <Link href="/admin" className={styles.adminLink}>Admin</Link>}
             <button onClick={logout} className={styles.logoutBtn}>Sair</button>
           </div>
