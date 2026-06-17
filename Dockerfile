@@ -1,5 +1,5 @@
 # ---- Stage 1: Build Next.js ----
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /build
 
@@ -11,7 +11,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # ---- Stage 2: Runner (frontend + backend juntos) ----
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 
 WORKDIR /app
 
