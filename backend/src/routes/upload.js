@@ -45,9 +45,12 @@ router.post('/subtitle', upload.single('file'), async (req, res) => {
   }
 });
 
-// Retorna URL pré-assinada para upload direto do frontend (evita passar pelo servidor)
+// Retorna URL pré-assinada para upload direto do frontend
 router.get('/presign', async (req, res) => {
   try {
+    if (!process.env.BACKBLAZE_KEY_ID || !process.env.BACKBLAZE_APP_KEY) {
+      return res.status(500).json({ error: 'Credenciais do Backblaze não configuradas no servidor.' });
+    }
     const { getUploadUrl } = require('../services/backblaze');
     const uploadData = await getUploadUrl();
     res.json({
@@ -56,7 +59,12 @@ router.get('/presign', async (req, res) => {
       cdnBase: process.env.CDN_BASE_URL,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    const msg = err.response?.data?.message || err.message;
+    const status = err.response?.status;
+    if (status === 401) {
+      return res.status(500).json({ error: `Backblaze: credenciais inválidas (401). Gere uma nova App Key no console do B2 e atualize as variáveis de ambiente no EasePanel.` });
+    }
+    res.status(500).json({ error: `Backblaze: ${msg}` });
   }
 });
 
