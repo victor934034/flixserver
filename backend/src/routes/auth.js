@@ -26,6 +26,10 @@ router.post('/register', async (req, res) => {
 
     if (authError) {
       console.error('[register] Supabase authError:', JSON.stringify(authError));
+      const isRetryable = authError.name === 'AuthRetryableFetchError' || authError.status >= 500;
+      if (isRetryable) {
+        return res.status(503).json({ error: 'Serviço de autenticação temporariamente indisponível. Verifique se o projeto Supabase está ativo e as variáveis de ambiente estão corretas.' });
+      }
       const msg = authError.message || authError.msg || authError.error_description
         || authError.error || (typeof authError === 'string' ? authError : null)
         || 'Erro ao criar conta';
@@ -66,7 +70,11 @@ router.post('/login', async (req, res) => {
       password,
     });
 
-    if (authError) return res.status(401).json({ error: authError.message || 'Credenciais inválidas' });
+    if (authError) {
+      const isRetryable = authError.name === 'AuthRetryableFetchError' || authError.status >= 500;
+      if (isRetryable) return res.status(503).json({ error: 'Serviço de autenticação temporariamente indisponível.' });
+      return res.status(401).json({ error: authError.message || 'Credenciais inválidas' });
+    }
 
     const { data: user, error: userError } = await supabase
       .from('users')
