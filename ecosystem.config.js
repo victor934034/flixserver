@@ -11,7 +11,6 @@ module.exports = {
     {
       name: 'web',
       script: './frontend/server.js',
-      cwd: './frontend',
       env: {
         NODE_ENV: 'production',
         PORT: 3000,
