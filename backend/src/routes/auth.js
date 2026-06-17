@@ -24,7 +24,17 @@ router.post('/register', async (req, res) => {
       options: { data: { name } },
     });
 
-    if (authError) return res.status(400).json({ error: authError.message || authError.code || 'Erro ao criar conta' });
+    if (authError) {
+      console.error('[register] Supabase authError:', JSON.stringify(authError));
+      const msg = authError.message || authError.msg || authError.error_description
+        || authError.error || (typeof authError === 'string' ? authError : null)
+        || 'Erro ao criar conta';
+      return res.status(400).json({ error: msg });
+    }
+
+    if (!authData?.user) {
+      return res.status(400).json({ error: 'Não foi possível criar a conta. Verifique se o email já está cadastrado.' });
+    }
 
     const { data: userData, error: userError } = await supabase
       .from('users')
@@ -32,7 +42,11 @@ router.post('/register', async (req, res) => {
       .select()
       .single();
 
-    if (userError) return res.status(400).json({ error: userError.message || userError.code || 'Erro ao salvar usuário' });
+    if (userError) {
+      console.error('[register] Supabase userError:', JSON.stringify(userError));
+      const msg = userError.message || userError.code || 'Erro ao salvar usuário';
+      return res.status(400).json({ error: msg });
+    }
 
     res.status(201).json({ user: userData, token: signToken(userData) });
   } catch (err) {
