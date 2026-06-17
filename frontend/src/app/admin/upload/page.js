@@ -22,6 +22,35 @@ function formatSize(bytes) {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
+function doUploadXHR(item, presign, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', presign.uploadUrl);
+    xhr.setRequestHeader('Authorization', presign.authorizationToken);
+    xhr.setRequestHeader('X-Bz-File-Name', encodeURIComponent(item.file.name));
+    xhr.setRequestHeader('Content-Type', item.file.type || 'video/mp4');
+    xhr.setRequestHeader('X-Bz-Content-Sha1', 'do_not_verify');
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 90));
+    };
+
+    xhr.onload = () => {
+      if (xhr.status < 300) resolve();
+      else {
+        const err = new Error(`HTTP ${xhr.status}`);
+        err.isServer = true;
+        reject(err);
+      }
+    };
+    xhr.onerror = () => reject(new Error('connection'));
+    xhr.send(item.file);
+  });
+}
+
+const MAX_RETRIES = 3;
+const RETRY_DELAYS = [3000, 6000, 12000];
+
 export default function UploadPage() {
   const [files, setFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
@@ -54,39 +83,48 @@ export default function UploadPage() {
   }
 
   async function uploadFile(item) {
-    updateFile(item.id, { status: 'uploading', progress: 0 });
+    updateFile(item.id, { status: 'uploading', progress: 0, error: null });
 
-    try {
-      const { data: presign } = await api.get('/upload/presign');
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const { data: presign } = await api.get('/upload/presign');
 
-      await new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open('POST', presign.uploadUrl);
-        xhr.setRequestHeader('Authorization', presign.authorizationToken);
-        xhr.setRequestHeader('X-Bz-File-Name', encodeURIComponent(item.file.name));
-        xhr.setRequestHeader('Content-Type', item.file.type || 'video/mp4');
-        xhr.setRequestHeader('X-Bz-Content-Sha1', 'do_not_verify');
+        await doUploadXHR(item, presign, (pct) => updateFile(item.id, { progress: pct }));
 
-        xhr.upload.onprogress = (e) => {
-          if (e.lengthComputable) {
-            updateFile(item.id, { progress: Math.round((e.loaded / e.total) * 90) });
-          }
-        };
+        updateFile(item.id, { progress: 92 });
 
-        xhr.onload = () => (xhr.status < 300 ? resolve() : reject(new Error(`HTTP ${xhr.status}`)));
-        xhr.onerror = () => reject(new Error('Falha na conexão'));
-        xhr.send(item.file);
-      });
+        const cdnUrl = `${presign.cdnBase}/${item.file.name}`;
+        const { data: tmdbResult } = await api.post('/tmdb/detect', { fileUrl: cdnUrl, version: item.version });
 
-      updateFile(item.id, { progress: 92 });
+        updateFile(item.id, { status: 'done', progress: 100, result: tmdbResult, error: null });
+        return;
+      } catch (err) {
+        const isConnection = err.message === 'connection' || !err.isServer;
+        const hasRetry = isConnection && attempt < MAX_RETRIES;
 
-      const cdnUrl = `${presign.cdnBase}/${item.file.name}`;
-      const { data: tmdbResult } = await api.post('/tmdb/detect', { fileUrl: cdnUrl, version: item.version });
-
-      updateFile(item.id, { status: 'done', progress: 100, result: tmdbResult });
-    } catch (err) {
-      updateFile(item.id, { status: 'error', error: err.message });
+        if (hasRetry) {
+          const delay = RETRY_DELAYS[attempt];
+          updateFile(item.id, {
+            status: 'retrying',
+            progress: 0,
+            error: `Falha de conexão. Tentando novamente em ${delay / 1000}s... (tentativa ${attempt + 1}/${MAX_RETRIES})`,
+          });
+          await new Promise(r => setTimeout(r, delay));
+          updateFile(item.id, { status: 'uploading', error: null });
+        } else {
+          updateFile(item.id, {
+            status: 'error',
+            error: err.message === 'connection' ? 'Falha de conexão após 3 tentativas' : err.message,
+          });
+          return;
+        }
+      }
     }
+  }
+
+  async function retryFile(item) {
+    updateFile(item.id, { status: 'pending', progress: 0, error: null, result: null });
+    await uploadFile({ ...item, status: 'pending' });
   }
 
   async function startAll() {
@@ -154,13 +192,23 @@ export default function UploadPage() {
                   )}
 
                   {item.status === 'done' && <span className={styles.badgeDone}>✓ Concluído</span>}
-                  {item.status === 'error' && <span className={styles.badgeError}>✗ Erro</span>}
+                  {item.status === 'error' && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span className={styles.badgeError}>✗ Erro</span>
+                      <button className={styles.btnRetry} onClick={() => retryFile(item)}>↺ Tentar novamente</button>
+                    </div>
+                  )}
+                  {item.status === 'retrying' && <span className={styles.badgeRetrying}>↺ Reconectando...</span>}
                 </div>
 
                 {(item.status === 'uploading' || item.status === 'done') && (
                   <div className={styles.progressBar}>
                     <div className={styles.progressFill} style={{ width: `${item.progress}%` }} />
                   </div>
+                )}
+
+                {item.status === 'retrying' && item.error && (
+                  <p className={styles.retryMsg}>{item.error}</p>
                 )}
 
                 {item.result && (
@@ -172,7 +220,7 @@ export default function UploadPage() {
                   </div>
                 )}
 
-                {item.error && <p className={styles.errorMsg}>{item.error}</p>}
+                {item.status === 'error' && item.error && <p className={styles.errorMsg}>{item.error}</p>}
               </div>
             ))}
           </div>
