@@ -63,4 +63,29 @@ async function deleteFile(fileId, fileName) {
   );
 }
 
-module.exports = { authorize, getUploadUrl, uploadFile, deleteFile };
+const VIDEO_EXTENSIONS = /\.(mp4|mkv|avi|mov|m4v|webm|ts|wmv)$/i;
+
+async function listFiles(prefix = '', limit = 1000) {
+  const auth = await authorize();
+  const allFiles = [];
+  let nextFileName = null;
+
+  do {
+    const body = { bucketId: process.env.BACKBLAZE_BUCKET_ID, maxFileCount: 1000 };
+    if (prefix) body.prefix = prefix;
+    if (nextFileName) body.startFileName = nextFileName;
+
+    const { data } = await axios.post(
+      `${auth.apiUrl}/b2api/v2/b2_list_file_names`,
+      body,
+      { headers: { Authorization: auth.authorizationToken } }
+    );
+
+    allFiles.push(...data.files.filter(f => VIDEO_EXTENSIONS.test(f.fileName)));
+    nextFileName = data.nextFileName;
+  } while (nextFileName && allFiles.length < limit);
+
+  return allFiles;
+}
+
+module.exports = { authorize, getUploadUrl, uploadFile, deleteFile, listFiles };

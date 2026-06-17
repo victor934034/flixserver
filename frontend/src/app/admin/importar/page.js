@@ -404,6 +404,239 @@ function ImportarTab() {
   );
 }
 
+// ─── Tab: Escanear Bucket ─────────────────────────────────────────────────
+
+function formatBytes(b) {
+  if (!b) return '—';
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(0)} KB`;
+  if (b < 1024 ** 3) return `${(b / 1024 / 1024).toFixed(1)} MB`;
+  return `${(b / 1024 ** 3).toFixed(2)} GB`;
+}
+
+function ScanTab() {
+  const [scanning, setScanning] = useState(false);
+  const [scanResult, setScanResult] = useState(null);
+  const [selected, setSelected] = useState(new Set());
+  const [importing, setImporting] = useState(false);
+  const [importReport, setImportReport] = useState(null);
+
+  const scan = async () => {
+    setScanning(true);
+    setScanResult(null);
+    setSelected(new Set());
+    setImportReport(null);
+    try {
+      const { data } = await api.get('/admin/scan-bucket');
+      setScanResult(data);
+      // Seleciona todos por padrão
+      setSelected(new Set(data.newFiles.map(f => f.cdnUrl)));
+    } catch (e) {
+      setScanResult({ error: e.response?.data?.error || e.message });
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const toggleSelect = (url) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(url) ? next.delete(url) : next.add(url);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    if (selected.size === scanResult?.newFiles?.length) setSelected(new Set());
+    else setSelected(new Set(scanResult.newFiles.map(f => f.cdnUrl)));
+  };
+
+  const updateVersion = (url, version) => {
+    setScanResult(prev => ({
+      ...prev,
+      newFiles: prev.newFiles.map(f => f.cdnUrl === url ? { ...f, version } : f),
+    }));
+  };
+
+  const importSelected = async () => {
+    const files = scanResult.newFiles.filter(f => selected.has(f.cdnUrl));
+    if (!files.length) return;
+    setImporting(true);
+    setImportReport(null);
+    try {
+      const { data } = await api.post('/admin/scan-bucket/import', { files });
+      setImportReport(data);
+      // Remove importados com sucesso da lista
+      if (data.success?.length) {
+        const doneUrls = new Set(data.success.map(s => s.fileUrl));
+        setScanResult(prev => ({
+          ...prev,
+          newFiles: prev.newFiles.filter(f => !doneUrls.has(f.cdnUrl)),
+        }));
+        setSelected(new Set());
+      }
+    } catch (e) {
+      setImportReport({ error: e.response?.data?.error || e.message });
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const newFiles = scanResult?.newFiles || [];
+
+  return (
+    <div className={styles.tabContent}>
+      <div className={styles.scanHeader}>
+        <div className={styles.batchInfo} style={{ flex: 1 }}>
+          <div className={styles.infoIcon}>🪣</div>
+          <div>
+            <p className={styles.infoTitle}>Escanear Bucket Backblaze</p>
+            <p className={styles.infoDesc}>
+              Lista todos os vídeos no bucket e detecta quais ainda não foram cadastrados no banco.
+              Você pode importar todos de uma vez ou selecionar individualmente.
+            </p>
+            <p className={styles.infoDesc} style={{ color: '#ffa500' }}>
+              💡 Para importação automática sem clicar em nada, configure o <strong>Webhook do B2</strong> abaixo.
+            </p>
+          </div>
+        </div>
+        <button className={styles.btnScan} onClick={scan} disabled={scanning}>
+          {scanning ? <><Spinner /> Escaneando...</> : '🔍 Escanear Bucket'}
+        </button>
+      </div>
+
+      {scanResult?.error && (
+        <div className={styles.alertError}>✗ {scanResult.error}</div>
+      )}
+
+      {scanResult && !scanResult.error && (
+        <>
+          <div className={styles.scanStats}>
+            <div className={styles.statBox}>
+              <span className={styles.statNum}>{scanResult.totalInBucket}</span>
+              <span className={styles.statLabel}>No bucket</span>
+            </div>
+            <div className={styles.statBox}>
+              <span className={styles.statNum} style={{ color: '#46d369' }}>{scanResult.alreadyRegistered}</span>
+              <span className={styles.statLabel}>Já cadastrados</span>
+            </div>
+            <div className={styles.statBox}>
+              <span className={styles.statNum} style={{ color: '#ffa500' }}>{newFiles.length}</span>
+              <span className={styles.statLabel}>Novos (pendentes)</span>
+            </div>
+          </div>
+
+          {newFiles.length === 0 ? (
+            <div className={styles.alertSuccess}>✓ Todos os arquivos do bucket já estão cadastrados!</div>
+          ) : (
+            <>
+              <div className={styles.scanActions}>
+                <label className={styles.selectAll}>
+                  <input type="checkbox" checked={selected.size === newFiles.length} onChange={toggleAll} />
+                  Selecionar todos ({newFiles.length})
+                </label>
+                <button
+                  className={styles.btnImport}
+                  onClick={importSelected}
+                  disabled={importing || selected.size === 0}
+                >
+                  {importing
+                    ? <><Spinner /> Importando...</>
+                    : `🚀 Importar ${selected.size} arquivo${selected.size !== 1 ? 's' : ''}`}
+                </button>
+              </div>
+
+              <div className={styles.scanList}>
+                {newFiles.map(f => (
+                  <div key={f.cdnUrl} className={`${styles.scanItem} ${selected.has(f.cdnUrl) ? styles.scanItemSelected : ''}`}>
+                    <input
+                      type="checkbox"
+                      checked={selected.has(f.cdnUrl)}
+                      onChange={() => toggleSelect(f.cdnUrl)}
+                      className={styles.scanCheck}
+                    />
+                    <div className={styles.scanItemInfo}>
+                      <p className={styles.scanFileName}>{f.fileName}</p>
+                      <div className={styles.scanMeta}>
+                        <span className={styles.itemBadge} style={{ background: f.detectedType === 'movie' ? '#0071eb' : '#7b2ff7' }}>
+                          {f.detectedType === 'movie' ? 'FILME' : 'SÉRIE'}
+                        </span>
+                        <span className={styles.scanDetected}>{f.detectedName}</span>
+                        {f.detectedSeason && (
+                          <span className={styles.itemFaded}>T{f.detectedSeason}E{String(f.detectedEpisode).padStart(2,'0')}</span>
+                        )}
+                        <span className={styles.itemFaded}>{formatBytes(f.size)}</span>
+                      </div>
+                    </div>
+                    <select
+                      className={styles.select}
+                      value={f.version}
+                      onChange={e => updateVersion(f.cdnUrl, e.target.value)}
+                      onClick={e => e.stopPropagation()}
+                    >
+                      <option value="dubbing">🎙 Dublado</option>
+                      <option value="subtitled">💬 Legendado</option>
+                      <option value="cinema">🎞 Cinema</option>
+                      <option value="4k">4K</option>
+                    </select>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {importReport && (
+            <div className={importReport.error ? styles.alertError : styles.alertSuccess}>
+              {importReport.error
+                ? `✗ ${importReport.error}`
+                : `✓ ${importReport.success?.length || 0} importados · ${importReport.notFound?.length || 0} não encontrados no TMDB`}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Instruções do Webhook */}
+      <div className={styles.webhookBox}>
+        <h3 className={styles.webhookTitle}>⚡ Importação 100% automática via Webhook</h3>
+        <p className={styles.infoDesc}>
+          Configure o Backblaze B2 para chamar nossa API automaticamente quando você enviar um arquivo.
+          Assim você nunca precisa abrir o admin — o cadastro acontece sozinho.
+        </p>
+        <div className={styles.webhookSteps}>
+          <div className={styles.step}>
+            <span className={styles.stepNum}>1</span>
+            <div>
+              <p className={styles.stepTitle}>Adicione a variável de ambiente</p>
+              <code className={styles.code}>B2_WEBHOOK_SECRET=uma_senha_secreta_aqui</code>
+              <p className={styles.stepDesc}>No EasePanel → Ambiente → adicione essa variável</p>
+            </div>
+          </div>
+          <div className={styles.step}>
+            <span className={styles.stepNum}>2</span>
+            <div>
+              <p className={styles.stepTitle}>Configure o Event Notification no B2</p>
+              <p className={styles.stepDesc}>Backblaze Console → Buckets → Flixhome → <strong>Event Notifications</strong></p>
+              <code className={styles.code}>
+                https://movies0-movie.mgf7wb.easypanel.host/api/webhook/b2?secret=SUA_SENHA
+              </code>
+              <p className={styles.stepDesc}>Event type: <strong>b2:ObjectCreated:*</strong></p>
+            </div>
+          </div>
+          <div className={styles.step}>
+            <span className={styles.stepNum}>3</span>
+            <div>
+              <p className={styles.stepTitle}>Pronto!</p>
+              <p className={styles.stepDesc}>
+                Qualquer arquivo de vídeo (.mp4, .mkv, etc.) enviado ao bucket será detectado e
+                cadastrado automaticamente. O nome do arquivo determina o título buscado no TMDB.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────
 
 export default function ImportarPage() {
@@ -432,9 +665,17 @@ export default function ImportarPage() {
         >
           📋 Importar por URL
         </button>
+        <button
+          className={`${styles.tab} ${tab === 'scan' ? styles.tabActive : ''}`}
+          onClick={() => setTab('scan')}
+        >
+          🪣 Escanear Bucket
+        </button>
       </div>
 
-      {tab === 'busca' ? <BuscaTab /> : <ImportarTab />}
+      {tab === 'busca' && <BuscaTab />}
+      {tab === 'batch' && <ImportarTab />}
+      {tab === 'scan' && <ScanTab />}
     </div>
   );
 }

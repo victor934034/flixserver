@@ -33,6 +33,82 @@ router.get('/stats', async (req, res) => {
   }
 });
 
+// ---- SCAN BUCKET ----
+router.get('/scan-bucket', async (req, res) => {
+  try {
+    const { listFiles } = require('../services/backblaze');
+    const CDN = process.env.CDN_BASE_URL;
+
+    // Lista todos os vídeos no bucket
+    const b2Files = await listFiles();
+
+    // Coleta todas as URLs já cadastradas no banco
+    const [moviesRes, episodesRes] = await Promise.all([
+      supabase.from('movies').select('file_dubbing, file_subtitled, file_cinema, file_4k').not('id', 'is', null),
+      supabase.from('episodes').select('file_dubbing, file_subtitled, file_cinema').not('id', 'is', null),
+    ]);
+
+    const registeredUrls = new Set();
+    for (const m of moviesRes.data || []) {
+      [m.file_dubbing, m.file_subtitled, m.file_cinema, m.file_4k]
+        .filter(Boolean).forEach(u => registeredUrls.add(u));
+    }
+    for (const e of episodesRes.data || []) {
+      [e.file_dubbing, e.file_subtitled, e.file_cinema]
+        .filter(Boolean).forEach(u => registeredUrls.add(u));
+    }
+
+    // Filtra os arquivos que NÃO estão cadastrados
+    const { extractInfo } = require('../../tmdb-bot');
+    const newFiles = b2Files
+      .filter(f => !registeredUrls.has(`${CDN}/${f.fileName}`))
+      .map(f => {
+        const info = extractInfo(f.fileName);
+        return {
+          fileName: f.fileName,
+          cdnUrl: `${CDN}/${f.fileName}`,
+          size: f.contentLength,
+          detectedName: info.name,
+          detectedType: info.type,
+          detectedSeason: info.season,
+          detectedEpisode: info.episode,
+          version: detectVersionFromName(f.fileName),
+        };
+      });
+
+    res.json({
+      totalInBucket: b2Files.length,
+      alreadyRegistered: b2Files.length - newFiles.length,
+      newFiles,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Importa arquivos selecionados do bucket
+router.post('/scan-bucket/import', async (req, res) => {
+  const { files } = req.body; // [{ cdnUrl, version }]
+  if (!Array.isArray(files) || files.length === 0) {
+    return res.status(400).json({ error: 'files é obrigatório' });
+  }
+  try {
+    const { processFiles } = require('../../tmdb-bot');
+    const report = await processFiles(files.map(f => ({ url: f.cdnUrl, version: f.version || 'dubbing' })));
+    res.json(report);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+function detectVersionFromName(filename = '') {
+  const lower = filename.toLowerCase();
+  if (lower.includes('legendado') || lower.includes('sub') || lower.includes('leg')) return 'subtitled';
+  if (lower.includes('cinema') || lower.includes('original')) return 'cinema';
+  if (lower.includes('4k') || lower.includes('2160p')) return '4k';
+  return 'dubbing';
+}
+
 // ---- MOVIES CRUD ----
 router.get('/movies', async (req, res) => {
   try {

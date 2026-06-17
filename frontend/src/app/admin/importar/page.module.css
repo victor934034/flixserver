@@ -270,6 +270,76 @@
 .itemEp { color: var(--text-muted); font-size: 0.8rem; }
 .itemFaded { color: var(--text-muted); font-size: 0.8rem; }
 
+/* ── Scan tab ── */
+.scanHeader { display: flex; align-items: flex-start; gap: 1rem; flex-wrap: wrap; }
+
+.btnScan {
+  display: flex; align-items: center; gap: 0.5rem; white-space: nowrap; flex-shrink: 0;
+  background: #7b2ff7; color: #fff; border: none; cursor: pointer;
+  padding: 0.8rem 1.75rem; border-radius: 8px; font-size: 0.95rem; font-weight: 700;
+  transition: opacity 0.15s; align-self: flex-start; margin-top: 0.25rem;
+}
+.btnScan:hover { opacity: 0.85; }
+.btnScan:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.scanStats {
+  display: flex; gap: 1rem; flex-wrap: wrap;
+}
+.statBox {
+  flex: 1; min-width: 120px;
+  background: var(--bg-secondary); border: 1px solid var(--border);
+  border-radius: 10px; padding: 1rem 1.25rem; text-align: center;
+}
+.statNum { display: block; font-size: 2rem; font-weight: 800; color: #fff; }
+.statLabel { font-size: 0.78rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+
+.scanActions {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 0.75rem;
+}
+.selectAll { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-size: 0.9rem; color: var(--text-secondary); }
+.selectAll input { accent-color: var(--accent); cursor: pointer; }
+
+.scanList { display: flex; flex-direction: column; gap: 0.5rem; }
+
+.scanItem {
+  display: flex; align-items: center; gap: 0.75rem;
+  background: var(--bg-secondary); border: 1px solid var(--border);
+  border-radius: 8px; padding: 0.75rem 1rem; cursor: pointer;
+  transition: border-color 0.15s;
+}
+.scanItem:hover { border-color: #555; }
+.scanItemSelected { border-color: var(--accent) !important; background: rgba(229,9,20,0.06); }
+
+.scanCheck { accent-color: var(--accent); cursor: pointer; flex-shrink: 0; width: 16px; height: 16px; }
+
+.scanItemInfo { flex: 1; min-width: 0; }
+.scanFileName { font-size: 0.85rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.3rem; word-break: break-all; }
+.scanMeta { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.scanDetected { font-size: 0.82rem; color: var(--text-secondary); }
+
+/* ── Webhook box ── */
+.webhookBox {
+  background: rgba(123,47,247,0.08); border: 1px solid rgba(123,47,247,0.3);
+  border-radius: 12px; padding: 1.5rem;
+}
+.webhookTitle { font-size: 1.05rem; font-weight: 700; margin-bottom: 0.5rem; }
+
+.webhookSteps { display: flex; flex-direction: column; gap: 1rem; margin-top: 1rem; }
+.step { display: flex; gap: 0.75rem; }
+.stepNum {
+  flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%;
+  background: #7b2ff7; color: #fff; font-size: 0.8rem; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+.stepTitle { font-size: 0.9rem; font-weight: 700; margin-bottom: 0.3rem; }
+.stepDesc { font-size: 0.82rem; color: var(--text-secondary); line-height: 1.5; margin-top: 0.25rem; }
+.code {
+  display: block; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 6px; padding: 0.6rem 0.9rem; font-family: monospace;
+  font-size: 0.8rem; color: #a8ff78; margin: 0.4rem 0; word-break: break-all;
+}
+
 /* ── Spinner ── */
 .spinner {
   width: 16px; height: 16px; border-radius: 50%; flex-shrink: 0;
