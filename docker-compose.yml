@@ -1,0 +1,47 @@
+services:
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: flixhome-api
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      TMDB_API_KEY: ${TMDB_API_KEY}
+      BACKBLAZE_KEY_ID: ${BACKBLAZE_KEY_ID}
+      BACKBLAZE_APP_KEY: ${BACKBLAZE_APP_KEY}
+      BACKBLAZE_BUCKET_ID: ${BACKBLAZE_BUCKET_ID}
+      BACKBLAZE_BUCKET_NAME: ${BACKBLAZE_BUCKET_NAME}
+      CDN_BASE_URL: ${CDN_BASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      FRONTEND_URL: ${FRONTEND_URL}
+    networks:
+      - flixhome
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+        NEXT_PUBLIC_SUPABASE_URL: ${SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_CDN_URL: ${CDN_BASE_URL}
+    container_name: flixhome-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    networks:
+      - flixhome
+
+networks:
+  flixhome:
+    driver: bridge

@@ -1,0 +1,25 @@
+.heading { font-size: 1.8rem; font-weight: 700; margin-bottom: 2rem; }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 1.25rem;
+}
+
+.card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.5rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.alertCard { border-color: #ff6b35; }
+
+.cardValue { font-size: 2.5rem; font-weight: 800; }
+
+.cardLabel { font-size: 0.85rem; color: var(--text-secondary); }
+
+.loading { color: var(--text-muted); margin-top: 1rem; }

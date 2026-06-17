@@ -1,0 +1,19 @@
+.row { padding: 1.5rem 3rem; }
+
+.title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin-bottom: 1rem;
+  color: var(--text-primary);
+}
+
+.scroll {
+  display: flex;
+  gap: 0.75rem;
+  overflow-x: auto;
+  padding-bottom: 0.5rem;
+  scrollbar-width: thin;
+  scroll-snap-type: x mandatory;
+}
+
+.scroll > * { scroll-snap-align: start; }

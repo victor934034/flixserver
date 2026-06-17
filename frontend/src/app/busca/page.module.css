@@ -1,0 +1,6 @@
+.main { padding: 7rem 3rem 4rem; }
+.heading { font-size: 1.8rem; font-weight: 700; margin-bottom: 2rem; }
+.section { margin-bottom: 3rem; }
+.section h2 { font-size: 1.2rem; color: var(--text-secondary); margin-bottom: 1rem; }
+.grid { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+.loading, .empty { color: var(--text-secondary); font-size: 1rem; margin-top: 2rem; }

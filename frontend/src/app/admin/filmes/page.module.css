@@ -1,0 +1,78 @@
+.topBar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; }
+
+.heading { font-size: 1.6rem; font-weight: 700; }
+.heading span { font-size: 1rem; color: var(--text-muted); font-weight: 400; }
+
+.btnNew {
+  background: var(--accent);
+  color: #fff;
+  padding: 0.6rem 1.4rem;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.search {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.6rem 1rem;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  width: 300px;
+  margin-bottom: 1.25rem;
+  outline: none;
+}
+
+.tableWrap { overflow-x: auto; }
+
+.table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+
+.table th {
+  text-align: left;
+  padding: 0.75rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.table td {
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  vertical-align: middle;
+}
+
+.table tr:hover td { background: var(--bg-hover); }
+
+.noPoster {
+  width: 40px;
+  height: 60px;
+  background: var(--bg-hover);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  border-radius: 3px;
+}
+
+.movieTitle { font-weight: 600; max-width: 250px; }
+.movieOriginal { font-size: 0.75rem; color: var(--text-muted); }
+
+.yes { color: var(--success); font-weight: 700; }
+.no { color: var(--text-muted); }
+
+.statusActive { background: rgba(70,211,105,0.15); color: var(--success); border: 1px solid rgba(70,211,105,0.3); padding: 2px 8px; border-radius: 3px; cursor: pointer; font-size: 0.8rem; }
+.statusInactive { background: rgba(255,255,255,0.05); color: var(--text-muted); border: 1px solid var(--border); padding: 2px 8px; border-radius: 3px; cursor: pointer; font-size: 0.8rem; }
+
+.actions { display: flex; gap: 0.5rem; }
+
+.btnEdit { color: #0071eb; font-size: 0.8rem; padding: 3px 8px; border: 1px solid rgba(0,113,235,0.3); border-radius: 3px; }
+.btnDelete { color: var(--accent); font-size: 0.8rem; padding: 3px 8px; border: 1px solid rgba(229,9,20,0.3); border-radius: 3px; background: none; cursor: pointer; }
+
+.pagination { display: flex; align-items: center; gap: 1rem; margin-top: 1.5rem; }
+.pagination button { background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-primary); padding: 6px 14px; border-radius: 4px; cursor: pointer; }
+.pagination button:disabled { opacity: 0.4; cursor: not-allowed; }
+.pagination span { color: var(--text-secondary); font-size: 0.85rem; }
+
+.loading { color: var(--text-muted); margin-top: 1rem; }

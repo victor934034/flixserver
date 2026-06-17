@@ -1,0 +1,102 @@
+.hero {
+  position: relative;
+  height: 80vh;
+  min-height: 500px;
+  max-height: 800px;
+  overflow: hidden;
+}
+
+.gradient {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to right, rgba(0,0,0,0.85) 40%, transparent 100%),
+              linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 50%);
+}
+
+.content {
+  position: absolute;
+  bottom: 12%;
+  left: 3rem;
+  max-width: 550px;
+  z-index: 2;
+}
+
+.title {
+  font-size: clamp(1.8rem, 4vw, 3rem);
+  font-weight: 900;
+  line-height: 1.1;
+  margin-bottom: 0.75rem;
+  text-shadow: 2px 2px 8px rgba(0,0,0,0.5);
+}
+
+.synopsis {
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: 1rem;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.buttons {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.btnPlay {
+  background: var(--text-primary);
+  color: #000;
+  border: none;
+  padding: 0.7rem 1.8rem;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btnPlay:hover { background: rgba(255,255,255,0.8); }
+
+.btnList {
+  background: rgba(109,109,110,0.7);
+  color: var(--text-primary);
+  border: none;
+  padding: 0.7rem 1.8rem;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btnList:hover { background: rgba(109,109,110,0.4); }
+
+.dots {
+  position: absolute;
+  bottom: 2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 0.5rem;
+  z-index: 2;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.4);
+  border: none;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.dotActive { background: var(--text-primary); }

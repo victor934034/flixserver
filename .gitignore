@@ -1,0 +1,29 @@
+# Variáveis de ambiente — NUNCA commitar
+.env
+.env.local
+.env.production
+backend/.env
+frontend/.env.local
+
+# Dependências
+node_modules/
+*/node_modules/
+
+# Build Next.js
+frontend/.next/
+frontend/out/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# Outros apps no mesmo diretório
+meu-app/
