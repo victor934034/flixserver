@@ -8,6 +8,9 @@ RUN npm install
 
 COPY frontend/ ./
 
+# Garante que a pasta public existe mesmo que esteja vazia
+RUN mkdir -p /build/public
+
 RUN npm run build
 
 # ---- Stage 2: Runner (frontend + backend juntos) ----
@@ -23,6 +26,7 @@ RUN cd backend && npm install --omit=dev
 COPY backend/ ./backend/
 
 # Frontend (standalone)
+RUN mkdir -p ./frontend/public
 COPY --from=builder /build/public ./frontend/public
 COPY --from=builder /build/.next/standalone ./frontend/
 COPY --from=builder /build/.next/static ./frontend/.next/static
