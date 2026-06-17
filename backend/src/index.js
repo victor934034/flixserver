@@ -112,4 +112,9 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, () => {
   console.log(`🚀 Flixhome API rodando na porta ${PORT}`);
+  // Configure B2 bucket CORS so browsers can upload directly
+  if (process.env.BACKBLAZE_KEY_ID && process.env.BACKBLAZE_BUCKET_ID) {
+    const { setupCors } = require('./services/backblaze');
+    setupCors();
+  }
 });

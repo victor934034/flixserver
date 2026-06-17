@@ -26,7 +26,8 @@ export default function LoginPage() {
       }
       router.push('/');
     } catch (err) {
-      setError(err.response?.data?.error || 'Ocorreu um erro. Tente novamente.');
+      const msg = err.response?.data?.error;
+      setError(msg && typeof msg === 'string' ? msg : 'Ocorreu um erro. Tente novamente.');
     } finally {
       setLoading(false);
     }

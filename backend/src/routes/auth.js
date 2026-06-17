@@ -24,7 +24,7 @@ router.post('/register', async (req, res) => {
       options: { data: { name } },
     });
 
-    if (authError) return res.status(400).json({ error: authError.message });
+    if (authError) return res.status(400).json({ error: authError.message || authError.code || 'Erro ao criar conta' });
 
     const { data: userData, error: userError } = await supabase
       .from('users')
@@ -32,7 +32,7 @@ router.post('/register', async (req, res) => {
       .select()
       .single();
 
-    if (userError) return res.status(400).json({ error: userError.message });
+    if (userError) return res.status(400).json({ error: userError.message || userError.code || 'Erro ao salvar usuário' });
 
     res.status(201).json({ user: userData, token: signToken(userData) });
   } catch (err) {
@@ -52,7 +52,7 @@ router.post('/login', async (req, res) => {
       password,
     });
 
-    if (authError) return res.status(401).json({ error: 'Credenciais inválidas' });
+    if (authError) return res.status(401).json({ error: authError.message || 'Credenciais inválidas' });
 
     const { data: user, error: userError } = await supabase
       .from('users')

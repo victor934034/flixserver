@@ -88,4 +88,29 @@ async function listFiles(prefix = '', limit = 1000) {
   return allFiles;
 }
 
-module.exports = { authorize, getUploadUrl, uploadFile, deleteFile, listFiles };
+async function setupCors() {
+  try {
+    const auth = await authorize();
+    await axios.post(
+      `${auth.apiUrl}/b2api/v2/b2_update_bucket`,
+      {
+        accountId: auth.accountId,
+        bucketId: process.env.BACKBLAZE_BUCKET_ID,
+        corsRules: [{
+          corsRuleName: 'allowBrowserUploads',
+          allowedOrigins: ['*'],
+          allowedHeaders: ['*'],
+          allowedOperations: ['b2_upload_file'],
+          exposeHeaders: ['x-bz-file-name', 'x-bz-content-sha1', 'authorization'],
+          maxAgeSeconds: 3600,
+        }],
+      },
+      { headers: { Authorization: auth.authorizationToken } }
+    );
+    console.log('[B2] CORS rules configured for browser uploads');
+  } catch (err) {
+    console.warn('[B2] Could not set CORS rules (key may lack writeBucketSettings):', err.response?.data?.message || err.message);
+  }
+}
+
+module.exports = { authorize, getUploadUrl, uploadFile, deleteFile, listFiles, setupCors };
