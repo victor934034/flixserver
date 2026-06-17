@@ -117,13 +117,22 @@ export default function VideoPlayer({ content, onProgress }) {
     setVolume(newVol);
   }
 
+  useEffect(() => {
+    const onChange = () => setFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', onChange);
+    document.addEventListener('webkitfullscreenchange', onChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onChange);
+      document.removeEventListener('webkitfullscreenchange', onChange);
+    };
+  }, []);
+
   function toggleFullscreen() {
     if (!document.fullscreenElement) {
-      containerRef.current?.requestFullscreen();
-      setFullscreen(true);
+      (containerRef.current?.requestFullscreen?.() ||
+        containerRef.current?.webkitRequestFullscreen?.());
     } else {
-      document.exitFullscreen();
-      setFullscreen(false);
+      (document.exitFullscreen?.() || document.webkitExitFullscreen?.());
     }
   }
 

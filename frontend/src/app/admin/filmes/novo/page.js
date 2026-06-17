@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import api from '../../../../lib/api';
@@ -17,41 +17,75 @@ export default function NovoFilme() {
   const [form, setForm] = useState(EMPTY);
   const [tmdbSearch, setTmdbSearch] = useState('');
   const [tmdbLoading, setTmdbLoading] = useState(false);
+  const [tmdbSuggestions, setTmdbSuggestions] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const router = useRouter();
+  const debounceRef = useRef(null);
 
   function set(key, value) {
     setForm(prev => ({ ...prev, [key]: value }));
   }
 
-  async function searchTMDB() {
-    if (!tmdbSearch.trim()) return;
+  function handleTmdbInput(value) {
+    setTmdbSearch(value);
+    clearTimeout(debounceRef.current);
+    if (!value.trim() || value.length < 2) { setTmdbSuggestions([]); return; }
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const { data } = await api.get(`/tmdb/search-multiple?q=${encodeURIComponent(value)}&type=movie`);
+        setTmdbSuggestions(data || []);
+      } catch { setTmdbSuggestions([]); }
+    }, 350);
+  }
+
+  async function pickTmdbSuggestion(item) {
+    setTmdbSuggestions([]);
+    setTmdbSearch(item.title);
     setTmdbLoading(true);
     try {
-      const { data } = await api.get(`/tmdb/search?q=${encodeURIComponent(tmdbSearch)}&type=movie`);
+      const { data } = await api.get(`/tmdb/search?q=${encodeURIComponent(item.title)}&type=movie&year=${item.year || ''}`);
       if (!data) { setError('Não encontrado no TMDB'); return; }
-      setForm(prev => ({
-        ...prev,
-        tmdb_id: data.id,
-        title: data.title || prev.title,
-        original_title: data.original_title || prev.original_title,
-        synopsis: data.overview || prev.synopsis,
-        year: data.release_date ? data.release_date.split('-')[0] : prev.year,
-        duration: data.runtime || prev.duration,
-        rating: data.vote_average ? Number(data.vote_average).toFixed(1) : prev.rating,
-        genres: data.genres?.map(g => g.name).join(', ') || prev.genres,
-        poster_url: data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : prev.poster_url,
-        backdrop_url: data.backdrop_path ? `https://image.tmdb.org/t/p/original${data.backdrop_path}` : prev.backdrop_url,
-        trailer_url: data.videos?.results?.find(v => v.type === 'Trailer')
-          ? `https://www.youtube.com/watch?v=${data.videos.results.find(v => v.type === 'Trailer').key}`
-          : prev.trailer_url,
-      }));
+      applyTmdbData(data);
     } catch (err) {
       setError(err.response?.data?.error || 'Erro ao buscar no TMDB');
     } finally {
       setTmdbLoading(false);
     }
+  }
+
+  async function searchTMDB() {
+    if (!tmdbSearch.trim()) return;
+    setTmdbSuggestions([]);
+    setTmdbLoading(true);
+    try {
+      const { data } = await api.get(`/tmdb/search?q=${encodeURIComponent(tmdbSearch)}&type=movie`);
+      if (!data) { setError('Não encontrado no TMDB'); return; }
+      applyTmdbData(data);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Erro ao buscar no TMDB');
+    } finally {
+      setTmdbLoading(false);
+    }
+  }
+
+  function applyTmdbData(data) {
+    setForm(prev => ({
+      ...prev,
+      tmdb_id: data.id,
+      title: data.title || prev.title,
+      original_title: data.original_title || prev.original_title,
+      synopsis: data.overview || prev.synopsis,
+      year: data.release_date ? data.release_date.split('-')[0] : prev.year,
+      duration: data.runtime || prev.duration,
+      rating: data.vote_average ? Number(data.vote_average).toFixed(1) : prev.rating,
+      genres: data.genres?.map(g => g.name).join(', ') || prev.genres,
+      poster_url: data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : prev.poster_url,
+      backdrop_url: data.backdrop_path ? `https://image.tmdb.org/t/p/original${data.backdrop_path}` : prev.backdrop_url,
+      trailer_url: data.videos?.results?.find(v => v.type === 'Trailer')
+        ? `https://www.youtube.com/watch?v=${data.videos.results.find(v => v.type === 'Trailer').key}`
+        : prev.trailer_url,
+    }));
   }
 
   async function handleSave(e) {
@@ -82,18 +116,43 @@ export default function NovoFilme() {
 
       <div className={styles.tmdbBox}>
         <label className={styles.label}>Buscar no TMDB (preenche automaticamente)</label>
-        <div className={styles.tmdbRow}>
+        <div className={styles.tmdbRow} style={{ position: 'relative' }}>
           <input
             type="text"
             placeholder="Nome do filme..."
             value={tmdbSearch}
-            onChange={e => setTmdbSearch(e.target.value)}
+            onChange={e => handleTmdbInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), searchTMDB())}
             className={styles.input}
+            autoComplete="off"
           />
           <button onClick={searchTMDB} disabled={tmdbLoading} className={styles.btnSearch}>
-            {tmdbLoading ? 'Buscando...' : 'Buscar TMDB'}
+            {tmdbLoading ? 'Buscando...' : 'Buscar'}
           </button>
+          {tmdbSuggestions.length > 0 && (
+            <div style={{
+              position: 'absolute', top: '100%', left: 0, right: 80, zIndex: 50,
+              background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 6,
+              overflow: 'hidden', boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+            }}>
+              {tmdbSuggestions.map(s => (
+                <button key={s.id} onClick={() => pickTmdbSuggestion(s)} style={{
+                  display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+                  padding: '8px 12px', background: 'none', border: 'none',
+                  borderBottom: '1px solid #2a2a2a', cursor: 'pointer', textAlign: 'left',
+                  color: '#fff',
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = '#242424'}
+                onMouseLeave={e => e.currentTarget.style.background = 'none'}>
+                  {s.poster_url && <img src={s.poster_url} alt="" style={{ width: 32, height: 48, borderRadius: 3, objectFit: 'cover' }} />}
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{s.title}</div>
+                    <div style={{ fontSize: 11, color: '#888' }}>{s.year} · {s.rating ? `★ ${s.rating}` : ''}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

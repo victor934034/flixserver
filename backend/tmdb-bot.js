@@ -43,20 +43,32 @@ function extractInfo(filename) {
     if (match) {
       season = parseInt(match[1]);
       episode = parseInt(match[2]);
-      name = name.substring(0, name.search(/[Ss]\d{1,2}[Ee]\d{1,2}|[Tt]\d{1,2}[Ee]\d{1,2}|\d{1,2}x\d{2}/i)).trim();
+      // Cut everything from S01E02 marker — only series title remains
+      const markerIdx = name.search(/[Ss]\d{1,2}[Ee]\d{1,2}|[Tt]\d{1,2}[Ee]\d{1,2}|\d{1,2}x\d{2}/i);
+      name = name.substring(0, markerIdx);
     }
   }
 
-  const yearMatch = name.match(/[\.\s\(](\d{4})[\.\s\)]/);
+  // Extract year from what remains of the name
+  const yearMatch = name.match(/[\.\s\-_(](\d{4})[\.\s\-_)]/);
   if (yearMatch) {
-    year = parseInt(yearMatch[1]);
-    name = name.replace(yearMatch[0], ' ');
+    const y = parseInt(yearMatch[1]);
+    if (y >= 1900 && y <= 2100) {
+      year = y;
+      if (type === 'movie') {
+        // For movies everything after the year is quality tags — cut here
+        name = name.substring(0, yearMatch.index);
+      } else {
+        // For series just remove the year token from the title
+        name = name.substring(0, yearMatch.index) + name.substring(yearMatch.index + yearMatch[0].length);
+      }
+    }
   }
 
+  // Clean up separators — no need for keyword removal since we cut at year/episode marker
   name = name
     .replace(/\./g, ' ')
-    .replace(/_/g, ' ')
-    .replace(/\b(1080p|720p|4k|2160p|bluray|webrip|hdtv|x264|x265|hevc|aac|dublado|legendado|dual|audio|br|pt|en|hdr|dts|ac3)\b/gi, '')
+    .replace(/[_\-]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 
