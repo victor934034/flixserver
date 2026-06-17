@@ -96,12 +96,21 @@ CREATE TABLE IF NOT EXISTS watch_history (
   content_type VARCHAR(10),
   content_id UUID,
   episode_id UUID REFERENCES episodes(id) ON DELETE SET NULL,
+  series_id UUID REFERENCES series(id) ON DELETE SET NULL,
   progress INTEGER DEFAULT 0,
   duration INTEGER,
   completed BOOLEAN DEFAULT false,
-  last_watched TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE(user_id, content_id, episode_id)
+  last_watched TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Índice único que trata NULL corretamente: um registro por (user, content, episode)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_watch_history_unique
+  ON watch_history(user_id, content_id)
+  WHERE episode_id IS NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_watch_history_unique_ep
+  ON watch_history(user_id, content_id, episode_id)
+  WHERE episode_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS watchlist (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -117,6 +126,7 @@ CREATE TABLE IF NOT EXISTS categories (
   name VARCHAR(100) NOT NULL,
   slug VARCHAR(100) UNIQUE,
   type VARCHAR(20) DEFAULT 'both',
+  description TEXT,
   order_index INTEGER DEFAULT 0,
   is_active BOOLEAN DEFAULT true
 );

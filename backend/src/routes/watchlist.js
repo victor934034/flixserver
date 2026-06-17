@@ -6,14 +6,36 @@ router.use(authMiddleware);
 
 router.get('/', async (req, res) => {
   try {
-    const { data, error } = await supabase
+    const { data: items, error } = await supabase
       .from('watchlist')
       .select('*')
       .eq('user_id', req.user.id)
       .order('added_at', { ascending: false });
 
     if (error) throw error;
-    res.json(data);
+    if (!items || items.length === 0) return res.json([]);
+
+    const movieIds = items.filter(i => i.content_type === 'movie').map(i => i.content_id);
+    const seriesIds = items.filter(i => i.content_type === 'series').map(i => i.content_id);
+
+    const [moviesRes, seriesRes] = await Promise.all([
+      movieIds.length > 0
+        ? supabase.from('movies').select('id, title, poster_url, year').in('id', movieIds)
+        : { data: [] },
+      seriesIds.length > 0
+        ? supabase.from('series').select('id, title, poster_url, year_start').in('id', seriesIds)
+        : { data: [] },
+    ]);
+
+    const moviesMap = Object.fromEntries((moviesRes.data || []).map(m => [m.id, m]));
+    const seriesMap = Object.fromEntries((seriesRes.data || []).map(s => [s.id, s]));
+
+    const enriched = items.map(item => {
+      const meta = item.content_type === 'movie' ? moviesMap[item.content_id] : seriesMap[item.content_id];
+      return { ...item, ...(meta || {}) };
+    });
+
+    res.json(enriched);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -26,7 +48,6 @@ router.post('/', async (req, res) => {
   }
 
   try {
-    // Verifica se já existe
     const { data: existing } = await supabase
       .from('watchlist')
       .select('id')

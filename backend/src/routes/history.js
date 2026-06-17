@@ -6,7 +6,7 @@ router.use(authMiddleware);
 
 router.get('/', async (req, res) => {
   try {
-    const { data, error } = await supabase
+    const { data: items, error } = await supabase
       .from('watch_history')
       .select('*')
       .eq('user_id', req.user.id)
@@ -14,14 +14,62 @@ router.get('/', async (req, res) => {
       .limit(50);
 
     if (error) throw error;
-    res.json(data);
+    if (!items || items.length === 0) return res.json([]);
+
+    const movieIds = items.filter(i => i.content_type === 'movie').map(i => i.content_id);
+    const episodeIds = items.filter(i => i.content_type === 'episode').map(i => i.content_id);
+
+    const [moviesRes, episodesRes] = await Promise.all([
+      movieIds.length > 0
+        ? supabase.from('movies').select('id, title, poster_url, year').in('id', movieIds)
+        : { data: [] },
+      episodeIds.length > 0
+        ? supabase.from('episodes').select('id, title, thumbnail_url, season_number, episode_number, series_id').in('id', episodeIds)
+        : { data: [] },
+    ]);
+
+    const moviesMap = Object.fromEntries((moviesRes.data || []).map(m => [m.id, m]));
+    const episodesMap = Object.fromEntries((episodesRes.data || []).map(e => [e.id, e]));
+
+    // Fetch series info for episodes
+    const seriesIds = [...new Set(
+      (episodesRes.data || []).map(e => e.series_id).filter(Boolean)
+    )];
+    let seriesMap = {};
+    if (seriesIds.length > 0) {
+      const { data: seriesData } = await supabase
+        .from('series')
+        .select('id, title, poster_url')
+        .in('id', seriesIds);
+      seriesMap = Object.fromEntries((seriesData || []).map(s => [s.id, s]));
+    }
+
+    const enriched = items.map(item => {
+      if (item.content_type === 'movie') {
+        const meta = moviesMap[item.content_id] || {};
+        return { ...item, title: meta.title, poster_url: meta.poster_url };
+      }
+      const ep = episodesMap[item.content_id] || {};
+      const serie = seriesMap[ep.series_id] || {};
+      return {
+        ...item,
+        title: serie.title,
+        poster_url: serie.poster_url,
+        episode_title: ep.title,
+        season_number: ep.season_number,
+        episode_number: ep.episode_number,
+        series_id: ep.series_id || item.series_id,
+      };
+    });
+
+    res.json(enriched);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 router.post('/', async (req, res) => {
-  const { content_type, content_id, episode_id, progress, duration } = req.body;
+  const { content_type, content_id, episode_id, series_id, progress, duration } = req.body;
   if (!content_type || !content_id) {
     return res.status(400).json({ error: 'content_type e content_id são obrigatórios' });
   }
@@ -50,7 +98,7 @@ router.post('/', async (req, res) => {
     } else {
       const { data, error } = await supabase
         .from('watch_history')
-        .insert({ user_id: req.user.id, content_type, content_id, episode_id, progress, duration, completed })
+        .insert({ user_id: req.user.id, content_type, content_id, episode_id, series_id, progress, duration, completed })
         .select()
         .single();
       if (error) throw error;
