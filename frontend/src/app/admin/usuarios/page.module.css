@@ -1,0 +1,33 @@
+.heading { font-size: 1.6rem; font-weight: 700; margin-bottom: 1.5rem; }
+.heading span { font-size: 1rem; color: var(--text-muted); font-weight: 400; }
+
+.tableWrap { overflow-x: auto; }
+
+.table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.table th { text-align: left; padding: 0.75rem; border-bottom: 1px solid var(--border); color: var(--text-muted); font-weight: 600; white-space: nowrap; }
+.table td { padding: 0.65rem 0.75rem; border-bottom: 1px solid rgba(255,255,255,0.05); vertical-align: middle; }
+.table tr:hover td { background: var(--bg-hover); }
+
+.name { font-weight: 600; }
+.email { color: var(--text-secondary); font-size: 0.82rem; }
+.date { color: var(--text-muted); font-size: 0.8rem; }
+
+.planBadge { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 10px; font-size: 0.75rem; font-weight: 700; color: #fff; }
+
+.yes { color: var(--success); font-weight: 700; }
+.no { color: var(--text-muted); }
+
+.select {
+  background: var(--bg-secondary); border: 1px solid var(--border);
+  color: var(--text-primary); padding: 3px 6px; border-radius: 4px;
+  font-size: 0.82rem; outline: none;
+}
+.select option { background: #1a1a2e; }
+
+.actions { display: flex; gap: 0.5rem; }
+
+.btnEdit { color: #0071eb; font-size: 0.8rem; padding: 3px 10px; border: 1px solid rgba(0,113,235,0.3); border-radius: 3px; background: none; cursor: pointer; }
+.btnSave { color: var(--success); font-size: 0.8rem; padding: 3px 10px; border: 1px solid rgba(70,211,105,0.3); border-radius: 3px; background: none; cursor: pointer; }
+.btnCancel { color: var(--text-muted); font-size: 0.8rem; padding: 3px 10px; border: 1px solid var(--border); border-radius: 3px; background: none; cursor: pointer; }
+
+.loading { color: var(--text-muted); margin-top: 1rem; font-size: 0.9rem; }
