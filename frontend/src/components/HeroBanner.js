@@ -1,15 +1,60 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import styles from './HeroBanner.module.css';
+import api from '../lib/api';
+import { getToken } from '../lib/auth';
 
 export default function HeroBanner({ items = [] }) {
   const [index, setIndex] = useState(0);
+  // Map of content_id → watchlist entry id for quick lookup
+  const [watchlistMap, setWatchlistMap] = useState({});
+  const [toggling, setToggling] = useState(false);
+
+  useEffect(() => {
+    if (!getToken()) return;
+    api.get('/watchlist')
+      .then(r => {
+        const map = {};
+        (r.data || []).forEach(w => { map[w.content_id] = w.id; });
+        setWatchlistMap(map);
+      })
+      .catch(() => {});
+  }, []);
+
   if (!items.length) return null;
 
   const item = items[index];
   const href = item.type === 'series' ? `/serie/${item.id}` : `/filme/${item.id}`;
+  const watchlistId = watchlistMap[item.id];
+  const inList = !!watchlistId;
+
+  async function toggleList() {
+    if (!getToken()) {
+      window.location.href = '/login';
+      return;
+    }
+    if (toggling) return;
+    setToggling(true);
+    try {
+      if (inList) {
+        await api.delete(`/watchlist/${watchlistId}`);
+        setWatchlistMap(prev => {
+          const next = { ...prev };
+          delete next[item.id];
+          return next;
+        });
+      } else {
+        const r = await api.post('/watchlist', {
+          content_type: item.type || 'movie',
+          content_id: item.id,
+        });
+        setWatchlistMap(prev => ({ ...prev, [item.id]: r.data.id }));
+      }
+    } catch {}
+    setToggling(false);
+  }
 
   return (
     <div className={styles.hero}>
@@ -35,7 +80,13 @@ export default function HeroBanner({ items = [] }) {
         </div>
         <div className={styles.buttons}>
           <Link href={href} className={styles.btnPlay}>▶ Assistir</Link>
-          <button className={styles.btnList}>+ Minha Lista</button>
+          <button
+            onClick={toggleList}
+            className={`${styles.btnList} ${inList ? styles.btnListActive : ''}`}
+            disabled={toggling}
+          >
+            {inList ? '✓ Na Lista' : '+ Minha Lista'}
+          </button>
         </div>
       </div>
 

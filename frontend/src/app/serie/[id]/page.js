@@ -5,6 +5,7 @@ import Image from 'next/image';
 import Navbar from '../../../components/Navbar';
 import VideoPlayer from '../../../components/VideoPlayer';
 import api from '../../../lib/api';
+import { getToken } from '../../../lib/auth';
 import styles from './page.module.css';
 
 export default function SeriePage() {
@@ -14,7 +15,7 @@ export default function SeriePage() {
   const [season, setSeason] = useState(1);
   const [playing, setPlaying] = useState(null);
   const [error, setError] = useState(null);
-  const [inList, setInList] = useState(false);
+  const [watchlistId, setWatchlistId] = useState(null);
 
   useEffect(() => {
     api.get(`/series/${id}`)
@@ -23,23 +24,27 @@ export default function SeriePage() {
     api.get(`/series/${id}/episodes`)
       .then(r => setEpisodes(r.data || []))
       .catch(() => {});
-    api.get('/watchlist')
-      .then(r => setInList((r.data || []).some(w => w.content_id === id)))
-      .catch(() => {});
-  }, [id]);
-
-  function toggleList() {
-    if (inList) {
+    if (getToken()) {
       api.get('/watchlist')
         .then(r => {
-          const entry = r.data.find(w => w.content_id === id);
-          if (entry) api.delete(`/watchlist/${entry.id}`).then(() => setInList(false)).catch(() => {});
-        });
-    } else {
-      api.post('/watchlist', { content_type: 'series', content_id: id })
-        .then(() => setInList(true))
+          const entry = (r.data || []).find(w => w.content_id === id);
+          if (entry) setWatchlistId(entry.id);
+        })
         .catch(() => {});
     }
+  }, [id]);
+
+  async function toggleList() {
+    if (!getToken()) { window.location.href = '/login'; return; }
+    try {
+      if (watchlistId) {
+        await api.delete(`/watchlist/${watchlistId}`);
+        setWatchlistId(null);
+      } else {
+        const r = await api.post('/watchlist', { content_type: 'series', content_id: id });
+        setWatchlistId(r.data.id);
+      }
+    } catch {}
   }
 
   function saveProgress(current, total, ep) {
@@ -103,8 +108,8 @@ export default function SeriePage() {
                       ▶ Assistir T1E1
                     </button>
                   )}
-                  <button className={`${styles.btnList} ${inList ? styles.inList : ''}`} onClick={toggleList}>
-                    {inList ? '✓ Na Minha Lista' : '+ Minha Lista'}
+                  <button className={`${styles.btnList} ${watchlistId ? styles.inList : ''}`} onClick={toggleList}>
+                    {watchlistId ? '✓ Na Minha Lista' : '+ Minha Lista'}
                   </button>
                   {serie.trailer_url && (
                     <a href={serie.trailer_url} target="_blank" rel="noreferrer" className={styles.btnTrailer}>Trailer</a>

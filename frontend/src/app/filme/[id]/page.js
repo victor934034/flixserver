@@ -5,6 +5,7 @@ import Image from 'next/image';
 import Navbar from '../../../components/Navbar';
 import VideoPlayer from '../../../components/VideoPlayer';
 import api from '../../../lib/api';
+import { getToken } from '../../../lib/auth';
 import styles from './page.module.css';
 
 export default function FilmePage() {
@@ -12,11 +13,22 @@ export default function FilmePage() {
   const [movie, setMovie] = useState(null);
   const [playing, setPlaying] = useState(false);
   const [error, setError] = useState(null);
+  const [watchlistId, setWatchlistId] = useState(null);
+  const [listLoading, setListLoading] = useState(false);
 
   useEffect(() => {
     api.get(`/movies/${id}`)
       .then(r => setMovie(r.data))
       .catch(() => setError('Filme não encontrado'));
+
+    if (getToken()) {
+      api.get('/watchlist')
+        .then(r => {
+          const entry = (r.data || []).find(w => w.content_id === id);
+          if (entry) setWatchlistId(entry.id);
+        })
+        .catch(() => {});
+    }
   }, [id]);
 
   function saveProgress(current, total) {
@@ -27,6 +39,25 @@ export default function FilmePage() {
       progress: Math.floor(current),
       duration: Math.floor(total),
     }).catch(() => {});
+  }
+
+  async function toggleList() {
+    if (!getToken()) {
+      window.location.href = '/login';
+      return;
+    }
+    if (listLoading) return;
+    setListLoading(true);
+    try {
+      if (watchlistId) {
+        await api.delete(`/watchlist/${watchlistId}`);
+        setWatchlistId(null);
+      } else {
+        const r = await api.post('/watchlist', { content_type: 'movie', content_id: id });
+        setWatchlistId(r.data.id);
+      }
+    } catch {}
+    setListLoading(false);
   }
 
   if (error) return <div className={styles.error}>{error}</div>;
@@ -66,9 +97,7 @@ export default function FilmePage() {
                 {movie.rating && <span>★ {Number(movie.rating).toFixed(1)}</span>}
                 {movie.age_rating && <span className={`badge-${movie.age_rating}`}>{movie.age_rating}</span>}
               </div>
-              <div className={styles.genres}>
-                {movie.genres?.join(' · ')}
-              </div>
+              <div className={styles.genres}>{movie.genres?.join(' · ')}</div>
               <p className={styles.synopsis}>{movie.synopsis}</p>
               <div className={styles.actions}>
                 {(movie.file_dubbing || movie.file_subtitled || movie.file_cinema || movie.file_4k) ? (
@@ -81,6 +110,13 @@ export default function FilmePage() {
                     Trailer
                   </a>
                 )}
+                <button
+                  onClick={toggleList}
+                  className={`${styles.btnList} ${watchlistId ? styles.btnListActive : ''}`}
+                  disabled={listLoading}
+                >
+                  {watchlistId ? '✓ Na Lista' : '+ Minha Lista'}
+                </button>
               </div>
             </div>
           </div>

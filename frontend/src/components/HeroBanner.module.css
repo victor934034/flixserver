@@ -79,6 +79,13 @@
 
 .btnList:hover { background: rgba(109,109,110,0.4); }
 
+.btnListActive {
+  background: rgba(255,255,255,0.15);
+  color: var(--success);
+}
+
+.btnListActive:hover { background: rgba(255,255,255,0.1); }
+
 .dots {
   position: absolute;
   bottom: 2rem;
