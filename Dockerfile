@@ -30,6 +30,6 @@ RUN mkdir -p ./frontend/public
 # PM2 config
 COPY ecosystem.config.js ./
 
-EXPOSE 3000
+EXPOSE 80
 
 CMD ["pm2-runtime", "ecosystem.config.js"]
