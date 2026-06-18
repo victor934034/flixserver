@@ -22,6 +22,7 @@ function formatSize(bytes) {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
+// Single-file upload (< 5GB)
 function doUploadXHR(item, presign, onProgress) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -37,15 +38,69 @@ function doUploadXHR(item, presign, onProgress) {
 
     xhr.onload = () => {
       if (xhr.status < 300) resolve();
-      else {
-        const err = new Error(`HTTP ${xhr.status}`);
-        err.isServer = true;
-        reject(err);
-      }
+      else reject(Object.assign(new Error(`HTTP ${xhr.status}`), { isServer: true }));
     };
     xhr.onerror = () => reject(new Error('connection'));
     xhr.send(item.file);
   });
+}
+
+// Large file upload using B2 Large File API (>= 5GB)
+const LARGE_FILE_THRESHOLD = 5 * 1024 * 1024 * 1024;
+const PART_SIZE = 100 * 1024 * 1024; // 100MB per part
+
+async function doLargeUploadXHR(item, onProgress) {
+  const file = item.file;
+
+  const { data: { fileId } } = await api.post('/upload/start-large', {
+    filename: file.name,
+    contentType: file.type || 'video/mp4',
+  });
+
+  const totalParts = Math.ceil(file.size / PART_SIZE);
+  const sha1Array = [];
+
+  for (let i = 0; i < totalParts; i++) {
+    const start = i * PART_SIZE;
+    const chunk = file.slice(start, Math.min(start + PART_SIZE, file.size));
+    const partNumber = i + 1;
+
+    const { data: partInfo } = await api.post('/upload/part-url', { fileId });
+
+    await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', partInfo.uploadUrl);
+      xhr.setRequestHeader('Authorization', partInfo.authorizationToken);
+      xhr.setRequestHeader('X-Bz-Part-Number', String(partNumber));
+      xhr.setRequestHeader('Content-Length', String(chunk.size));
+      xhr.setRequestHeader('X-Bz-Content-Sha1', 'do_not_verify');
+
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const total = ((i + e.loaded / e.total) / totalParts) * 90;
+          onProgress(Math.round(total));
+        }
+      };
+
+      xhr.onload = () => {
+        if (xhr.status < 300) resolve();
+        else reject(Object.assign(new Error(`HTTP ${xhr.status}`), { isServer: true }));
+      };
+      xhr.onerror = () => reject(new Error('connection'));
+      xhr.send(chunk);
+    });
+
+    sha1Array.push('do_not_verify');
+    onProgress(Math.round(((i + 1) / totalParts) * 90));
+  }
+
+  const { data: { cdnUrl } } = await api.post('/upload/finish-large', {
+    fileId,
+    partSha1Array: sha1Array,
+    filename: file.name,
+  });
+
+  return cdnUrl;
 }
 
 const MAX_RETRIES = 3;
@@ -84,22 +139,27 @@ export default function UploadPage() {
 
   async function uploadFile(item) {
     updateFile(item.id, { status: 'uploading', progress: 0, error: null });
+    const isLarge = item.file.size >= LARGE_FILE_THRESHOLD;
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
-        const { data: presign } = await api.get('/upload/presign');
+        let cdnUrl;
 
-        await doUploadXHR(item, presign, (pct) => updateFile(item.id, { progress: pct }));
+        if (isLarge) {
+          cdnUrl = await doLargeUploadXHR(item, (pct) => updateFile(item.id, { progress: pct }));
+        } else {
+          const { data: presign } = await api.get('/upload/presign');
+          await doUploadXHR(item, presign, (pct) => updateFile(item.id, { progress: pct }));
+          cdnUrl = `${presign.cdnBase}/${item.file.name}`;
+        }
 
         updateFile(item.id, { progress: 92 });
-
-        const cdnUrl = `${presign.cdnBase}/${item.file.name}`;
         const { data: tmdbResult } = await api.post('/tmdb/detect', { fileUrl: cdnUrl, version: item.version });
-
         updateFile(item.id, { status: 'done', progress: 100, result: tmdbResult, error: null });
         return;
       } catch (err) {
-        const isConnection = err.message === 'connection' || !err.isServer;
+        // Only retry pure network errors, not HTTP server errors
+        const isConnection = err.message === 'connection' || (!err.isServer && !err.response);
         const hasRetry = isConnection && attempt < MAX_RETRIES;
 
         if (hasRetry) {
@@ -112,10 +172,8 @@ export default function UploadPage() {
           await new Promise(r => setTimeout(r, delay));
           updateFile(item.id, { status: 'uploading', error: null });
         } else {
-          updateFile(item.id, {
-            status: 'error',
-            error: err.message === 'connection' ? 'Falha de conexão após 3 tentativas' : err.message,
-          });
+          const msg = err.response?.data?.error || (err.message === 'connection' ? 'Falha de conexão após 3 tentativas' : err.message);
+          updateFile(item.id, { status: 'error', error: msg });
           return;
         }
       }
@@ -150,7 +208,7 @@ export default function UploadPage() {
         <p className={styles.dropText}>
           {isDragActive ? 'Solte os arquivos aqui' : 'Arraste arquivos de vídeo ou clique para selecionar'}
         </p>
-        <p className={styles.dropSub}>MP4, MKV, AVI, MOV — múltiplos arquivos aceitos</p>
+        <p className={styles.dropSub}>MP4, MKV, AVI, MOV — sem limite de tamanho (arquivos &gt; 5GB usam upload em partes)</p>
       </div>
 
       {files.length > 0 && (
@@ -175,6 +233,9 @@ export default function UploadPage() {
                       <span>{item.type === 'series' ? 'Série' : 'Filme'}</span>
                       <span>·</span>
                       <span>{formatSize(item.file.size)}</span>
+                      {item.file.size >= LARGE_FILE_THRESHOLD && (
+                        <span style={{ color: '#f59e0b', fontSize: '0.7rem' }}>· upload em partes</span>
+                      )}
                     </div>
                   </div>
 

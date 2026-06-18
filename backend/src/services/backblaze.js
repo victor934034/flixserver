@@ -88,6 +88,36 @@ async function listFiles(prefix = '', limit = 1000) {
   return allFiles;
 }
 
+async function startLargeFile(filename, contentType) {
+  const auth = await authorize();
+  const { data } = await axios.post(
+    `${auth.apiUrl}/b2api/v2/b2_start_large_file`,
+    { bucketId: process.env.BACKBLAZE_BUCKET_ID, fileName: encodeURIComponent(filename), contentType: contentType || 'video/mp4' },
+    { headers: { Authorization: auth.authorizationToken } }
+  );
+  return data;
+}
+
+async function getUploadPartUrl(fileId) {
+  const auth = await authorize();
+  const { data } = await axios.post(
+    `${auth.apiUrl}/b2api/v2/b2_get_upload_part_url`,
+    { fileId },
+    { headers: { Authorization: auth.authorizationToken } }
+  );
+  return data;
+}
+
+async function finishLargeFile(fileId, partSha1Array) {
+  const auth = await authorize();
+  const { data } = await axios.post(
+    `${auth.apiUrl}/b2api/v2/b2_finish_large_file`,
+    { fileId, partSha1Array },
+    { headers: { Authorization: auth.authorizationToken } }
+  );
+  return data;
+}
+
 async function setupCors() {
   try {
     const auth = await authorize();
@@ -100,7 +130,7 @@ async function setupCors() {
           corsRuleName: 'allowBrowserUploads',
           allowedOrigins: ['*'],
           allowedHeaders: ['*'],
-          allowedOperations: ['b2_upload_file'],
+          allowedOperations: ['b2_upload_file', 'b2_upload_part'],
           exposeHeaders: ['x-bz-file-name', 'x-bz-content-sha1', 'authorization'],
           maxAgeSeconds: 3600,
         }],
@@ -113,4 +143,4 @@ async function setupCors() {
   }
 }
 
-module.exports = { authorize, getUploadUrl, uploadFile, deleteFile, listFiles, setupCors };
+module.exports = { authorize, getUploadUrl, uploadFile, deleteFile, listFiles, setupCors, startLargeFile, getUploadPartUrl, finishLargeFile };

@@ -68,6 +68,45 @@ router.get('/presign', async (req, res) => {
   }
 });
 
+// Start B2 large file upload (for files > 5GB)
+router.post('/start-large', async (req, res) => {
+  const { filename, contentType } = req.body;
+  if (!filename) return res.status(400).json({ error: 'filename é obrigatório' });
+  try {
+    const { startLargeFile } = require('../services/backblaze');
+    const data = await startLargeFile(filename, contentType);
+    res.json({ fileId: data.fileId });
+  } catch (err) {
+    res.status(500).json({ error: err.response?.data?.message || err.message });
+  }
+});
+
+// Get upload URL for a single part
+router.post('/part-url', async (req, res) => {
+  const { fileId } = req.body;
+  if (!fileId) return res.status(400).json({ error: 'fileId é obrigatório' });
+  try {
+    const { getUploadPartUrl } = require('../services/backblaze');
+    const data = await getUploadPartUrl(fileId);
+    res.json({ uploadUrl: data.uploadUrl, authorizationToken: data.authorizationToken });
+  } catch (err) {
+    res.status(500).json({ error: err.response?.data?.message || err.message });
+  }
+});
+
+// Finish large file upload
+router.post('/finish-large', async (req, res) => {
+  const { fileId, partSha1Array, filename } = req.body;
+  if (!fileId || !filename) return res.status(400).json({ error: 'fileId e filename são obrigatórios' });
+  try {
+    const { finishLargeFile } = require('../services/backblaze');
+    await finishLargeFile(fileId, partSha1Array || []);
+    res.json({ cdnUrl: `${process.env.CDN_BASE_URL}/${filename}` });
+  } catch (err) {
+    res.status(500).json({ error: err.response?.data?.message || err.message });
+  }
+});
+
 function convertSrtToVtt(srt) {
   return 'WEBVTT\n\n' + srt
     .replace(/\r\n/g, '\n')
