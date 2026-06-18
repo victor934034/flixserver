@@ -83,4 +83,20 @@ router.get('/section/new', async (req, res) => {
   }
 });
 
+router.get('/section/popular', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('series')
+      .select(PUBLIC_FIELDS)
+      .eq('is_active', true)
+      .order('views', { ascending: false })
+      .limit(20);
+
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

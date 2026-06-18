@@ -36,6 +36,15 @@ export function AuthProvider({ children }) {
     setUser(u);
   };
 
+  const register = async (email, password, name) => {
+    const res = await api.post('/auth/register', { email, password, name });
+    const { token: t, user: u } = res.data;
+    await AsyncStorage.setItem('token', t);
+    await AsyncStorage.setItem('user', JSON.stringify(u));
+    setToken(t);
+    setUser(u);
+  };
+
   const logout = async () => {
     await AsyncStorage.multiRemove(['token', 'user']);
     setToken(null);
@@ -43,7 +52,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, token, loading, login, register, logout }}>
       {children}
     </AuthContext.Provider>
   );

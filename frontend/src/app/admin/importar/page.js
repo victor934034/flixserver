@@ -404,6 +404,183 @@ function ImportarTab() {
   );
 }
 
+// ─── Tab: Legendas ────────────────────────────────────────────────────────
+
+function LegendasTab() {
+  const [query, setQuery] = useState('');
+  const [mediaType, setMediaType] = useState('movie');
+  const [results, setResults] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [searching, setSearching] = useState(false);
+  const [language, setLanguage] = useState('pt');
+  const [file, setFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const fileRef = useRef(null);
+  const debounceRef = useRef(null);
+
+  const search = async (q) => {
+    if (!q.trim() || q.length < 2) { setResults([]); return; }
+    setSearching(true);
+    try {
+      const { data } = await api.get(`/tmdb/search-multiple?q=${encodeURIComponent(q)}&type=${mediaType}`);
+      setResults(data || []);
+    } catch { setResults([]); }
+    setSearching(false);
+  };
+
+  const onQueryChange = (val) => {
+    setQuery(val);
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => search(val), 500);
+  };
+
+  const handleSelect = (item) => {
+    setSelected(item);
+    setResults([]);
+    setQuery(item.title);
+    setMsg(null);
+    setFile(null);
+  };
+
+  const handleUpload = async () => {
+    if (!selected || !file) return;
+    setUploading(true);
+    setMsg(null);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      form.append('movieId', selected.id || selected.tmdb_id);
+      form.append('movieType', mediaType);
+      form.append('language', language);
+      await api.post('/upload/subtitle', form, { headers: { 'Content-Type': 'multipart/form-data' } });
+      setMsg({ ok: true, text: `Legenda (${language.toUpperCase()}) salva em "${selected.title}"!` });
+      setFile(null);
+      setSelected(null);
+      setQuery('');
+    } catch (e) {
+      setMsg({ ok: false, text: e.response?.data?.error || e.message });
+    }
+    setUploading(false);
+  };
+
+  return (
+    <div className={styles.tabContent}>
+      <div className={styles.batchInfo}>
+        <div className={styles.infoIcon}>💬</div>
+        <div>
+          <p className={styles.infoTitle}>Upload de Legendas</p>
+          <p className={styles.infoDesc}>
+            Faça upload de arquivos <strong>.srt</strong> ou <strong>.vtt</strong> para adicionar legenda a um filme ou série.
+            Arquivos .srt são convertidos automaticamente para .vtt.
+          </p>
+        </div>
+      </div>
+
+      <div className={styles.searchRow}>
+        <div className={styles.searchInputWrap}>
+          <span className={styles.searchIcon}>🔍</span>
+          <input
+            className={styles.searchInput}
+            type="text"
+            placeholder="Nome do filme ou série..."
+            value={query}
+            onChange={e => onQueryChange(e.target.value)}
+            autoComplete="off"
+          />
+          {searching && <Spinner />}
+        </div>
+        <select className={styles.select} value={mediaType} onChange={e => setMediaType(e.target.value)}>
+          <option value="movie">🎬 Filme</option>
+          <option value="tv">📺 Série</option>
+        </select>
+      </div>
+
+      {results.length > 0 && (
+        <div className={styles.resultsBox}>
+          <p className={styles.resultsHint}>Selecione o título correto:</p>
+          <div className={styles.resultsGrid}>
+            {results.map(r => (
+              <button key={r.id} className={styles.resultCard} onClick={() => handleSelect(r)}>
+                <div className={styles.resultPoster}>
+                  {r.poster_url
+                    ? <img src={r.poster_url} alt={r.title} className={styles.resultImg} />
+                    : <div className={styles.resultNoPoster}><span>🎬</span></div>}
+                </div>
+                <div className={styles.resultInfo}>
+                  <p className={styles.resultTitle}>{r.title}</p>
+                  <p className={styles.resultYear}>{r.year || '—'}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {selected && (
+        <div className={styles.selectedBox}>
+          <div className={styles.selectedHeader}>
+            {selected.poster_url && (
+              <div className={styles.selectedPosterWrap}>
+                <img src={selected.poster_url} alt={selected.title} className={styles.selectedPoster} />
+              </div>
+            )}
+            <div className={styles.selectedMeta}>
+              <h2 className={styles.selectedTitle}>{selected.title}</h2>
+              {selected.year && <p className={styles.selectedOriginal}>{selected.year}</p>}
+            </div>
+          </div>
+
+          <div className={styles.fileSection}>
+            <div className={styles.fileRow}>
+              <div className={styles.fileField}>
+                <label className={styles.label}>Idioma da legenda</label>
+                <select className={styles.select} value={language} onChange={e => setLanguage(e.target.value)}>
+                  <option value="pt">🇧🇷 Português</option>
+                  <option value="en">🇺🇸 Inglês</option>
+                  <option value="es">🇪🇸 Espanhol</option>
+                </select>
+              </div>
+              <div className={styles.fileField}>
+                <label className={styles.label}>Arquivo de legenda (.srt ou .vtt)</label>
+                <input
+                  type="file"
+                  accept=".srt,.vtt"
+                  ref={fileRef}
+                  style={{ display: 'none' }}
+                  onChange={e => setFile(e.target.files?.[0] || null)}
+                />
+                <button className={styles.btnSearch} onClick={() => fileRef.current?.click()}>
+                  {file ? `📄 ${file.name}` : '📂 Escolher arquivo'}
+                </button>
+              </div>
+            </div>
+
+            <div className={styles.saveRow}>
+              <button
+                className={styles.btnSave}
+                onClick={handleUpload}
+                disabled={uploading || !file}
+              >
+                {uploading ? <><Spinner /> Enviando...</> : '⬆ Fazer upload da legenda'}
+              </button>
+              <button className={styles.btnCancel} onClick={() => { setSelected(null); setQuery(''); setFile(null); }}>
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {msg && (
+        <div className={msg.ok ? styles.alertSuccess : styles.alertError}>
+          {msg.ok ? `✓ ${msg.text}` : `✗ Erro: ${msg.text}`}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Tab: Escanear Bucket ─────────────────────────────────────────────────
 
 function formatBytes(b) {
@@ -586,9 +763,18 @@ function ScanTab() {
 
           {importReport && (
             <div className={importReport.error ? styles.alertError : styles.alertSuccess}>
-              {importReport.error
-                ? `✗ ${importReport.error}`
-                : `✓ ${importReport.success?.length || 0} importados · ${importReport.notFound?.length || 0} não encontrados no TMDB`}
+              {importReport.error ? (
+                `✗ ${importReport.error}`
+              ) : (
+                <>
+                  ✓ {importReport.success?.length || 0} importados · {importReport.notFound?.length || 0} não encontrados no TMDB
+                  {importReport.errors?.length > 0 && (
+                    <span style={{ color: '#ff6b6b', marginLeft: 8 }}>
+                      · {importReport.errors.length} erro{importReport.errors.length !== 1 ? 's' : ''}: {importReport.errors.map(e => e.error).join(' | ')}
+                    </span>
+                  )}
+                </>
+              )}
             </div>
           )}
         </>
@@ -671,11 +857,18 @@ export default function ImportarPage() {
         >
           🪣 Escanear Bucket
         </button>
+        <button
+          className={`${styles.tab} ${tab === 'legendas' ? styles.tabActive : ''}`}
+          onClick={() => setTab('legendas')}
+        >
+          💬 Legendas
+        </button>
       </div>
 
       {tab === 'busca' && <BuscaTab />}
       {tab === 'batch' && <ImportarTab />}
       {tab === 'scan' && <ScanTab />}
+      {tab === 'legendas' && <LegendasTab />}
     </div>
   );
 }

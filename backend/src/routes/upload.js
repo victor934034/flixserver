@@ -22,23 +22,33 @@ router.post('/video', upload.single('file'), async (req, res) => {
   }
 });
 
-// Upload de legenda
+// Upload de legenda — aceita .srt ou .vtt, converte .srt e salva no DB se movieId informado
 router.post('/subtitle', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado' });
+
+  const { movieId, movieType, language } = req.body; // language: pt | en | es
 
   try {
     let buffer = req.file.buffer;
     let filename = req.file.originalname;
 
-    // Converte .srt para .vtt automaticamente
     if (filename.endsWith('.srt')) {
-      const srtContent = buffer.toString('utf-8');
-      const vttContent = convertSrtToVtt(srtContent);
+      const vttContent = convertSrtToVtt(buffer.toString('utf-8'));
       buffer = Buffer.from(vttContent, 'utf-8');
-      filename = filename.replace('.srt', '.vtt');
+      filename = filename.replace(/\.srt$/, '.vtt');
     }
 
-    const result = await uploadFile(buffer, filename, 'text/vtt');
+    const result = await uploadFile(buffer, `subtitles/${filename}`, 'text/vtt');
+
+    if (movieId && language) {
+      const { supabase } = require('../services/supabase');
+      const col = `subtitle_${language}`;
+      // 'series' type maps to episodes table; 'movie' maps to movies table
+      const table = movieType === 'series' ? 'episodes' : 'movies';
+      const { error: dbErr } = await supabase.from(table).update({ [col]: result.cdnUrl }).eq('id', movieId);
+      if (dbErr) console.error('[subtitle] db update error:', dbErr.message);
+    }
+
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -90,17 +100,45 @@ router.post('/part-url', async (req, res) => {
     const data = await getUploadPartUrl(fileId);
     res.json({ uploadUrl: data.uploadUrl, authorizationToken: data.authorizationToken });
   } catch (err) {
+    const b2Code = err.response?.data?.code;
+    const b2Msg = err.response?.data?.message || err.message;
+    const httpStatus = err.response?.status || 500;
+    console.error(`[B2 part-url] status=${httpStatus} code=${b2Code} msg=${b2Msg}`);
+    res.status(httpStatus === 503 ? 503 : 500).json({ error: b2Msg, code: b2Code });
+  }
+});
+
+// List already-uploaded parts of a large file (used for resume)
+router.post('/list-parts', async (req, res) => {
+  const { fileId } = req.body;
+  if (!fileId) return res.status(400).json({ error: 'fileId é obrigatório' });
+  try {
+    const { listParts } = require('../services/backblaze');
+    const parts = await listParts(fileId);
+    res.json({ parts: parts.sort((a, b) => a.partNumber - b.partNumber) });
+  } catch (err) {
     res.status(500).json({ error: err.response?.data?.message || err.message });
   }
 });
 
 // Finish large file upload
 router.post('/finish-large', async (req, res) => {
-  const { fileId, partSha1Array, filename } = req.body;
+  const { fileId, filename, partSha1Array } = req.body;
   if (!fileId || !filename) return res.status(400).json({ error: 'fileId e filename são obrigatórios' });
   try {
-    const { finishLargeFile } = require('../services/backblaze');
-    await finishLargeFile(fileId, partSha1Array || []);
+    const { listParts, finishLargeFile } = require('../services/backblaze');
+
+    let sha1Array = partSha1Array;
+
+    // Se o frontend não enviou SHA1s reais (legado ou vazio), busca do B2
+    if (!Array.isArray(sha1Array) || sha1Array.length === 0 || sha1Array.every(s => s === 'do_not_verify')) {
+      const parts = await listParts(fileId);
+      sha1Array = parts
+        .sort((a, b) => a.partNumber - b.partNumber)
+        .map(p => p.contentSha1);
+    }
+
+    await finishLargeFile(fileId, sha1Array);
     res.json({ cdnUrl: `${process.env.CDN_BASE_URL}/${filename}` });
   } catch (err) {
     res.status(500).json({ error: err.response?.data?.message || err.message });

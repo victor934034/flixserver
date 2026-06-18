@@ -1,11 +1,13 @@
-import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { useAuth } from '../../contexts/AuthContext';
 
 export default function PerfilScreen() {
   const insets = useSafeAreaInsets();
   const { user, logout } = useAuth();
+  const router = useRouter();
 
   const handleLogout = () =>
     Alert.alert('Sair', 'Deseja encerrar sua sessão?', [
@@ -17,8 +19,12 @@ export default function PerfilScreen() {
   const plan = (user?.plan || 'free').toUpperCase();
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      <View style={styles.header}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={{ paddingBottom: 40 }}
+      showsVerticalScrollIndicator={false}
+    >
+      <View style={[styles.header, { paddingTop: insets.top + 20 }]}>
         <View style={styles.avatar}>
           <Text style={styles.avatarText}>{initial}</Text>
         </View>
@@ -29,56 +35,152 @@ export default function PerfilScreen() {
         </View>
       </View>
 
-      <View style={styles.menu}>
-        <MenuItem icon="heart-outline" label="Minha Lista" />
-        <MenuItem icon="time-outline" label="Continuar Assistindo" />
-        <MenuItem icon="settings-outline" label="Configurações" />
-        <MenuItem icon="help-circle-outline" label="Ajuda" />
+      {user?.is_admin && (
+        <View style={[styles.section, { marginTop: 4 }]}>
+          <Text style={styles.sectionLabel}>Administrador</Text>
+          <View style={styles.card}>
+            <MenuItem
+              icon="cloud-upload-outline"
+              label="Upload de Vídeo"
+              desc="Enviar filme ou série para o servidor"
+              onPress={() => router.push('/admin-upload')}
+            />
+          </View>
+        </View>
+      )}
+
+      <View style={styles.section}>
+        <Text style={styles.sectionLabel}>Minha Conta</Text>
+        <View style={styles.card}>
+          <MenuItem
+            icon="heart-outline"
+            label="Minha Lista"
+            desc="Conteúdos salvos"
+            onPress={() => router.push('/minha-lista')}
+          />
+          <View style={styles.divider} />
+          <MenuItem
+            icon="time-outline"
+            label="Histórico"
+            desc="Continue de onde parou"
+            onPress={() => router.push('/historico')}
+          />
+          <View style={styles.divider} />
+          <MenuItem
+            icon="download-outline"
+            label="Downloads"
+            desc="Em breve"
+            disabled
+          />
+        </View>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionLabel}>Preferências</Text>
+        <View style={styles.card}>
+          <MenuItem
+            icon="notifications-outline"
+            label="Notificações"
+            onPress={() => Alert.alert('Notificações', 'Ative ou desative notificações nas configurações do sistema.')}
+          />
+          <View style={styles.divider} />
+          <MenuItem
+            icon="shield-checkmark-outline"
+            label="Controle Parental"
+            onPress={() => Alert.alert('Controle Parental', 'Em breve disponível!')}
+          />
+        </View>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionLabel}>Suporte</Text>
+        <View style={styles.card}>
+          <MenuItem
+            icon="help-circle-outline"
+            label="Ajuda"
+            onPress={() => Alert.alert('Flixhome', 'Versão 1.0.0\n\nPara suporte entre em contato pelo painel admin.')}
+          />
+          <View style={styles.divider} />
+          <MenuItem
+            icon="information-circle-outline"
+            label="Sobre o App"
+            onPress={() => Alert.alert('Sobre', 'Flixhome v1.0.0\nSua plataforma de streaming.')}
+          />
+        </View>
       </View>
 
       <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
         <Ionicons name="log-out-outline" size={20} color="#E50914" />
-        <Text style={styles.logoutText}>Sair</Text>
+        <Text style={styles.logoutText}>Sair da conta</Text>
       </TouchableOpacity>
-    </View>
+
+      <Text style={styles.version}>v1.0.0</Text>
+    </ScrollView>
   );
 }
 
-function MenuItem({ icon, label, onPress }) {
+function MenuItem({ icon, label, desc, onPress, disabled }) {
   return (
-    <TouchableOpacity style={styles.menuItem} onPress={onPress}>
-      <Ionicons name={icon} size={22} color="#b3b3b3" />
-      <Text style={styles.menuLabel}>{label}</Text>
-      <Ionicons name="chevron-forward" size={18} color="#333" />
+    <TouchableOpacity
+      style={[styles.menuItem, disabled && styles.menuItemDisabled]}
+      onPress={disabled ? undefined : onPress}
+      activeOpacity={disabled ? 1 : 0.6}
+    >
+      <View style={styles.menuIcon}>
+        <Ionicons name={icon} size={20} color={disabled ? '#333' : '#b3b3b3'} />
+      </View>
+      <View style={styles.menuText}>
+        <Text style={[styles.menuLabel, disabled && { color: '#444' }]}>{label}</Text>
+        {desc && <Text style={styles.menuDesc}>{desc}</Text>}
+      </View>
+      <Ionicons name="chevron-forward" size={16} color={disabled ? '#222' : '#333'} />
     </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0a0a0a' },
-  header: { alignItems: 'center', paddingVertical: 32, paddingHorizontal: 24 },
+  header: { alignItems: 'center', paddingBottom: 28, paddingHorizontal: 24 },
   avatar: {
-    width: 84, height: 84, borderRadius: 42,
-    backgroundColor: '#E50914', justifyContent: 'center', alignItems: 'center', marginBottom: 12,
+    width: 88, height: 88, borderRadius: 44,
+    backgroundColor: '#E50914', justifyContent: 'center', alignItems: 'center',
+    marginBottom: 14, shadowColor: '#E50914', shadowOpacity: 0.4,
+    shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 8,
   },
-  avatarText: { fontSize: 34, fontWeight: '700', color: '#fff' },
+  avatarText: { fontSize: 36, fontWeight: '800', color: '#fff' },
   name: { fontSize: 20, fontWeight: '700', color: '#fff', marginBottom: 4 },
-  email: { fontSize: 14, color: '#b3b3b3', marginBottom: 12 },
+  email: { fontSize: 13, color: '#666', marginBottom: 14 },
   planBadge: {
-    backgroundColor: 'transparent', paddingHorizontal: 20, paddingVertical: 6,
-    borderRadius: 20, borderWidth: 1, borderColor: '#E50914',
+    paddingHorizontal: 20, paddingVertical: 6, borderRadius: 20,
+    borderWidth: 1, borderColor: '#E50914',
   },
   planText: { color: '#E50914', fontSize: 12, fontWeight: '700', letterSpacing: 1 },
-  menu: { borderTopWidth: 1, borderTopColor: '#1f1f1f' },
+  section: { paddingHorizontal: 16, marginBottom: 20 },
+  sectionLabel: {
+    color: '#555', fontSize: 11, fontWeight: '600', letterSpacing: 1,
+    textTransform: 'uppercase', marginBottom: 10, paddingLeft: 4,
+  },
+  card: { backgroundColor: '#111', borderRadius: 14, overflow: 'hidden' },
+  divider: { height: 1, backgroundColor: '#1a1a1a', marginLeft: 58 },
   menuItem: {
     flexDirection: 'row', alignItems: 'center',
-    paddingVertical: 16, paddingHorizontal: 20,
-    borderBottomWidth: 1, borderBottomColor: '#141414',
+    paddingVertical: 15, paddingHorizontal: 16,
   },
-  menuLabel: { flex: 1, color: '#fff', fontSize: 15, marginLeft: 14 },
+  menuItemDisabled: { opacity: 0.5 },
+  menuIcon: {
+    width: 36, height: 36, borderRadius: 10,
+    backgroundColor: '#1a1a1a', justifyContent: 'center', alignItems: 'center',
+    marginRight: 14,
+  },
+  menuText: { flex: 1 },
+  menuLabel: { color: '#fff', fontSize: 15 },
+  menuDesc: { color: '#555', fontSize: 12, marginTop: 2 },
   logoutBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    margin: 24, paddingVertical: 14, borderWidth: 1, borderColor: '#E50914', borderRadius: 8,
+    marginHorizontal: 16, marginTop: 8, marginBottom: 16,
+    paddingVertical: 15, borderWidth: 1, borderColor: '#E50914',
+    borderRadius: 14, gap: 8,
   },
-  logoutText: { color: '#E50914', fontSize: 15, fontWeight: '600', marginLeft: 8 },
+  logoutText: { color: '#E50914', fontSize: 15, fontWeight: '600' },
+  version: { color: '#333', fontSize: 12, textAlign: 'center', marginBottom: 8 },
 });

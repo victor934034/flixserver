@@ -11,4 +11,14 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
+api.interceptors.response.use(
+  (res) => res,
+  async (error) => {
+    if (error.response?.status === 401) {
+      await AsyncStorage.multiRemove(['token', 'user']);
+    }
+    return Promise.reject(error);
+  }
+);
+
 export default api;

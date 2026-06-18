@@ -50,28 +50,59 @@ app.get('/api/health', (req, res) => {
 });
 
 app.get('/api/search', async (req, res) => {
-  const { q, type, limit = 20 } = req.query;
+  const { q, type, genre, limit = 20 } = req.query;
   if (!q || q.trim().length < 2) {
     return res.status(400).json({ error: 'Query deve ter pelo menos 2 caracteres' });
   }
 
   const { supabase } = require('./services/supabase');
   const search = `%${q}%`;
+  const lim = Number(limit);
 
   try {
-    const [moviesResult, seriesResult] = await Promise.all([
-      type !== 'series'
-        ? supabase.from('movies').select('id, title, year, poster_url, rating, genres').ilike('title', search).eq('is_active', true).limit(Number(limit))
-        : Promise.resolve({ data: [] }),
-      type !== 'movie'
-        ? supabase.from('series').select('id, title, year_start, poster_url, rating, genres').ilike('title', search).eq('is_active', true).limit(Number(limit))
-        : Promise.resolve({ data: [] }),
+    let moviesQ = supabase.from('movies').select('id, title, year, poster_url, rating, genres').ilike('title', search).eq('is_active', true).limit(lim);
+    let seriesQ = supabase.from('series').select('id, title, year_start, poster_url, rating, genres').ilike('title', search).eq('is_active', true).limit(lim);
+    let episodesQ = supabase.from('episodes').select('id, title, season_number, episode_number, thumbnail_url, series_id, series:series_id(id, title, poster_url)').ilike('title', search).limit(lim);
+
+    if (genre) {
+      moviesQ = moviesQ.contains('genres', [genre]);
+      seriesQ = seriesQ.contains('genres', [genre]);
+    }
+
+    const [moviesResult, seriesResult, episodesResult] = await Promise.all([
+      type === 'series' || type === 'episode' ? Promise.resolve({ data: [] }) : moviesQ,
+      type === 'movie' || type === 'episode' ? Promise.resolve({ data: [] }) : seriesQ,
+      type === 'movie' || type === 'series' ? Promise.resolve({ data: [] }) : episodesQ,
     ]);
 
     res.json({
       movies: (moviesResult.data || []).map(m => ({ ...m, type: 'movie' })),
       series: (seriesResult.data || []).map(s => ({ ...s, type: 'series' })),
+      episodes: (episodesResult.data || []).map(e => ({
+        ...e,
+        type: 'episode',
+        poster_url: e.series?.poster_url || e.thumbnail_url,
+        seriesTitle: e.series?.title,
+      })),
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Categorias/gêneros dinâmicos — extraídos dos filmes e séries cadastrados
+app.get('/api/genres', async (req, res) => {
+  const { supabase } = require('./services/supabase');
+  try {
+    const [moviesRes, seriesRes] = await Promise.all([
+      supabase.from('movies').select('genres').eq('is_active', true),
+      supabase.from('series').select('genres').eq('is_active', true),
+    ]);
+    const set = new Set();
+    [...(moviesRes.data || []), ...(seriesRes.data || [])].forEach(row => {
+      (row.genres || []).forEach(g => { if (g) set.add(g); });
+    });
+    res.json([...set].sort());
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

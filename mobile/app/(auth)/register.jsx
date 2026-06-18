@@ -4,9 +4,10 @@ import {
   KeyboardAvoidingView, Platform, ActivityIndicator, Alert, ScrollView,
 } from 'react-native';
 import { Link, useRouter } from 'expo-router';
-import api from '../../lib/api';
+import { useAuth } from '../../contexts/AuthContext';
 
 export default function RegisterScreen() {
+  const { register } = useAuth();
   const router = useRouter();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -18,10 +19,8 @@ export default function RegisterScreen() {
     if (password.length < 6) return Alert.alert('Senha deve ter pelo menos 6 caracteres');
     setLoading(true);
     try {
-      await api.post('/auth/register', { name, email: email.trim(), password });
-      Alert.alert('Conta criada!', 'Faça login para continuar', [
-        { text: 'OK', onPress: () => router.replace('/(auth)/login') },
-      ]);
+      await register(email.trim(), password, name);
+      router.replace('/(tabs)');
     } catch (e) {
       Alert.alert('Erro', e.response?.data?.error || 'Erro ao criar conta');
     } finally {

@@ -1,26 +1,39 @@
-import { useEffect, useState } from 'react';
-import { View, Text, FlatList, StyleSheet, ActivityIndicator } from 'react-native';
+import { useEffect, useState, useCallback } from 'react';
+import { View, Text, FlatList, StyleSheet, ActivityIndicator, useWindowDimensions, TouchableOpacity, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MovieCard from '../../components/MovieCard';
 import api from '../../lib/api';
 
 export default function FilmesScreen() {
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const GAP = 8;
+  const PAD = 12;
+  const cardW = (width - PAD * 2 - GAP * 2) / 3;
   const [movies, setMovies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [genres, setGenres] = useState([]);
+  const [selectedGenre, setSelectedGenre] = useState(null);
 
-  useEffect(() => { load(1, true); }, []);
+  useEffect(() => {
+    api.get('/genres').then(r => setGenres(Array.isArray(r.data) ? r.data : [])).catch(() => {});
+  }, []);
+
+  useEffect(() => { load(1, true); }, [selectedGenre]);
 
   const load = async (p, reset = false) => {
-    if (p > 1) setLoadingMore(true);
+    if (reset) setLoading(true); else setLoadingMore(true);
     try {
-      const res = await api.get(`/movies?page=${p}&limit=21`);
-      const data = res.data.items ?? res.data;
+      let url = `/movies?page=${p}&limit=21`;
+      if (selectedGenre) url += `&genre=${encodeURIComponent(selectedGenre)}`;
+      const res = await api.get(url);
+      const data = Array.isArray(res.data) ? res.data : (res.data.data ?? res.data.items ?? []);
       setMovies(prev => reset ? data : [...prev, ...data]);
       setHasMore(data.length === 21);
+      setPage(p);
     } catch {}
     setLoading(false);
     setLoadingMore(false);
@@ -28,23 +41,38 @@ export default function FilmesScreen() {
 
   const loadMore = () => {
     if (!hasMore || loadingMore) return;
-    const next = page + 1;
-    setPage(next);
-    load(next);
+    load(page + 1);
   };
+
+  const toggleGenre = (g) => setSelectedGenre(prev => prev === g ? null : g);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <Text style={styles.header}>Filmes</Text>
+
+      {genres.length > 0 && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.genreRow} style={styles.genreScroll}>
+          {genres.map(g => (
+            <TouchableOpacity key={g} style={[styles.chip, selectedGenre === g && styles.chipActive]} onPress={() => toggleGenre(g)}>
+              <Text style={[styles.chipText, selectedGenre === g && styles.chipTextActive]}>{g}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
+
       {loading ? (
         <View style={styles.loader}><ActivityIndicator size="large" color="#E50914" /></View>
+      ) : movies.length === 0 ? (
+        <View style={styles.loader}><Text style={{ color: '#444', fontSize: 14 }}>Nenhum filme{selectedGenre ? ` em "${selectedGenre}"` : ''}</Text></View>
       ) : (
         <FlatList
           data={movies}
           keyExtractor={item => item.id}
           numColumns={3}
-          renderItem={({ item }) => <MovieCard item={item} type="movie" compact />}
+          renderItem={({ item }) => <MovieCard item={item} type="movie" compact cardWidth={cardW} />}
           contentContainerStyle={styles.grid}
+          columnWrapperStyle={{ gap: GAP }}
+          ItemSeparatorComponent={() => <View style={{ height: GAP }} />}
           onEndReached={loadMore}
           onEndReachedThreshold={0.4}
           showsVerticalScrollIndicator={false}
@@ -57,7 +85,16 @@ export default function FilmesScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0a0a0a' },
-  header: { fontSize: 24, fontWeight: '700', color: '#fff', paddingHorizontal: 16, paddingBottom: 8 },
+  header: { fontSize: 24, fontWeight: '700', color: '#fff', paddingHorizontal: 16, paddingBottom: 6 },
   loader: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  grid: { paddingHorizontal: 8, paddingBottom: 16 },
+  genreScroll: { flexGrow: 0, marginBottom: 8 },
+  genreRow: { paddingHorizontal: 12, gap: 8 },
+  chip: {
+    paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20,
+    backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: '#2a2a2a',
+  },
+  chipActive: { backgroundColor: '#E50914', borderColor: '#E50914' },
+  chipText: { color: '#777', fontSize: 12, fontWeight: '500' },
+  chipTextActive: { color: '#fff', fontWeight: '700' },
+  grid: { paddingHorizontal: 12, paddingBottom: 16 },
 });

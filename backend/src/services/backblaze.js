@@ -108,6 +108,16 @@ async function getUploadPartUrl(fileId) {
   return data;
 }
 
+async function listParts(fileId) {
+  const auth = await authorize();
+  const { data } = await axios.post(
+    `${auth.apiUrl}/b2api/v2/b2_list_parts`,
+    { fileId, maxPartCount: 10000 },
+    { headers: { Authorization: auth.authorizationToken } }
+  );
+  return data.parts; // [{partNumber, contentSha1, contentLength}]
+}
+
 async function finishLargeFile(fileId, partSha1Array) {
   const auth = await authorize();
   const { data } = await axios.post(
@@ -143,4 +153,4 @@ async function setupCors() {
   }
 }
 
-module.exports = { authorize, getUploadUrl, uploadFile, deleteFile, listFiles, setupCors, startLargeFile, getUploadPartUrl, finishLargeFile };
+module.exports = { authorize, getUploadUrl, uploadFile, deleteFile, listFiles, setupCors, startLargeFile, getUploadPartUrl, listParts, finishLargeFile };

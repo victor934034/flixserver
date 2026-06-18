@@ -1,5 +1,5 @@
 'use client';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useDropzone } from 'react-dropzone';
 import api from '../../../lib/api';
 import styles from './page.module.css';
@@ -7,12 +7,10 @@ import styles from './page.module.css';
 function detectName(filename) {
   const seriePatterns = [/s\d{1,2}e\d{1,2}/i, /\d{1,2}x\d{2}/i, /t\d{1,2}e\d{1,2}/i, /temporada/i];
   const type = seriePatterns.some(p => p.test(filename)) ? 'series' : 'movie';
-
   let name = filename.replace(/\.[^.]+$/, '');
   name = name.replace(/\./g, ' ').replace(/_/g, ' ')
     .replace(/\b(1080p|720p|4k|2160p|bluray|webrip|hdtv|x264|x265|hevc|aac|dublado|legendado|dual|br|hdr)\b/gi, '')
     .replace(/\s+/g, ' ').trim();
-
   return { type, name };
 }
 
@@ -23,7 +21,7 @@ function formatSize(bytes) {
 }
 
 // Single-file upload (< 5GB)
-function doUploadXHR(item, presign, onProgress) {
+function doUploadXHR(item, presign, onProgress, signal) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', presign.uploadUrl);
@@ -33,37 +31,64 @@ function doUploadXHR(item, presign, onProgress) {
     xhr.setRequestHeader('X-Bz-Content-Sha1', 'do_not_verify');
 
     xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 90));
+      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 88));
     };
-
     xhr.onload = () => {
       if (xhr.status < 300) resolve();
       else reject(Object.assign(new Error(`HTTP ${xhr.status}`), { isServer: true }));
     };
     xhr.onerror = () => reject(new Error('connection'));
+
+    signal?.addEventListener('abort', () => { xhr.abort(); reject(new Error('paused')); });
     xhr.send(item.file);
   });
 }
 
-// Large file upload using B2 Large File API (>= 5GB)
 const LARGE_FILE_THRESHOLD = 5 * 1024 * 1024 * 1024;
-const PART_SIZE = 100 * 1024 * 1024; // 100MB per part
+const PART_SIZE = 100 * 1024 * 1024;
 
-async function doLargeUploadXHR(item, onProgress) {
+// Calcula SHA1 real de um Blob — obrigatório para b2_finish_large_file
+async function sha1Hex(blob) {
+  const buf = await blob.arrayBuffer();
+  const hash = await crypto.subtle.digest('SHA-1', buf);
+  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function doLargeUploadXHR(item, onProgress, signal, resumeState) {
   const file = item.file;
+  let fileId = resumeState?.fileId;
+  let startPart = 0;
+  const allSha1s = []; // índice i → SHA1 da parte i+1
 
-  const { data: { fileId } } = await api.post('/upload/start-large', {
-    filename: file.name,
-    contentType: file.type || 'video/mp4',
-  });
+  if (fileId) {
+    // Resume: busca SHA1s das partes já enviadas no B2
+    const { data } = await api.post('/upload/list-parts', { fileId });
+    const doneParts = data.parts.sort((a, b) => a.partNumber - b.partNumber);
+    startPart = doneParts.length;
+    for (const p of doneParts) allSha1s[p.partNumber - 1] = p.contentSha1;
+    onProgress({ pct: Math.round((startPart / Math.ceil(file.size / PART_SIZE)) * 88), fileId, partsDone: startPart });
+  } else {
+    const { data: { fileId: newId } } = await api.post('/upload/start-large', {
+      filename: file.name,
+      contentType: file.type || 'video/mp4',
+    });
+    fileId = newId;
+    onProgress({ pct: 0, fileId, partsDone: 0 });
+  }
 
   const totalParts = Math.ceil(file.size / PART_SIZE);
-  const sha1Array = [];
 
-  for (let i = 0; i < totalParts; i++) {
+  for (let i = startPart; i < totalParts; i++) {
+    if (signal?.aborted) throw new Error('paused');
+
     const start = i * PART_SIZE;
     const chunk = file.slice(start, Math.min(start + PART_SIZE, file.size));
     const partNumber = i + 1;
+
+    // Calcula SHA1 antes de enviar (necessário — B2 armazena "do_not_verify" como marcador
+    // e rejeita em finish_large_file; precisamos do SHA1 real)
+    const sha1 = await sha1Hex(chunk);
+    allSha1s[i] = sha1;
 
     const { data: partInfo } = await api.post('/upload/part-url', { fileId });
 
@@ -72,34 +97,31 @@ async function doLargeUploadXHR(item, onProgress) {
       xhr.open('POST', partInfo.uploadUrl);
       xhr.setRequestHeader('Authorization', partInfo.authorizationToken);
       xhr.setRequestHeader('X-Bz-Part-Number', String(partNumber));
-      xhr.setRequestHeader('Content-Length', String(chunk.size));
-      xhr.setRequestHeader('X-Bz-Content-Sha1', 'do_not_verify');
+      xhr.setRequestHeader('X-Bz-Content-Sha1', sha1);
 
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable) {
-          const total = ((i + e.loaded / e.total) / totalParts) * 90;
-          onProgress(Math.round(total));
+          const pct = Math.round(((i + e.loaded / e.total) / totalParts) * 88);
+          onProgress({ pct, fileId, partsDone: i });
         }
       };
-
       xhr.onload = () => {
         if (xhr.status < 300) resolve();
         else reject(Object.assign(new Error(`HTTP ${xhr.status}`), { isServer: true }));
       };
       xhr.onerror = () => reject(new Error('connection'));
+      signal?.addEventListener('abort', () => { xhr.abort(); reject(new Error('paused')); });
       xhr.send(chunk);
     });
 
-    sha1Array.push('do_not_verify');
-    onProgress(Math.round(((i + 1) / totalParts) * 90));
+    onProgress({ pct: Math.round(((i + 1) / totalParts) * 88), fileId, partsDone: i + 1 });
   }
 
   const { data: { cdnUrl } } = await api.post('/upload/finish-large', {
     fileId,
-    partSha1Array: sha1Array,
     filename: file.name,
+    partSha1Array: allSha1s,
   });
-
   return cdnUrl;
 }
 
@@ -109,6 +131,7 @@ const RETRY_DELAYS = [3000, 6000, 12000];
 export default function UploadPage() {
   const [files, setFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
+  const abortRefs = useRef({});
 
   const onDrop = useCallback((accepted) => {
     const items = accepted.map(file => ({
@@ -123,6 +146,7 @@ export default function UploadPage() {
       status: 'pending',
       result: null,
       error: null,
+      resumeState: null, // {fileId, partsDone}
     }));
     setFiles(prev => [...prev, ...items]);
   }, []);
@@ -140,25 +164,42 @@ export default function UploadPage() {
   async function uploadFile(item) {
     updateFile(item.id, { status: 'uploading', progress: 0, error: null });
     const isLarge = item.file.size >= LARGE_FILE_THRESHOLD;
+    const controller = new AbortController();
+    abortRefs.current[item.id] = controller;
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
         let cdnUrl;
 
         if (isLarge) {
-          cdnUrl = await doLargeUploadXHR(item, (pct) => updateFile(item.id, { progress: pct }));
+          cdnUrl = await doLargeUploadXHR(
+            item,
+            ({ pct, fileId, partsDone }) => {
+              updateFile(item.id, {
+                progress: pct,
+                resumeState: { fileId, partsDone },
+              });
+            },
+            controller.signal,
+            item.resumeState,
+          );
         } else {
           const { data: presign } = await api.get('/upload/presign');
-          await doUploadXHR(item, presign, (pct) => updateFile(item.id, { progress: pct }));
+          await doUploadXHR(item, presign, (pct) => updateFile(item.id, { progress: pct }), controller.signal);
           cdnUrl = `${presign.cdnBase}/${item.file.name}`;
         }
 
         updateFile(item.id, { progress: 92 });
         const { data: tmdbResult } = await api.post('/tmdb/detect', { fileUrl: cdnUrl, version: item.version });
         updateFile(item.id, { status: 'done', progress: 100, result: tmdbResult, error: null });
+        delete abortRefs.current[item.id];
         return;
       } catch (err) {
-        // Only retry pure network errors, not HTTP server errors
+        if (err.message === 'paused') {
+          updateFile(item.id, { status: 'paused', error: null });
+          delete abortRefs.current[item.id];
+          return;
+        }
         const isConnection = err.message === 'connection' || (!err.isServer && !err.response);
         const hasRetry = isConnection && attempt < MAX_RETRIES;
 
@@ -167,22 +208,36 @@ export default function UploadPage() {
           updateFile(item.id, {
             status: 'retrying',
             progress: 0,
-            error: `Falha de conexão. Tentando novamente em ${delay / 1000}s... (tentativa ${attempt + 1}/${MAX_RETRIES})`,
+            error: `Falha de conexão. Tentando novamente em ${delay / 1000}s... (${attempt + 1}/${MAX_RETRIES})`,
           });
           await new Promise(r => setTimeout(r, delay));
           updateFile(item.id, { status: 'uploading', error: null });
         } else {
           const msg = err.response?.data?.error || (err.message === 'connection' ? 'Falha de conexão após 3 tentativas' : err.message);
           updateFile(item.id, { status: 'error', error: msg });
+          delete abortRefs.current[item.id];
           return;
         }
       }
     }
   }
 
+  function pauseFile(item) {
+    abortRefs.current[item.id]?.abort();
+  }
+
+  function resumeFile(item) {
+    const freshItem = files.find(f => f.id === item.id);
+    if (!freshItem) return;
+    const controller = new AbortController();
+    abortRefs.current[item.id] = controller;
+    updateFile(item.id, { status: 'uploading', error: null });
+    uploadFile(freshItem);
+  }
+
   async function retryFile(item) {
-    updateFile(item.id, { status: 'pending', progress: 0, error: null, result: null });
-    await uploadFile({ ...item, status: 'pending' });
+    updateFile(item.id, { status: 'pending', progress: 0, error: null, result: null, resumeState: null });
+    await uploadFile({ ...item, status: 'pending', resumeState: null });
   }
 
   async function startAll() {
@@ -239,33 +294,61 @@ export default function UploadPage() {
                     </div>
                   </div>
 
-                  {item.status === 'pending' && (
-                    <select
-                      value={item.version}
-                      onChange={e => updateFile(item.id, { version: e.target.value })}
-                      className={styles.versionSelect}
-                    >
-                      <option value="dubbing">Dublado</option>
-                      <option value="subtitled">Legendado</option>
-                      <option value="cinema">Cinema</option>
-                      <option value="4k">4K</option>
-                    </select>
-                  )}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {item.status === 'pending' && (
+                      <select
+                        value={item.version}
+                        onChange={e => updateFile(item.id, { version: e.target.value })}
+                        className={styles.versionSelect}
+                      >
+                        <option value="dubbing">Dublado</option>
+                        <option value="subtitled">Legendado</option>
+                        <option value="cinema">Cinema</option>
+                        <option value="4k">4K</option>
+                      </select>
+                    )}
 
-                  {item.status === 'done' && <span className={styles.badgeDone}>✓ Concluído</span>}
-                  {item.status === 'error' && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span className={styles.badgeError}>✗ Erro</span>
-                      <button className={styles.btnRetry} onClick={() => retryFile(item)}>↺ Tentar novamente</button>
-                    </div>
-                  )}
-                  {item.status === 'retrying' && <span className={styles.badgeRetrying}>↺ Reconectando...</span>}
+                    {item.status === 'uploading' && item.file.size >= LARGE_FILE_THRESHOLD && (
+                      <button className={styles.btnPause} onClick={() => pauseFile(item)}>⏸ Pausar</button>
+                    )}
+
+                    {item.status === 'paused' && (
+                      <>
+                        <span className={styles.badgePaused}>⏸ Pausado</span>
+                        <button className={styles.btnResume} onClick={() => resumeFile(item)}>▶ Continuar</button>
+                      </>
+                    )}
+
+                    {item.status === 'done' && <span className={styles.badgeDone}>✓ Concluído</span>}
+
+                    {item.status === 'error' && (
+                      <>
+                        <span className={styles.badgeError}>✗ Erro</span>
+                        <button className={styles.btnRetry} onClick={() => retryFile(item)}>↺ Tentar novamente</button>
+                      </>
+                    )}
+
+                    {item.status === 'retrying' && <span className={styles.badgeRetrying}>↺ Reconectando...</span>}
+                  </div>
                 </div>
 
-                {(item.status === 'uploading' || item.status === 'done') && (
+                {(item.status === 'uploading' || item.status === 'paused' || item.status === 'done') && (
                   <div className={styles.progressBar}>
-                    <div className={styles.progressFill} style={{ width: `${item.progress}%` }} />
+                    <div
+                      className={styles.progressFill}
+                      style={{
+                        width: `${item.progress}%`,
+                        backgroundColor: item.status === 'paused' ? '#ffa500' : undefined,
+                      }}
+                    />
                   </div>
+                )}
+
+                {item.status === 'paused' && item.resumeState && (
+                  <p className={styles.retryMsg}>
+                    {item.resumeState.partsDone} de {Math.ceil(item.file.size / PART_SIZE)} partes concluídas —
+                    clique em Continuar para retomar do ponto parado.
+                  </p>
                 )}
 
                 {item.status === 'retrying' && item.error && (

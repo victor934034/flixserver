@@ -17,6 +17,7 @@ export default function VideoPlayer({ content, onProgress }) {
   const [fullscreen, setFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [currentTime, setCurrentTime] = useState(0);
+  const [audioWarning, setAudioWarning] = useState(false);
 
   const versions = [
     { key: 'dubbing', label: 'Dublado', url: content.file_dubbing },
@@ -56,16 +57,29 @@ export default function VideoPlayer({ content, onProgress }) {
       setProgress(video.duration ? (video.currentTime / video.duration) * 100 : 0);
       onProgress?.(video.currentTime, video.duration);
     };
-    const onLoaded = () => setDuration(video.duration);
+    const onLoaded = () => {
+      setDuration(video.duration);
+      // Detecta ausência de faixas de áudio decodificáveis
+      if (video.audioTracks && video.audioTracks.length === 0) {
+        setAudioWarning(true);
+      }
+    };
     const onEnded = () => setPlaying(false);
+    const onError = (e) => {
+      const err = video.error;
+      // MEDIA_ERR_DECODE (4) com vídeo visível → provavelmente codec de áudio não suportado
+      if (err && err.code === 4) setAudioWarning(true);
+    };
 
     video.addEventListener('timeupdate', onTimeUpdate);
     video.addEventListener('loadedmetadata', onLoaded);
     video.addEventListener('ended', onEnded);
+    video.addEventListener('error', onError);
     return () => {
       video.removeEventListener('timeupdate', onTimeUpdate);
       video.removeEventListener('loadedmetadata', onLoaded);
       video.removeEventListener('ended', onEnded);
+      video.removeEventListener('error', onError);
     };
   }, [onProgress]);
 
@@ -137,12 +151,20 @@ export default function VideoPlayer({ content, onProgress }) {
   }
 
   function changeVersion(key) {
-    const v = videoRef.current;
-    const time = v?.currentTime || 0;
+    const savedTime = videoRef.current?.currentTime || 0;
     setVersion(key);
+    setAudioWarning(false);
+    // key={currentUrl} já desmonta/remonta o <video>, então esperamos o loadedmetadata
+    const onReady = () => {
+      const v = videoRef.current;
+      if (!v) return;
+      v.currentTime = savedTime;
+      if (playing) v.play();
+      v.removeEventListener('loadedmetadata', onReady);
+    };
     setTimeout(() => {
-      if (v) { v.currentTime = time; if (playing) v.play(); }
-    }, 100);
+      videoRef.current?.addEventListener('loadedmetadata', onReady);
+    }, 50);
   }
 
   function changeSubtitle(key) {
@@ -173,14 +195,22 @@ export default function VideoPlayer({ content, onProgress }) {
       <video
         ref={videoRef}
         className={styles.video}
-        src={currentUrl}
         onClick={e => e.stopPropagation()}
         crossOrigin="anonymous"
+        key={currentUrl}
       >
+        <source src={currentUrl} type="video/mp4" />
         {subtitles.filter(s => s.url).map(s => (
           <track key={s.key} kind="subtitles" src={s.url} srcLang={s.key} label={s.label} />
         ))}
       </video>
+
+      {audioWarning && (
+        <div className={styles.audioWarning}>
+          ⚠️ Sem áudio — codec AAC não suportado neste navegador.{' '}
+          Use <strong>Chrome</strong> ou <strong>Edge</strong>, ou reenvie o vídeo com áudio AAC-LC estéreo.
+        </div>
+      )}
 
       <div
         className={`${styles.controls} ${showControls ? styles.visible : ''}`}

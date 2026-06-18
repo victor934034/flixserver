@@ -33,6 +33,7 @@ export default function RootLayout() {
             <Stack.Screen name="(tabs)" />
             <Stack.Screen name="filme/[id]" />
             <Stack.Screen name="serie/[id]" />
+            <Stack.Screen name="historico" />
             <Stack.Screen name="player" options={{ animation: 'fade', gestureEnabled: false }} />
           </Stack>
         </AuthProvider>
