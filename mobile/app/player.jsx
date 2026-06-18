@@ -4,7 +4,8 @@ import {
   ActivityIndicator, StatusBar, useWindowDimensions,
   Animated, FlatList, Image,
 } from 'react-native';
-import { Video, ResizeMode } from 'expo-av';
+import { VideoView, useVideoPlayer } from 'expo-video';
+import { useEvent } from 'expo';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ScreenOrientation from 'expo-screen-orientation';
@@ -12,7 +13,6 @@ import * as KeepAwake from 'expo-keep-awake';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import api from '../lib/api';
 
-// Brightness: graceful fallback if expo-brightness not installed
 let Brightness = null;
 try { Brightness = require('expo-brightness'); } catch {}
 
@@ -28,13 +28,12 @@ const SUB_LABELS = { pt: 'Português 🇧🇷', en: 'English 🇺🇸', es: 'Esp
 const SLIDER_H = 140;
 
 function pad(n) { return String(n).padStart(2, '0'); }
-function fmt(ms) {
-  if (!ms) return '0:00';
-  const s = Math.floor(ms / 1000);
-  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
-  return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
+function fmtSec(sec) {
+  if (!sec || sec < 0) return '0:00';
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = Math.floor(sec % 60);
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
 }
-function fmtMin(ms) {
+function fmtMs(ms) {
   const m = Math.floor(ms / 60000), s = Math.floor((ms % 60000) / 1000);
   return `${m}:${pad(s)}`;
 }
@@ -45,78 +44,101 @@ export default function PlayerScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
-  const videoRef = useRef(null);
-  const hideTimerRef = useRef(null);
-  const sleepIntervalRef = useRef(null);
-  const nextCountRef = useRef(null);
-  const timerEndRef = useRef(null);
 
-  // Parse params
-  const versions = params.versions ? JSON.parse(params.versions) : { dubbing: params.url };
-  const availVer = Object.keys(versions).filter(k => versions[k]);
-  const initVer = params.currentVersion && versions[params.currentVersion] ? params.currentVersion : availVer[0];
-  const subtitles = params.subtitles ? JSON.parse(params.subtitles) : {};
-  const availSubs = Object.entries(subtitles).filter(([, u]) => u);
-  const nextEp = params.nextEpisode ? JSON.parse(params.nextEpisode) : null;
+  // Parse params (stable — route params don't change)
+  const versions = useRef(params.versions ? JSON.parse(params.versions) : { dubbing: params.url }).current;
+  const availVer = useRef(Object.keys(versions).filter(k => versions[k])).current;
+  const initVer = useRef((params.currentVersion && versions[params.currentVersion]) ? params.currentVersion : availVer[0]).current;
+  const subtitles = useRef(params.subtitles ? JSON.parse(params.subtitles) : {}).current;
+  const availSubs = useRef(Object.entries(subtitles).filter(([, u]) => u)).current;
+  const nextEp = useRef(params.nextEpisode ? JSON.parse(params.nextEpisode) : null).current;
   const introEnd = params.introEnd ? Number(params.introEnd) : 0;
 
-  // Playback
+  // Initial video source (with all available text tracks)
+  const initialSource = useRef({
+    uri: versions[initVer],
+    textTracks: availSubs.map(([lang, url]) => ({
+      uri: url, language: lang, title: SUB_LABELS[lang] || lang, type: 'text/vtt',
+    })),
+  }).current;
+
+  // ─── expo-video player ────────────────────────────────────────────────────
+  const player = useVideoPlayer(initialSource, p => {
+    p.play();
+    p.preservesPitch = true;
+    p.timeUpdateEventInterval = 0.5;
+  });
+
+  const { currentTime = 0 } = useEvent(player, 'timeUpdate', { currentTime: 0 });
+  const { isPlaying = false } = useEvent(player, 'playingChange', { isPlaying: false });
+  const { status = 'idle' } = useEvent(player, 'statusChange', { status: 'idle' });
+
+  // Derived values (seconds)
+  const durSec = player.duration || 0;
+  const remainSec = Math.max(0, durSec - currentTime);
+  const progress = durSec > 0 ? currentTime / durSec : 0;
+  const isBuffering = status === 'loading';
+  const isEnded = !isPlaying && durSec > 0 && currentTime > 0 && remainSec < 1.5;
+  const showSkipIntro = introEnd > 0 && currentTime < introEnd && currentTime > 2;
+  const showNextCard = nextEp && ((remainSec > 0 && remainSec < 30) || isEnded);
+
+  // ─── State ────────────────────────────────────────────────────────────────
   const [activeVer, setActiveVer] = useState(initVer);
-  const [playStatus, setPlayStatus] = useState({});
-  const [savedPos, setSavedPos] = useState(null);
+  const [savedPosSec, setSavedPosSec] = useState(null);
   const [activeSub, setActiveSub] = useState(null);
   const [speed, setSpeed] = useState(1);
-
-  // UI
   const [ctrlVisible, setCtrlVisible] = useState(true);
   const [locked, setLocked] = useState(false);
   const [brightness, setBrightness] = useState(0.8);
+  const [sheet, setSheet] = useState(null);
+  const [timerRemaining, setTimerRemaining] = useState(null);
+  const [nextCountdown, setNextCountdown] = useState(null);
+  const [episodes, setEpisodes] = useState([]);
   const brightnessRef = useRef(0.8);
   const ctrlOpacity = useRef(new Animated.Value(1)).current;
-
-  // Sheets: null | 'speed' | 'episodes' | 'subtitles' | 'timer'
-  const [sheet, setSheet] = useState(null);
-
-  // Sleep timer
-  const [timerRemaining, setTimerRemaining] = useState(null);
-
-  // Next episode
-  const [nextCountdown, setNextCountdown] = useState(null);
-
-  // Episodes list
-  const [episodes, setEpisodes] = useState([]);
-
-  // Derived
-  const posMs = playStatus.positionMillis || 0;
-  const durMs = playStatus.durationMillis || 0;
-  const progress = durMs > 0 ? posMs / durMs : 0;
-  const remainMs = durMs > 0 ? durMs - posMs : 0;
-  const isPlaying = playStatus.isPlaying || false;
-  const isEnded = playStatus.didJustFinish || (durMs > 0 && remainMs < 600);
-  const showSkipIntro = introEnd > 0 && posMs / 1000 < introEnd && posMs > 2000;
-  const showNextCard = nextEp && ((remainMs > 0 && remainMs < 30000) || isEnded);
-  const currentUrl = versions[activeVer];
+  const hideTimerRef = useRef(null);
+  const sleepRef = useRef(null);
+  const nextCountRef = useRef(null);
+  const timerEndRef = useRef(null);
   const progressBarW = useRef(0);
 
-  // ─── SETUP ────────────────────────────────────────────────────────────────
+  // ─── Setup ────────────────────────────────────────────────────────────────
   useEffect(() => {
     StatusBar.setHidden(true, 'fade');
     ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
     KeepAwake.activateKeepAwakeAsync('player');
     schedHide();
-    Brightness?.getBrightnessAsync?.()?.then(b => {
-      brightnessRef.current = b;
-      setBrightness(b);
-    }).catch?.(() => {});
+    Brightness?.getBrightnessAsync?.()?.then(b => { brightnessRef.current = b; setBrightness(b); }).catch(() => {});
     return () => {
       StatusBar.setHidden(false, 'fade');
       ScreenOrientation.unlockAsync();
       KeepAwake.deactivateKeepAwake('player');
       clearTimeout(hideTimerRef.current);
-      clearInterval(sleepIntervalRef.current);
+      clearInterval(sleepRef.current);
       clearTimeout(nextCountRef.current);
     };
   }, []);
+
+  // Restore saved position after source replace
+  useEffect(() => {
+    if (status === 'readyToPlay' && savedPosSec !== null) {
+      player.seek(savedPosSec);
+      setSavedPosSec(null);
+    }
+  }, [status, savedPosSec]);
+
+  // Apply speed
+  useEffect(() => { player.playbackRate = speed; }, [speed]);
+
+  // Apply subtitle selection
+  useEffect(() => {
+    if (!activeSub) {
+      player.selectedTextTrack = null;
+      return;
+    }
+    const track = (player.textTracks || []).find(t => t.language === activeSub);
+    if (track) player.selectedTextTrack = track;
+  }, [activeSub]);
 
   // Load episodes for sheet
   useEffect(() => {
@@ -125,24 +147,6 @@ export default function PlayerScreen() {
       setEpisodes(Array.isArray(r.data) ? r.data : []);
     }).catch(() => {});
   }, [seriesId]);
-
-  // Sleep timer tick
-  useEffect(() => {
-    if (!timerEndRef.current) return;
-    clearInterval(sleepIntervalRef.current);
-    sleepIntervalRef.current = setInterval(() => {
-      const rem = timerEndRef.current - Date.now();
-      if (rem <= 0) {
-        setTimerRemaining(null);
-        timerEndRef.current = null;
-        videoRef.current?.pauseAsync?.();
-        clearInterval(sleepIntervalRef.current);
-      } else {
-        setTimerRemaining(rem);
-      }
-    }, 1000);
-    return () => clearInterval(sleepIntervalRef.current);
-  }, []);
 
   // Next ep countdown
   useEffect(() => {
@@ -157,22 +161,21 @@ export default function PlayerScreen() {
     return () => clearTimeout(nextCountRef.current);
   }, [nextCountdown]);
 
-  // ─── BRIGHTNESS PAN ───────────────────────────────────────────────────────
+  // ─── Brightness pan ───────────────────────────────────────────────────────
   let bStartVal = 0.8;
   const brightnessPan = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: () => true,
     onPanResponderGrant: () => { bStartVal = brightnessRef.current; },
     onPanResponderMove: (_, g) => {
-      const delta = -g.dy / SLIDER_H;
-      const b = Math.max(0.05, Math.min(1, bStartVal + delta));
+      const b = Math.max(0.05, Math.min(1, bStartVal - g.dy / SLIDER_H));
       brightnessRef.current = b;
       setBrightness(b);
       Brightness?.setBrightnessAsync?.(b)?.catch?.(() => {});
     },
   })).current;
 
-  // ─── PROGRESS PAN ─────────────────────────────────────────────────────────
+  // ─── Progress pan ─────────────────────────────────────────────────────────
   let pStartX = 0;
   const progressPan = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => true,
@@ -181,29 +184,18 @@ export default function PlayerScreen() {
       pStartX = e.nativeEvent.locationX;
       seekToRatio(pStartX / progressBarW.current);
     },
-    onPanResponderMove: (_, g) => {
-      seekToRatio((pStartX + g.dx) / progressBarW.current);
-    },
+    onPanResponderMove: (_, g) => { seekToRatio((pStartX + g.dx) / progressBarW.current); },
   })).current;
 
-  const seekToRatio = (ratio) => {
-    if (!videoRef.current || !durMs) return;
-    videoRef.current.setPositionAsync(Math.max(0, Math.min(1, ratio)) * durMs);
-  };
-
-  // ─── CONTROLS ─────────────────────────────────────────────────────────────
+  // ─── Control helpers ──────────────────────────────────────────────────────
   const schedHide = useCallback(() => {
     clearTimeout(hideTimerRef.current);
-    hideTimerRef.current = setTimeout(() => {
-      if (!sheet) fadeCtrl(false);
-    }, 4000);
+    hideTimerRef.current = setTimeout(() => { if (!sheet) fadeCtrl(false); }, 4000);
   }, [sheet]);
 
   const fadeCtrl = (show) => {
     setCtrlVisible(show);
-    Animated.timing(ctrlOpacity, {
-      toValue: show ? 1 : 0, duration: 220, useNativeDriver: true,
-    }).start();
+    Animated.timing(ctrlOpacity, { toValue: show ? 1 : 0, duration: 220, useNativeDriver: true }).start();
   };
 
   const onTap = () => {
@@ -214,21 +206,74 @@ export default function PlayerScreen() {
     if (next) schedHide();
   };
 
-  const togglePlay = async () => {
-    if (!videoRef.current) return;
-    isPlaying ? await videoRef.current.pauseAsync() : await videoRef.current.playAsync();
+  const togglePlay = () => {
+    isPlaying ? player.pause() : player.play();
     schedHide();
   };
 
-  const seek = async (sec) => {
-    await videoRef.current?.setPositionAsync(Math.max(0, posMs + sec * 1000));
-    schedHide();
+  const seekBy = (sec) => { player.seekBy(sec); schedHide(); };
+
+  const seekToRatio = (ratio) => {
+    if (durSec > 0) player.seek(Math.max(0, Math.min(1, ratio)) * durSec);
   };
 
   const openSheet = (name) => {
     setSheet(name);
     clearTimeout(hideTimerRef.current);
     if (!ctrlVisible) fadeCtrl(true);
+  };
+
+  const saveProgress = useCallback(async () => {
+    if (!id || currentTime < 5) return;
+    try {
+      await api.post('/history', {
+        content_type: type === 'episode' ? 'episode' : 'movie',
+        content_id: id,
+        progress: Math.floor(currentTime),
+        duration: Math.floor(durSec),
+      });
+    } catch {}
+  }, [id, type, currentTime, durSec]);
+
+  useEffect(() => {
+    const t = setInterval(saveProgress, 15000);
+    return () => clearInterval(t);
+  }, [saveProgress]);
+
+  const switchVer = (v) => {
+    if (v !== activeVer) {
+      setSavedPosSec(currentTime);
+      player.replace({
+        uri: versions[v],
+        textTracks: availSubs.map(([lang, url]) => ({
+          uri: url, language: lang, title: SUB_LABELS[lang] || lang, type: 'text/vtt',
+        })),
+      });
+      setActiveVer(v);
+    }
+    setSheet(null);
+  };
+
+  const startTimer = (ms) => {
+    clearInterval(sleepRef.current);
+    timerEndRef.current = Date.now() + ms;
+    setTimerRemaining(ms);
+    sleepRef.current = setInterval(() => {
+      const rem = timerEndRef.current - Date.now();
+      if (rem <= 0) {
+        setTimerRemaining(null);
+        timerEndRef.current = null;
+        player.pause();
+        clearInterval(sleepRef.current);
+      } else { setTimerRemaining(rem); }
+    }, 1000);
+    setSheet(null);
+  };
+
+  const cancelTimer = () => {
+    clearInterval(sleepRef.current);
+    timerEndRef.current = null;
+    setTimerRemaining(null);
   };
 
   const goNextEp = () => {
@@ -242,8 +287,7 @@ export default function PlayerScreen() {
       pathname: '/player',
       params: {
         url, title: nextEp.title || `Episódio ${nextEp.episode_number}`,
-        id: nextEp.id, type: 'episode',
-        seriesId: seriesId || undefined,
+        id: nextEp.id, type: 'episode', seriesId: seriesId || undefined,
         currentVersion: activeVer,
         versions: JSON.stringify({ dubbing: nextEp.file_dubbing || null, subtitled: nextEp.file_subtitled || null, cinema: nextEp.file_cinema || null }),
         subtitles: JSON.stringify({ pt: nextEp.subtitle_pt || null, en: nextEp.subtitle_en || null, es: nextEp.subtitle_es || null }),
@@ -253,87 +297,25 @@ export default function PlayerScreen() {
     });
   };
 
-  const switchVer = (v) => {
-    if (v !== activeVer) { setSavedPos(posMs); setActiveVer(v); }
-    setSheet(null);
-  };
-
-  const startTimer = (ms) => {
-    clearInterval(sleepIntervalRef.current);
-    timerEndRef.current = Date.now() + ms;
-    setTimerRemaining(ms);
-    // Start the tick
-    sleepIntervalRef.current = setInterval(() => {
-      const rem = timerEndRef.current - Date.now();
-      if (rem <= 0) {
-        setTimerRemaining(null);
-        timerEndRef.current = null;
-        videoRef.current?.pauseAsync?.();
-        clearInterval(sleepIntervalRef.current);
-      } else {
-        setTimerRemaining(rem);
-      }
-    }, 1000);
-    setSheet(null);
-  };
-
-  const cancelTimer = () => {
-    clearInterval(sleepIntervalRef.current);
-    timerEndRef.current = null;
-    setTimerRemaining(null);
-  };
-
-  const saveProgress = useCallback(async () => {
-    if (!id || posMs < 5000) return;
-    try {
-      await api.post('/history', {
-        content_type: type === 'episode' ? 'episode' : 'movie',
-        content_id: id,
-        progress: Math.floor(posMs / 1000),
-        duration: Math.floor(durMs / 1000),
-      });
-    } catch {}
-  }, [id, type, posMs, durMs]);
-
-  useEffect(() => {
-    const t = setInterval(saveProgress, 15000);
-    return () => clearInterval(t);
-  }, [saveProgress]);
-
-  const onVideoLoad = async () => {
-    if (savedPos != null && videoRef.current) {
-      await videoRef.current.setPositionAsync(savedPos);
-      setSavedPos(null);
-    }
-  };
-
   const sortedEps = [...episodes].sort((a, b) =>
     a.season_number !== b.season_number ? a.season_number - b.season_number : a.episode_number - b.episode_number
   );
 
-  // ─── RENDER ───────────────────────────────────────────────────────────────
+  // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <View style={{ flex: 1, backgroundColor: '#000', width, height }}>
-      {/* Video */}
-      <Video
-        ref={videoRef}
-        source={{ uri: currentUrl }}
+
+      {/* ── Video ── */}
+      <VideoView
+        player={player}
         style={StyleSheet.absoluteFill}
-        resizeMode={ResizeMode.CONTAIN}
-        shouldPlay
-        rate={speed}
-        shouldCorrectPitch
-        onPlaybackStatusUpdate={setPlayStatus}
-        onLoad={onVideoLoad}
-        progressUpdateIntervalMillis={500}
-        textTracks={availSubs.map(([lang, url]) => ({
-          title: SUB_LABELS[lang] || lang, language: lang, type: 'text/vtt', uri: url,
-        }))}
-        selectedTextTrack={activeSub ? { type: 'language', value: activeSub } : { type: 'disabled' }}
+        contentFit="contain"
+        nativeControls={false}
+        allowsFullscreen={false}
       />
 
       {/* Buffering */}
-      {playStatus.isBuffering && !isPlaying && (
+      {isBuffering && (
         <View style={styles.buffering}>
           <ActivityIndicator size="large" color="#fff" />
         </View>
@@ -357,7 +339,7 @@ export default function PlayerScreen() {
             <TouchableOpacity style={styles.timerBtn} onPress={() => openSheet('timer')}>
               <Ionicons name="timer-outline" size={18} color="#fff" />
               <Text style={styles.timerBtnText}>
-                {timerRemaining ? fmtMin(timerRemaining) : 'Temporizador'}
+                {timerRemaining ? fmtMs(timerRemaining) : 'Temporizador'}
               </Text>
             </TouchableOpacity>
           </View>
@@ -374,9 +356,9 @@ export default function PlayerScreen() {
               </View>
             </View>
 
-            {/* CENTER: back 10 | play/pause | forward 10 */}
+            {/* CENTER: <<10 | play | 10>> */}
             <View style={styles.centerRow}>
-              <TouchableOpacity style={styles.seekBtn} onPress={() => seek(-10)} activeOpacity={0.7}>
+              <TouchableOpacity style={styles.seekBtn} onPress={() => seekBy(-10)} activeOpacity={0.7}>
                 <View style={styles.seekWrap}>
                   <Ionicons name="refresh" size={50} color="rgba(255,255,255,0.9)" style={{ transform: [{ scaleX: -1 }] }} />
                   <Text style={styles.seekNum}>10</Text>
@@ -385,14 +367,12 @@ export default function PlayerScreen() {
 
               <TouchableOpacity style={styles.playPauseBtn} onPress={togglePlay} activeOpacity={0.8}>
                 <Ionicons
-                  name={isPlaying ? 'pause' : 'play'}
-                  size={56}
-                  color="#fff"
+                  name={isPlaying ? 'pause' : 'play'} size={56} color="#fff"
                   style={!isPlaying ? { marginLeft: 5 } : undefined}
                 />
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.seekBtn} onPress={() => seek(10)} activeOpacity={0.7}>
+              <TouchableOpacity style={styles.seekBtn} onPress={() => seekBy(10)} activeOpacity={0.7}>
                 <View style={styles.seekWrap}>
                   <Ionicons name="refresh" size={50} color="rgba(255,255,255,0.9)" />
                   <Text style={styles.seekNum}>10</Text>
@@ -400,7 +380,6 @@ export default function PlayerScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Spacer espelha coluna de brilho */}
             <View style={{ width: 44 }} />
           </View>
 
@@ -408,7 +387,7 @@ export default function PlayerScreen() {
           {showSkipIntro && (
             <TouchableOpacity
               style={styles.skipIntroBtn}
-              onPress={() => videoRef.current?.setPositionAsync(introEnd * 1000)}
+              onPress={() => player.seek(introEnd)}
               activeOpacity={0.85}
             >
               <Text style={styles.skipIntroText}>Pular Abertura</Text>
@@ -429,26 +408,22 @@ export default function PlayerScreen() {
               <View style={[styles.progressDot, { left: `${Math.min(progress * 100, 99)}%` }]} />
             </View>
 
-            {/* Times */}
             <View style={styles.timeRow}>
-              <Text style={styles.timeText}>{fmt(posMs)}</Text>
-              <Text style={styles.timeText}>{fmt(durMs)}</Text>
+              <Text style={styles.timeText}>{fmtSec(currentTime)}</Text>
+              <Text style={styles.timeText}>{fmtSec(durSec)}</Text>
             </View>
 
-            {/* Action bar — estilo Netflix */}
+            {/* Action bar — idêntico ao Netflix */}
             <View style={styles.actionBar}>
               <TouchableOpacity style={styles.actionBtn} onPress={() => openSheet('speed')}>
                 <Ionicons name="speedometer-outline" size={15} color="#fff" />
                 <Text style={styles.actionBtnText}>Velocidade ({speed}x)</Text>
               </TouchableOpacity>
-
               <View style={styles.actionDiv} />
-
               <TouchableOpacity style={styles.actionBtn} onPress={() => setLocked(true)}>
                 <Ionicons name="lock-open-outline" size={15} color="#fff" />
                 <Text style={styles.actionBtnText}>Bloquear</Text>
               </TouchableOpacity>
-
               {seriesId && <>
                 <View style={styles.actionDiv} />
                 <TouchableOpacity style={styles.actionBtn} onPress={() => openSheet('episodes')}>
@@ -456,14 +431,11 @@ export default function PlayerScreen() {
                   <Text style={styles.actionBtnText}>Episódios</Text>
                 </TouchableOpacity>
               </>}
-
               <View style={styles.actionDiv} />
-
               <TouchableOpacity style={styles.actionBtn} onPress={() => openSheet('subtitles')}>
                 <Ionicons name="text-outline" size={15} color="#fff" />
                 <Text style={styles.actionBtnText}>Idioma e legendas</Text>
               </TouchableOpacity>
-
               {nextEp && <>
                 <View style={styles.actionDiv} />
                 <TouchableOpacity style={styles.actionBtn} onPress={goNextEp}>
@@ -486,30 +458,21 @@ export default function PlayerScreen() {
         </TouchableOpacity>
       )}
 
-      {/* ── CARD PRÓXIMO EPISÓDIO ── */}
+      {/* ── PRÓXIMO EPISÓDIO ── */}
       {showNextCard && !locked && !sheet && (
         <View style={[styles.nextCard, { bottom: Math.max(insets.bottom, 14) + 78 }]}>
-          {nextEp.thumbnail_url && (
-            <Image source={{ uri: nextEp.thumbnail_url }} style={styles.nextThumb} />
-          )}
+          {nextEp.thumbnail_url && <Image source={{ uri: nextEp.thumbnail_url }} style={styles.nextThumb} />}
           <View style={styles.nextInfo}>
             <Text style={styles.nextLabel}>PRÓXIMO EPISÓDIO</Text>
-            <Text style={styles.nextTitle} numberOfLines={1}>
-              {nextEp.title || `Episódio ${nextEp.episode_number}`}
-            </Text>
-            {nextCountdown !== null && (
-              <Text style={styles.nextCountdown}>Começa em {nextCountdown}s</Text>
-            )}
+            <Text style={styles.nextTitle} numberOfLines={1}>{nextEp.title || `Episódio ${nextEp.episode_number}`}</Text>
+            {nextCountdown !== null && <Text style={styles.nextCountdown}>Começa em {nextCountdown}s</Text>}
           </View>
           <View style={styles.nextBtns}>
             <TouchableOpacity style={styles.nextPlayBtn} onPress={goNextEp}>
               <Ionicons name="play" size={15} color="#000" />
             </TouchableOpacity>
             {nextCountdown !== null && (
-              <TouchableOpacity
-                style={styles.nextCancelBtn}
-                onPress={() => { setNextCountdown(null); clearTimeout(nextCountRef.current); }}
-              >
+              <TouchableOpacity style={styles.nextCancelBtn} onPress={() => { setNextCountdown(null); clearTimeout(nextCountRef.current); }}>
                 <Ionicons name="close" size={13} color="#fff" />
               </TouchableOpacity>
             )}
@@ -522,20 +485,16 @@ export default function PlayerScreen() {
         <TouchableOpacity style={styles.sheetBg} onPress={() => setSheet(null)} activeOpacity={1}>
           <TouchableOpacity activeOpacity={1} style={styles.sheet}>
 
-            {/* VELOCIDADE */}
             {sheet === 'speed' && <>
               <Text style={styles.sheetTitle}>Velocidade de reprodução</Text>
               {SPEEDS.map(s => (
                 <TouchableOpacity key={s} style={styles.sheetRow} onPress={() => { setSpeed(s); setSheet(null); schedHide(); }}>
-                  <Text style={[styles.sheetRowText, s === speed && styles.sheetRowActive]}>
-                    {s === 1 ? 'Normal (1x)' : `${s}x`}
-                  </Text>
+                  <Text style={[styles.sheetRowText, s === speed && styles.sheetRowActive]}>{s === 1 ? 'Normal (1x)' : `${s}x`}</Text>
                   {s === speed && <Ionicons name="checkmark" size={20} color="#E50914" />}
                 </TouchableOpacity>
               ))}
             </>}
 
-            {/* IDIOMA E LEGENDAS */}
             {sheet === 'subtitles' && <>
               <Text style={styles.sheetTitle}>Idioma e legendas</Text>
               {availVer.length > 0 && <>
@@ -555,9 +514,7 @@ export default function PlayerScreen() {
                 </TouchableOpacity>
                 {availSubs.map(([lang]) => (
                   <TouchableOpacity key={lang} style={styles.sheetRow} onPress={() => { setActiveSub(lang); setSheet(null); }}>
-                    <Text style={[styles.sheetRowText, activeSub === lang && styles.sheetRowActive]}>
-                      {SUB_LABELS[lang] || lang}
-                    </Text>
+                    <Text style={[styles.sheetRowText, activeSub === lang && styles.sheetRowActive]}>{SUB_LABELS[lang] || lang}</Text>
                     {activeSub === lang && <Ionicons name="checkmark" size={20} color="#E50914" />}
                   </TouchableOpacity>
                 ))}
@@ -567,14 +524,11 @@ export default function PlayerScreen() {
               )}
             </>}
 
-            {/* TEMPORIZADOR */}
             {sheet === 'timer' && <>
               <Text style={styles.sheetTitle}>Temporizador de sono</Text>
               {timerRemaining != null && (
                 <TouchableOpacity style={styles.sheetRow} onPress={cancelTimer}>
-                  <Text style={[styles.sheetRowText, { color: '#E50914' }]}>
-                    Cancelar ({fmtMin(timerRemaining)} restantes)
-                  </Text>
+                  <Text style={[styles.sheetRowText, { color: '#E50914' }]}>Cancelar ({fmtMs(timerRemaining)} restantes)</Text>
                 </TouchableOpacity>
               )}
               {TIMER_OPTS.map(opt => (
@@ -584,7 +538,6 @@ export default function PlayerScreen() {
               ))}
             </>}
 
-            {/* EPISÓDIOS */}
             {sheet === 'episodes' && <>
               <Text style={styles.sheetTitle}>Episódios</Text>
               {sortedEps.length === 0
@@ -608,8 +561,7 @@ export default function PlayerScreen() {
                               params: {
                                 url: epUrl, id: ep.id, type: 'episode',
                                 title: ep.title || `Episódio ${ep.episode_number}`,
-                                seriesId: seriesId || undefined,
-                                currentVersion: activeVer,
+                                seriesId: seriesId || undefined, currentVersion: activeVer,
                                 versions: JSON.stringify({ dubbing: ep.file_dubbing || null, subtitled: ep.file_subtitled || null, cinema: ep.file_cinema || null }),
                                 subtitles: JSON.stringify({ pt: ep.subtitle_pt || null, en: ep.subtitle_en || null, es: ep.subtitle_es || null }),
                                 introEnd: ep.intro_end ? String(ep.intro_end) : undefined,
@@ -638,38 +590,29 @@ export default function PlayerScreen() {
 const styles = StyleSheet.create({
   buffering: { ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center' },
 
-  // TOP
   topBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingBottom: 8 },
   iconPad: { padding: 10 },
-  titleText: {
-    flex: 1, color: '#fff', fontSize: 16, fontWeight: '700',
-    textAlign: 'center', paddingHorizontal: 6,
-  },
+  titleText: { flex: 1, color: '#fff', fontSize: 16, fontWeight: '700', textAlign: 'center', paddingHorizontal: 6 },
   timerBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 7 },
   timerBtnText: { color: '#fff', fontSize: 13 },
 
-  // MIDDLE
   middleRow: { flex: 1, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12 },
 
-  // BRIGHTNESS
   brightnessCol: { width: 44, alignItems: 'center', gap: 12, paddingVertical: 20 },
   sliderWrap: { width: 4, height: SLIDER_H, position: 'relative', overflow: 'visible' },
   sliderBg: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: 2 },
   sliderFill: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#fff', borderRadius: 2 },
   sliderHandle: {
-    position: 'absolute', left: -7,
-    width: 18, height: 18, borderRadius: 9, backgroundColor: '#fff',
+    position: 'absolute', left: -7, width: 18, height: 18, borderRadius: 9, backgroundColor: '#fff',
     shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 4, elevation: 4,
   },
 
-  // CENTER
   centerRow: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 44 },
   seekBtn: { padding: 10 },
   seekWrap: { width: 52, height: 52, justifyContent: 'center', alignItems: 'center' },
   seekNum: { position: 'absolute', color: '#fff', fontSize: 12, fontWeight: '800' },
   playPauseBtn: { padding: 10 },
 
-  // SKIP INTRO
   skipIntroBtn: {
     position: 'absolute', right: 20, bottom: 90,
     flexDirection: 'row', alignItems: 'center', gap: 8,
@@ -679,7 +622,6 @@ const styles = StyleSheet.create({
   },
   skipIntroText: { color: '#fff', fontSize: 14, fontWeight: '600' },
 
-  // BOTTOM
   bottomArea: { paddingHorizontal: 16, paddingTop: 4 },
   progressOuter: { height: 38, justifyContent: 'center', position: 'relative' },
   progressTrack: {
@@ -690,23 +632,20 @@ const styles = StyleSheet.create({
   progressDot: {
     position: 'absolute', top: '50%', marginTop: -9, marginLeft: -9,
     width: 18, height: 18, borderRadius: 9, backgroundColor: '#E50914',
-    elevation: 4, shadowColor: '#E50914', shadowOpacity: 0.6, shadowRadius: 6,
+    elevation: 4, shadowColor: '#E50914', shadowOpacity: 0.5, shadowRadius: 6,
   },
   timeRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 2, marginBottom: 6 },
   timeText: { color: 'rgba(255,255,255,0.6)', fontSize: 11 },
 
-  // ACTION BAR
   actionBar: { flexDirection: 'row', alignItems: 'center', paddingVertical: 4 },
   actionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 8 },
   actionBtnText: { color: '#fff', fontSize: 11, fontWeight: '500' },
   actionDiv: { width: 1, height: 16, backgroundColor: 'rgba(255,255,255,0.15)' },
 
-  // LOCK
   lockScreen: { ...StyleSheet.absoluteFillObject, justifyContent: 'flex-end', alignItems: 'flex-start', paddingBottom: 28, paddingLeft: 20 },
   unlockPill: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(0,0,0,0.75)', paddingHorizontal: 18, paddingVertical: 10, borderRadius: 24 },
   unlockText: { color: '#fff', fontSize: 13 },
 
-  // NEXT CARD
   nextCard: {
     position: 'absolute', right: 16,
     flexDirection: 'row', alignItems: 'center',
@@ -723,7 +662,6 @@ const styles = StyleSheet.create({
   nextPlayBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#fff', justifyContent: 'center', alignItems: 'center' },
   nextCancelBtn: { width: 24, height: 24, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.15)', justifyContent: 'center', alignItems: 'center' },
 
-  // SHEETS
   sheetBg: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
   sheet: { backgroundColor: '#141414', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingTop: 8, paddingBottom: 40, maxHeight: '72%' },
   sheetTitle: {

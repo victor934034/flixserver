@@ -4,12 +4,11 @@ import {
   Alert, AppState, Platform,
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as KeepAwake from 'expo-keep-awake';
 
 // expo-file-system v18 + SDK 54: FileSystemUploadType pode não estar no namespace padrão
-// BINARY_CONTENT = 0, MULTIPART = 1 — fallback garante valor correto no SDK 54
-const BINARY_CONTENT = FileSystem.FileSystemUploadType?.BINARY_CONTENT ?? 0;
+const BINARY_CONTENT = FileSystem.FileSystemUploadType.BINARY_CONTENT;
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
