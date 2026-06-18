@@ -55,10 +55,36 @@ export default function SerieDetail() {
     .filter(e => e.season_number === season)
     .sort((a, b) => a.episode_number - b.episode_number);
 
+  const buildEpParam = (ep) => ({
+    id: ep.id,
+    title: ep.title || `Episódio ${ep.episode_number}`,
+    episode_number: ep.episode_number,
+    season_number: ep.season_number,
+    thumbnail_url: ep.thumbnail_url || null,
+    file_dubbing: ep.file_dubbing || null,
+    file_subtitled: ep.file_subtitled || null,
+    file_cinema: ep.file_cinema || null,
+    subtitle_pt: ep.subtitle_pt || null,
+    subtitle_en: ep.subtitle_en || null,
+    subtitle_es: ep.subtitle_es || null,
+    intro_end: ep.intro_end || null,
+  });
+
   const playEp = (ep, preferredVersion) => {
     const version = preferredVersion || (ep.file_dubbing ? 'dubbing' : ep.file_subtitled ? 'subtitled' : 'cinema');
     const url = ep.file_dubbing || ep.file_subtitled || ep.file_cinema;
     if (!url) return;
+
+    // Encontra próximo episódio (dentro da temporada ativa, depois tenta próxima temporada)
+    const allSorted = [...episodes].sort((a, b) =>
+      a.season_number !== b.season_number
+        ? a.season_number - b.season_number
+        : a.episode_number - b.episode_number
+    );
+    const idx = allSorted.findIndex(e => e.id === ep.id);
+    const rawNext = idx >= 0 && idx + 1 < allSorted.length ? allSorted[idx + 1] : null;
+    const nextEp = rawNext && (rawNext.file_dubbing || rawNext.file_subtitled || rawNext.file_cinema) ? rawNext : null;
+
     router.push({
       pathname: '/player',
       params: {
@@ -77,6 +103,8 @@ export default function SerieDetail() {
           en: ep.subtitle_en || null,
           es: ep.subtitle_es || null,
         }),
+        ...(nextEp ? { nextEpisode: JSON.stringify(buildEpParam(nextEp)) } : {}),
+        ...(ep.intro_end ? { introEnd: String(ep.intro_end) } : {}),
       },
     });
   };
