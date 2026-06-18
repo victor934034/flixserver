@@ -147,9 +147,11 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS movies_updated_at ON movies;
 CREATE TRIGGER movies_updated_at BEFORE UPDATE ON movies
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+DROP TRIGGER IF EXISTS series_updated_at ON series;
 CREATE TRIGGER series_updated_at BEFORE UPDATE ON series
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
@@ -171,11 +173,34 @@ ALTER TABLE watch_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE watchlist ENABLE ROW LEVEL SECURITY;
 ALTER TABLE categories ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "movies_public_read" ON movies FOR SELECT USING (is_active = true);
-CREATE POLICY "series_public_read" ON series FOR SELECT USING (is_active = true);
-CREATE POLICY "episodes_public_read" ON episodes FOR SELECT USING (is_active = true);
-CREATE POLICY "categories_public_read" ON categories FOR SELECT USING (is_active = true);
-CREATE POLICY "users_self_read" ON users FOR SELECT USING (auth.uid() = id);
-CREATE POLICY "users_self_update" ON users FOR UPDATE USING (auth.uid() = id);
-CREATE POLICY "history_self" ON watch_history USING (auth.uid() = user_id);
-CREATE POLICY "watchlist_self" ON watchlist USING (auth.uid() = user_id);
+DO $$ BEGIN
+  CREATE POLICY "movies_public_read" ON movies FOR SELECT USING (is_active = true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE POLICY "series_public_read" ON series FOR SELECT USING (is_active = true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE POLICY "episodes_public_read" ON episodes FOR SELECT USING (is_active = true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE POLICY "categories_public_read" ON categories FOR SELECT USING (is_active = true);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE POLICY "users_self_read" ON users FOR SELECT USING (auth.uid() = id);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE POLICY "users_self_update" ON users FOR UPDATE USING (auth.uid() = id);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE POLICY "history_self" ON watch_history USING (auth.uid() = user_id);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  CREATE POLICY "watchlist_self" ON watchlist USING (auth.uid() = user_id);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;

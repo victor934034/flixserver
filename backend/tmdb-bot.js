@@ -131,7 +131,6 @@ async function saveMovie(details, fileUrl, version) {
     poster_url: details.poster_path ? `${TMDB_IMG}${details.poster_path}` : null,
     backdrop_url: details.backdrop_path ? `${TMDB_BACKDROP}${details.backdrop_path}` : null,
     trailer_url: trailer ? `https://www.youtube.com/watch?v=${trailer.key}` : null,
-    category: 'movie',
   };
 
   if (fileUrl) movieData[`file_${version}`] = fileUrl;
@@ -234,13 +233,13 @@ async function processFiles(fileList) {
 
       if (type === 'movie') {
         const saved = await saveMovie(details, fileUrl, version);
-        report.success.push({ filename, type: 'movie', title: saved.title });
+        report.success.push({ filename, fileUrl, type: 'movie', title: saved.title });
       } else {
         const seriesRecord = await saveSeries(details);
         if (season && episode) {
           await saveEpisode(seriesRecord.id, details.id, season, episode, fileUrl, version);
         }
-        report.success.push({ filename, type: 'series', title: details.name, season, episode });
+        report.success.push({ filename, fileUrl, type: 'series', title: details.name, season, episode });
       }
 
       await new Promise(r => setTimeout(r, 260)); // respeita rate limit TMDB

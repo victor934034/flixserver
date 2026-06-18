@@ -54,7 +54,6 @@ function buildMovieData(details) {
     poster_url: details.poster_path ? `${TMDB_IMG}${details.poster_path}` : null,
     backdrop_url: details.backdrop_path ? `${TMDB_BACKDROP}${details.backdrop_path}` : null,
     trailer_url: trailer ? `https://www.youtube.com/watch?v=${trailer.key}` : null,
-    category: 'movie',
   };
 }
 

@@ -48,6 +48,9 @@ router.get('/scan-bucket', async (req, res) => {
       supabase.from('episodes').select('file_dubbing, file_subtitled, file_cinema').not('id', 'is', null),
     ]);
 
+    if (moviesRes.error) console.warn('[scan-bucket] movies query error:', moviesRes.error.message);
+    if (episodesRes.error) console.warn('[scan-bucket] episodes query error:', episodesRes.error.message);
+
     const registeredUrls = new Set();
     for (const m of moviesRes.data || []) {
       [m.file_dubbing, m.file_subtitled, m.file_cinema, m.file_4k]
