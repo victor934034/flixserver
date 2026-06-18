@@ -103,6 +103,7 @@ export default function SerieDetail() {
           en: ep.subtitle_en || null,
           es: ep.subtitle_es || null,
         }),
+        seriesId: id,
         ...(nextEp ? { nextEpisode: JSON.stringify(buildEpParam(nextEp)) } : {}),
         ...(ep.intro_end ? { introEnd: String(ep.intro_end) } : {}),
       },

@@ -6,6 +6,10 @@ import {
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import * as KeepAwake from 'expo-keep-awake';
+
+// expo-file-system v18 + SDK 54: FileSystemUploadType pode não estar no namespace padrão
+// BINARY_CONTENT = 0, MULTIPART = 1 — fallback garante valor correto no SDK 54
+const BINARY_CONTENT = FileSystem.FileSystemUploadType?.BINARY_CONTENT ?? 0;
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -87,7 +91,7 @@ export default function AdminUploadScreen() {
         target.uri,
         {
           httpMethod: 'POST',
-          uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+          uploadType: BINARY_CONTENT,
           headers: {
             Authorization: presign.authorizationToken,
             'X-Bz-File-Name': encodedName,
