@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, Image, TouchableOpacity,
-  ActivityIndicator, useWindowDimensions,
+  ActivityIndicator, useWindowDimensions, Alert,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import api from '../../lib/api';
+import { useDownloads } from '../../contexts/DownloadContext';
+import { useParental } from '../../contexts/ParentalContext';
 
 async function checkInList(contentId) {
   try {
@@ -25,6 +27,8 @@ export default function FilmeDetail() {
   const [loading, setLoading] = useState(true);
   const [listItem, setListItem] = useState(null);
   const [listLoading, setListLoading] = useState(false);
+  const { getStatus, startDownload, cancelDownload, deleteDownload } = useDownloads();
+  const { checkAccess } = useParental();
 
   useEffect(() => {
     api.get(`/movies/${id}`)
@@ -48,27 +52,37 @@ export default function FilmeDetail() {
     setListLoading(false);
   };
 
-  const play = (version) => {
+  const play = async (version) => {
     const urls = {
       dubbing: movie.file_dubbing,
       subtitled: movie.file_subtitled,
       cinema: movie.file_cinema,
       '4k': movie.file_4k,
     };
-    if (!urls[version]) return;
+    const remoteUrl = urls[version];
+    if (!remoteUrl) return;
+
+    // Check parental controls
+    const allowed = await checkAccess(movie);
+    if (!allowed) return;
+
+    // If downloaded, use local file
+    const dlStatus = getStatus(movie.id, version);
+    const playUrl = dlStatus.state === 'done' ? dlStatus.filePath : remoteUrl;
+
     router.push({
       pathname: '/player',
       params: {
-        url: urls[version],
+        url: playUrl,
         title: movie.title,
         id: movie.id,
         type: 'movie',
         currentVersion: version,
         versions: JSON.stringify({
-          dubbing: movie.file_dubbing || null,
-          subtitled: movie.file_subtitled || null,
-          cinema: movie.file_cinema || null,
-          '4k': movie.file_4k || null,
+          dubbing: dlStatus.state === 'done' && version === 'dubbing' ? dlStatus.filePath : (movie.file_dubbing || null),
+          subtitled: dlStatus.state === 'done' && version === 'subtitled' ? dlStatus.filePath : (movie.file_subtitled || null),
+          cinema: dlStatus.state === 'done' && version === 'cinema' ? dlStatus.filePath : (movie.file_cinema || null),
+          '4k': dlStatus.state === 'done' && version === '4k' ? dlStatus.filePath : (movie.file_4k || null),
         }),
         subtitles: JSON.stringify({
           pt: movie.subtitle_pt || null,
@@ -77,6 +91,32 @@ export default function FilmeDetail() {
         }),
       },
     });
+  };
+
+  const handleDownload = (version, url) => {
+    const st = getStatus(movie.id, version);
+    if (st.state === 'done') {
+      Alert.alert(
+        'Baixado',
+        'Já salvo no dispositivo. Deseja excluir?',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Excluir', style: 'destructive', onPress: () => deleteDownload(movie.id, version) },
+        ]
+      );
+    } else if (st.state === 'downloading') {
+      Alert.alert('Cancelar download?', '', [
+        { text: 'Não', style: 'cancel' },
+        { text: 'Cancelar', style: 'destructive', onPress: () => cancelDownload(movie.id, version) },
+      ]);
+    } else {
+      startDownload(movie.id, version, url, {
+        title: movie.title,
+        type: 'movie',
+        posterUrl: movie.poster_url || movie.backdrop_url,
+      });
+      Alert.alert('Download iniciado', `"${movie.title}" está sendo baixado para assistir offline.`);
+    }
   };
 
   const getFirstVersion = () => {
@@ -176,31 +216,40 @@ export default function FilmeDetail() {
         {hasAny && (
           <View style={styles.versions}>
             <Text style={styles.versionsLabel}>Versões disponíveis</Text>
-            <View style={styles.versionBtns}>
-              {movie.file_dubbing && (
-                <TouchableOpacity style={styles.versionBtn} onPress={() => play('dubbing')}>
-                  <Ionicons name="musical-notes" size={14} color="#fff" />
-                  <Text style={styles.versionBtnText}>Dublado</Text>
-                </TouchableOpacity>
-              )}
-              {movie.file_subtitled && (
-                <TouchableOpacity style={styles.versionBtn} onPress={() => play('subtitled')}>
-                  <Ionicons name="text" size={14} color="#fff" />
-                  <Text style={styles.versionBtnText}>Legendado</Text>
-                </TouchableOpacity>
-              )}
-              {movie.file_cinema && (
-                <TouchableOpacity style={styles.versionBtn} onPress={() => play('cinema')}>
-                  <Ionicons name="film-outline" size={14} color="#fff" />
-                  <Text style={styles.versionBtnText}>Cinema</Text>
-                </TouchableOpacity>
-              )}
-              {movie.file_4k && (
-                <TouchableOpacity style={styles.versionBtn} onPress={() => play('4k')}>
-                  <Text style={styles.versionBtnText}>4K</Text>
-                </TouchableOpacity>
-              )}
-            </View>
+            {[
+              { key: 'dubbing',   url: movie.file_dubbing,   icon: 'musical-notes',  label: 'Dublado' },
+              { key: 'subtitled', url: movie.file_subtitled, icon: 'text',           label: 'Legendado' },
+              { key: 'cinema',    url: movie.file_cinema,    icon: 'film-outline',   label: 'Original' },
+              { key: '4k',        url: movie.file_4k,        icon: 'sparkles-outline', label: '4K' },
+            ].filter(v => v.url).map(v => {
+              const st = getStatus(movie.id, v.key);
+              return (
+                <View key={v.key} style={styles.versionRow}>
+                  <TouchableOpacity style={styles.versionBtn} onPress={() => play(v.key)}>
+                    <Ionicons name={v.icon} size={14} color="#fff" />
+                    <Text style={styles.versionBtnText}>{v.label}</Text>
+                    {st.state === 'done' && (
+                      <Ionicons name="checkmark-circle" size={14} color="#4CAF50" />
+                    )}
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.dlBtn}
+                    onPress={() => handleDownload(v.key, v.url)}
+                  >
+                    {st.state === 'downloading' ? (
+                      <View style={styles.dlProgress}>
+                        <ActivityIndicator size="small" color="#E50914" />
+                        <Text style={styles.dlPct}>{Math.round((st.progress || 0) * 100)}%</Text>
+                      </View>
+                    ) : st.state === 'done' ? (
+                      <Ionicons name="trash-outline" size={16} color="#E50914" />
+                    ) : (
+                      <Ionicons name="download-outline" size={16} color="#aaa" />
+                    )}
+                  </TouchableOpacity>
+                </View>
+              );
+            })}
           </View>
         )}
       </View>
@@ -246,11 +295,18 @@ const styles = StyleSheet.create({
   synopsis: { color: '#ccc', fontSize: 14, lineHeight: 22, marginBottom: 24 },
   versions: { marginTop: 8 },
   versionsLabel: { color: '#666', fontSize: 12, fontWeight: '600', letterSpacing: 0.8, marginBottom: 10, textTransform: 'uppercase' },
-  versionBtns: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  versionRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10, gap: 8 },
   versionBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: '#1f1f1f', paddingHorizontal: 16, paddingVertical: 10,
+    flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: '#1f1f1f', paddingHorizontal: 16, paddingVertical: 12,
     borderRadius: 8, borderWidth: 1, borderColor: '#2a2a2a',
   },
-  versionBtnText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  versionBtnText: { color: '#fff', fontSize: 13, fontWeight: '600', flex: 1 },
+  dlBtn: {
+    width: 44, height: 44, borderRadius: 8,
+    backgroundColor: '#1a1a1a', justifyContent: 'center', alignItems: 'center',
+    borderWidth: 1, borderColor: '#2a2a2a',
+  },
+  dlProgress: { alignItems: 'center', gap: 2 },
+  dlPct: { color: '#E50914', fontSize: 9, fontWeight: '700' },
 });

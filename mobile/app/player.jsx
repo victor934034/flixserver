@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, PanResponder,
   ActivityIndicator, StatusBar, useWindowDimensions,
-  Animated, FlatList, Image,
+  Animated, FlatList, Image, Share, Platform, Linking,
 } from 'react-native';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { useEvent } from 'expo';
@@ -312,6 +312,8 @@ export default function PlayerScreen() {
         contentFit="contain"
         nativeControls={false}
         allowsFullscreen={false}
+        allowsExternalPlayback={true}
+        requiresLinearPlayback={false}
       />
 
       {/* Buffering */}
@@ -436,6 +438,11 @@ export default function PlayerScreen() {
                 <Ionicons name="text-outline" size={15} color="#fff" />
                 <Text style={styles.actionBtnText}>Idioma e legendas</Text>
               </TouchableOpacity>
+              <View style={styles.actionDiv} />
+              <TouchableOpacity style={styles.actionBtn} onPress={() => openSheet('cast')}>
+                <Ionicons name="tv-outline" size={15} color="#fff" />
+                <Text style={styles.actionBtnText}>Transmitir</Text>
+              </TouchableOpacity>
               {nextEp && <>
                 <View style={styles.actionDiv} />
                 <TouchableOpacity style={styles.actionBtn} onPress={goNextEp}>
@@ -537,6 +544,78 @@ export default function PlayerScreen() {
                 </TouchableOpacity>
               ))}
             </>}
+
+            {sheet === 'cast' && (() => {
+              const videoUrl = versions[activeVer];
+              const isLocal = videoUrl?.startsWith('file://');
+              return <>
+                <Text style={styles.sheetTitle}>Transmitir para TV</Text>
+
+                {Platform.OS === 'ios' && (
+                  <View style={styles.castOption}>
+                    <View style={styles.castIconBox}>
+                      <Ionicons name="radio-outline" size={24} color="#fff" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.castOptionTitle}>AirPlay</Text>
+                      <Text style={styles.castOptionDesc}>
+                        Abra a Central de Controle e toque em{' '}
+                        <Text style={{ color: '#fff' }}>Espelhar tela</Text>{' '}
+                        ou selecione AirPlay no menu de reprodução.
+                      </Text>
+                    </View>
+                  </View>
+                )}
+
+                <View style={styles.castOption}>
+                  <View style={styles.castIconBox}>
+                    <Ionicons name="phone-portrait-outline" size={24} color="#fff" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.castOptionTitle}>Espelhar tela</Text>
+                    <Text style={styles.castOptionDesc}>
+                      {Platform.OS === 'android'
+                        ? 'Use a barra de notificações → "Compartilhar tela" ou "Smart View / Transmitir" para espelhar no dispositivo.'
+                        : 'No iOS use a Central de Controle → "Espelhar tela".'}
+                    </Text>
+                  </View>
+                </View>
+
+                {!isLocal && (
+                  <View style={styles.castOption}>
+                    <View style={styles.castIconBox}>
+                      <Ionicons name="logo-youtube" size={24} color="#fff" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.castOptionTitle}>Abrir no VLC / Navegador da TV</Text>
+                      <Text style={styles.castOptionDesc}>
+                        Compartilhe o link abaixo e abra no VLC, Kodi ou navegador da sua smart TV.
+                        Compatível com todos os formatos de áudio (incluindo AAC).
+                      </Text>
+                    </View>
+                  </View>
+                )}
+
+                {!isLocal && (
+                  <TouchableOpacity
+                    style={styles.shareUrlBtn}
+                    onPress={() => Share.share({ message: videoUrl, title: title })}
+                  >
+                    <Ionicons name="share-outline" size={18} color="#fff" />
+                    <Text style={styles.shareUrlText} numberOfLines={1}>
+                      Compartilhar link do vídeo
+                    </Text>
+                  </TouchableOpacity>
+                )}
+
+                <View style={styles.castNote}>
+                  <Ionicons name="information-circle-outline" size={14} color="#555" />
+                  <Text style={styles.castNoteText}>
+                    Chromecast não está disponível pois alguns filmes usam áudio AAC, que é incompatível com o Cast do Google.
+                  </Text>
+                </View>
+              </>;
+            })()}
 
             {sheet === 'episodes' && <>
               <Text style={styles.sheetTitle}>Episódios</Text>
@@ -661,6 +740,15 @@ const styles = StyleSheet.create({
   nextBtns: { flexDirection: 'column', paddingRight: 10, gap: 6 },
   nextPlayBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#fff', justifyContent: 'center', alignItems: 'center' },
   nextCancelBtn: { width: 24, height: 24, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.15)', justifyContent: 'center', alignItems: 'center' },
+
+  castOption: { flexDirection: 'row', alignItems: 'flex-start', gap: 14, paddingHorizontal: 20, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)' },
+  castIconBox: { width: 40, height: 40, borderRadius: 10, backgroundColor: '#1f1f1f', justifyContent: 'center', alignItems: 'center', marginTop: 2, flexShrink: 0 },
+  castOptionTitle: { color: '#fff', fontSize: 15, fontWeight: '600', marginBottom: 4 },
+  castOptionDesc: { color: '#777', fontSize: 12, lineHeight: 18 },
+  shareUrlBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 20, marginTop: 16, backgroundColor: '#1f1f1f', borderRadius: 10, paddingVertical: 13, paddingHorizontal: 16 },
+  shareUrlText: { color: '#ccc', fontSize: 14, flex: 1 },
+  castNote: { flexDirection: 'row', gap: 8, marginHorizontal: 20, marginTop: 16, alignItems: 'flex-start' },
+  castNoteText: { color: '#555', fontSize: 11, lineHeight: 16, flex: 1 },
 
   sheetBg: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
   sheet: { backgroundColor: '#141414', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingTop: 8, paddingBottom: 40, maxHeight: '72%' },

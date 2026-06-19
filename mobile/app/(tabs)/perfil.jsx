@@ -3,11 +3,18 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../contexts/AuthContext';
+import { useDownloads, fmtBytes } from '../../contexts/DownloadContext';
+import { useParental } from '../../contexts/ParentalContext';
 
 export default function PerfilScreen() {
   const insets = useSafeAreaInsets();
   const { user, logout } = useAuth();
   const router = useRouter();
+  const { downloads, active, totalBytes } = useDownloads();
+  const { config: parentalConfig } = useParental();
+
+  const activeCount = Object.keys(active).length;
+  const dlCount = downloads.length + activeCount;
 
   const handleLogout = () =>
     Alert.alert('Sair', 'Deseja encerrar sua sessão?', [
@@ -69,8 +76,8 @@ export default function PerfilScreen() {
           <MenuItem
             icon="download-outline"
             label="Downloads"
-            desc="Em breve"
-            disabled
+            desc={dlCount > 0 ? `${dlCount} arquivo${dlCount !== 1 ? 's' : ''} · ${fmtBytes(totalBytes)}` : 'Filmes e episódios offline'}
+            onPress={() => router.push('/(tabs)/downloads')}
           />
         </View>
       </View>
@@ -87,7 +94,8 @@ export default function PerfilScreen() {
           <MenuItem
             icon="shield-checkmark-outline"
             label="Controle Parental"
-            onPress={() => Alert.alert('Controle Parental', 'Em breve disponível!')}
+            desc={parentalConfig.enabled ? `Ativo · máx ${parentalConfig.maxRating}+` : 'Desativado'}
+            onPress={() => router.push('/parental-controls')}
           />
         </View>
       </View>

@@ -1,6 +1,6 @@
 const router = require('express').Router();
 const { supabase } = require('../services/supabase');
-const { searchTMDB, getDetails, buildMovieData, buildSeriesData } = require('../services/tmdb');
+const { searchTMDB, getDetails, buildMovieData, buildSeriesData, extractAgeRating } = require('../services/tmdb');
 const { adminMiddleware } = require('../middleware/admin');
 
 router.use(adminMiddleware);
@@ -66,6 +66,8 @@ router.get('/search', async (req, res) => {
     if (!result) return res.json(null);
 
     const details = await getDetails(result.id, type);
+    // Adiciona age_rating extraído para uso no admin
+    details.age_rating = extractAgeRating(details, type);
     res.json(details);
   } catch (err) {
     res.status(500).json({ error: err.message });

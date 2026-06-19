@@ -4,6 +4,8 @@ import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
+import { DownloadProvider } from '../contexts/DownloadContext';
+import { ParentalProvider } from '../contexts/ParentalContext';
 
 function AuthGuard() {
   const { token, loading } = useAuth();
@@ -26,16 +28,21 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <AuthProvider>
-          <AuthGuard />
-          <StatusBar style="light" />
-          <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#0a0a0a' } }}>
-            <Stack.Screen name="(auth)" />
-            <Stack.Screen name="(tabs)" />
-            <Stack.Screen name="filme/[id]" />
-            <Stack.Screen name="serie/[id]" />
-            <Stack.Screen name="historico" />
-            <Stack.Screen name="player" options={{ animation: 'fade', gestureEnabled: false }} />
-          </Stack>
+          <DownloadProvider>
+            <ParentalProvider>
+              <AuthGuard />
+              <StatusBar style="light" />
+              <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#0a0a0a' } }}>
+                <Stack.Screen name="(auth)" />
+                <Stack.Screen name="(tabs)" />
+                <Stack.Screen name="filme/[id]" />
+                <Stack.Screen name="serie/[id]" />
+                <Stack.Screen name="historico" />
+                <Stack.Screen name="parental-controls" />
+                <Stack.Screen name="player" options={{ animation: 'fade', gestureEnabled: false }} />
+              </Stack>
+            </ParentalProvider>
+          </DownloadProvider>
         </AuthProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

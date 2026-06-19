@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, Image, TouchableOpacity,
-  ActivityIndicator, useWindowDimensions,
+  ActivityIndicator, useWindowDimensions, Alert,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import api from '../../lib/api';
+import { useDownloads } from '../../contexts/DownloadContext';
+import { useParental } from '../../contexts/ParentalContext';
 
 export default function SerieDetail() {
   const { id } = useLocalSearchParams();
@@ -20,6 +22,8 @@ export default function SerieDetail() {
   const [loading, setLoading] = useState(true);
   const [listItem, setListItem] = useState(null);
   const [listLoading, setListLoading] = useState(false);
+  const { getStatus, startDownload, cancelDownload, deleteDownload } = useDownloads();
+  const { checkAccess } = useParental();
 
   useEffect(() => {
     Promise.all([
@@ -70,10 +74,47 @@ export default function SerieDetail() {
     intro_end: ep.intro_end || null,
   });
 
-  const playEp = (ep, preferredVersion) => {
-    const version = preferredVersion || (ep.file_dubbing ? 'dubbing' : ep.file_subtitled ? 'subtitled' : 'cinema');
+  const handleEpDownload = (ep) => {
+    const version = ep.file_dubbing ? 'dubbing' : ep.file_subtitled ? 'subtitled' : 'cinema';
     const url = ep.file_dubbing || ep.file_subtitled || ep.file_cinema;
     if (!url) return;
+    const st = getStatus(ep.id, version);
+    const label = `T${ep.season_number}E${String(ep.episode_number).padStart(2, '0')}`;
+    if (st.state === 'done') {
+      Alert.alert('Baixado', `"${ep.title || label}" já está salvo. Excluir?`, [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Excluir', style: 'destructive', onPress: () => deleteDownload(ep.id, version) },
+      ]);
+    } else if (st.state === 'downloading') {
+      Alert.alert('Cancelar download?', label, [
+        { text: 'Não', style: 'cancel' },
+        { text: 'Cancelar', style: 'destructive', onPress: () => cancelDownload(ep.id, version) },
+      ]);
+    } else {
+      startDownload(ep.id, version, url, {
+        title: serie.title,
+        type: 'episode',
+        episodeLabel: label + (ep.title ? ` · ${ep.title}` : ''),
+        thumbnailUrl: ep.thumbnail_url,
+        posterUrl: serie.poster_url || serie.backdrop_url,
+        seriesId: id,
+      });
+      Alert.alert('Download iniciado', `${label} sendo baixado para assistir offline.`);
+    }
+  };
+
+  const playEp = async (ep, preferredVersion) => {
+    const version = preferredVersion || (ep.file_dubbing ? 'dubbing' : ep.file_subtitled ? 'subtitled' : 'cinema');
+    const remoteUrl = ep.file_dubbing || ep.file_subtitled || ep.file_cinema;
+    if (!remoteUrl) return;
+
+    // Parental check using series age rating
+    const allowed = await checkAccess(serie);
+    if (!allowed) return;
+
+    // Use downloaded file if available
+    const dlStatus = getStatus(ep.id, version);
+    const url = dlStatus.state === 'done' ? dlStatus.filePath : remoteUrl;
 
     // Encontra próximo episódio (dentro da temporada ativa, depois tenta próxima temporada)
     const allSorted = [...episodes].sort((a, b) =>
@@ -191,43 +232,69 @@ export default function SerieDetail() {
 
         {currentEps.map(ep => {
           const hasFile = ep.file_dubbing || ep.file_subtitled || ep.file_cinema;
+          const epVersion = ep.file_dubbing ? 'dubbing' : ep.file_subtitled ? 'subtitled' : 'cinema';
+          const dlSt = hasFile ? getStatus(ep.id, epVersion) : { state: 'none', progress: 0 };
           return (
-            <TouchableOpacity
-              key={ep.id}
-              style={[styles.episode, !hasFile && styles.episodeDisabled]}
-              onPress={() => playEp(ep)}
-              disabled={!hasFile}
-              activeOpacity={0.7}
-            >
-              <View style={styles.epThumb}>
-                {ep.thumbnail_url ? (
-                  <Image source={{ uri: ep.thumbnail_url }} style={styles.epThumbImg} />
-                ) : (
-                  <View style={styles.epThumbPlaceholder}>
-                    <Text style={styles.epNumText}>{ep.episode_number}</Text>
-                  </View>
-                )}
-                {hasFile && (
-                  <View style={styles.epPlayOverlay}>
-                    <Ionicons name="play-circle" size={28} color="#fff" />
-                  </View>
-                )}
-              </View>
-              <View style={styles.epInfo}>
-                <Text style={styles.epNum}>
-                  T{ep.season_number}E{String(ep.episode_number).padStart(2, '0')}
-                </Text>
-                <Text style={styles.epTitle} numberOfLines={1}>
-                  {ep.title || `Episódio ${ep.episode_number}`}
-                </Text>
-                {ep.synopsis && (
-                  <Text style={styles.epSynopsis} numberOfLines={2}>{ep.synopsis}</Text>
-                )}
-                {ep.duration && (
-                  <Text style={styles.epDuration}>{Math.floor(ep.duration / 60)}min</Text>
-                )}
-              </View>
-            </TouchableOpacity>
+            <View key={ep.id} style={styles.episodeWrap}>
+              <TouchableOpacity
+                style={[styles.episode, !hasFile && styles.episodeDisabled]}
+                onPress={() => playEp(ep)}
+                disabled={!hasFile}
+                activeOpacity={0.7}
+              >
+                <View style={styles.epThumb}>
+                  {ep.thumbnail_url ? (
+                    <Image source={{ uri: ep.thumbnail_url }} style={styles.epThumbImg} />
+                  ) : (
+                    <View style={styles.epThumbPlaceholder}>
+                      <Text style={styles.epNumText}>{ep.episode_number}</Text>
+                    </View>
+                  )}
+                  {hasFile && (
+                    <View style={styles.epPlayOverlay}>
+                      <Ionicons name="play-circle" size={28} color="#fff" />
+                    </View>
+                  )}
+                  {dlSt.state === 'done' && (
+                    <View style={styles.epDlBadge}>
+                      <Ionicons name="checkmark-circle" size={14} color="#4CAF50" />
+                    </View>
+                  )}
+                </View>
+                <View style={styles.epInfo}>
+                  <Text style={styles.epNum}>
+                    T{ep.season_number}E{String(ep.episode_number).padStart(2, '0')}
+                  </Text>
+                  <Text style={styles.epTitle} numberOfLines={1}>
+                    {ep.title || `Episódio ${ep.episode_number}`}
+                  </Text>
+                  {ep.synopsis && (
+                    <Text style={styles.epSynopsis} numberOfLines={2}>{ep.synopsis}</Text>
+                  )}
+                  {ep.duration && (
+                    <Text style={styles.epDuration}>{Math.floor(ep.duration / 60)}min</Text>
+                  )}
+                </View>
+              </TouchableOpacity>
+
+              {hasFile && (
+                <TouchableOpacity
+                  style={styles.epDlBtn}
+                  onPress={() => handleEpDownload(ep)}
+                >
+                  {dlSt.state === 'downloading' ? (
+                    <>
+                      <ActivityIndicator size="small" color="#E50914" />
+                      <Text style={styles.epDlPct}>{Math.round((dlSt.progress || 0) * 100)}%</Text>
+                    </>
+                  ) : dlSt.state === 'done' ? (
+                    <Ionicons name="trash-outline" size={16} color="#E50914" />
+                  ) : (
+                    <Ionicons name="download-outline" size={16} color="#666" />
+                  )}
+                </TouchableOpacity>
+              )}
+            </View>
           );
         })}
       </View>
@@ -271,11 +338,24 @@ const styles = StyleSheet.create({
     color: '#555', fontSize: 11, marginBottom: 12,
     textTransform: 'uppercase', letterSpacing: 1,
   },
+  episodeWrap: {
+    flexDirection: 'row', alignItems: 'center',
+    borderBottomWidth: 1, borderBottomColor: '#141414',
+  },
   episode: {
-    flexDirection: 'row', alignItems: 'flex-start',
-    paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#141414', gap: 12,
+    flex: 1, flexDirection: 'row', alignItems: 'flex-start',
+    paddingVertical: 12, gap: 12,
   },
   episodeDisabled: { opacity: 0.45 },
+  epDlBtn: {
+    width: 40, alignItems: 'center', justifyContent: 'center',
+    paddingRight: 4, gap: 2,
+  },
+  epDlPct: { color: '#E50914', fontSize: 9, fontWeight: '700' },
+  epDlBadge: {
+    position: 'absolute', bottom: 4, right: 4,
+    backgroundColor: 'rgba(0,0,0,0.7)', borderRadius: 8, padding: 1,
+  },
   epThumb: { width: 120, height: 68, borderRadius: 6, overflow: 'hidden', position: 'relative' },
   epThumbImg: { width: '100%', height: '100%' },
   epThumbPlaceholder: {

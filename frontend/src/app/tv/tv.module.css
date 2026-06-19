@@ -1,0 +1,450 @@
+/* ── Root ─────────────────────────────────────────────── */
+.app {
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+  background: #000;
+  color: #fff;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* ── Sidebar ──────────────────────────────────────────── */
+.sidebar {
+  position: relative;
+  z-index: 20;
+  width: 68px;
+  min-width: 68px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 24px 0 24px;
+  background: linear-gradient(to right, rgba(0,0,0,0.92) 60%, transparent);
+  transition: width 0.25s cubic-bezier(.4,0,.2,1), background 0.25s;
+  overflow: hidden;
+}
+
+.sidebarOpen {
+  width: 230px;
+  min-width: 230px;
+  background: rgba(0,0,0,0.96);
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  margin-bottom: 28px;
+  min-width: 230px;
+}
+
+.logoMark {
+  width: 32px;
+  height: 32px;
+  background: #E50914;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 900;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.logoText {
+  margin-left: 12px;
+  font-size: 22px;
+  font-weight: 800;
+  color: #E50914;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.sidebarOpen .logoText {
+  opacity: 1;
+}
+
+.navItem {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 13px 20px;
+  cursor: pointer;
+  border-radius: 0;
+  transition: background 0.15s;
+  position: relative;
+  white-space: nowrap;
+}
+
+.navIcon {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #999;
+  transition: color 0.15s;
+}
+
+.navLabel {
+  font-size: 15px;
+  font-weight: 500;
+  color: #aaa;
+  transition: color 0.15s;
+  opacity: 0;
+  transition: opacity 0.2s, color 0.15s;
+}
+
+.sidebarOpen .navLabel {
+  opacity: 1;
+}
+
+.navItemFocused {
+  background: rgba(255,255,255,0.1);
+}
+
+.navItemFocused .navIcon,
+.navItemFocused .navLabel {
+  color: #fff;
+}
+
+.navItemFocused::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: #E50914;
+  border-radius: 0 2px 2px 0;
+}
+
+/* ── Main content ─────────────────────────────────────── */
+.main {
+  flex: 1;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  margin-left: -68px; /* overlap with sidebar gradient */
+}
+
+/* ── Hero ─────────────────────────────────────────────── */
+.hero {
+  position: relative;
+  flex: 0 0 62vh;
+  background: #111;
+  background-size: cover;
+  background-position: center 20%;
+  overflow: hidden;
+  transition: flex 0.35s cubic-bezier(.4,0,.2,1);
+}
+
+.heroCollapsed {
+  flex: 0 0 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.heroGradient {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(to right, rgba(0,0,0,0.85) 30%, rgba(0,0,0,0.1) 80%),
+    linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 50%);
+}
+
+.heroContent {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  padding: 0 60px 48px 80px;
+  max-width: 600px;
+}
+
+.heroMeta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.heroBadge {
+  background: #E50914;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 900;
+  padding: 2px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.5px;
+}
+
+.heroCategory {
+  color: #aaa;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 2px;
+}
+
+.heroTitle {
+  font-size: clamp(2.2rem, 4vw, 4rem);
+  font-weight: 900;
+  line-height: 1.05;
+  margin: 0 0 12px;
+  text-shadow: 2px 2px 12px rgba(0,0,0,0.8);
+  letter-spacing: -0.5px;
+}
+
+.heroInfo {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 12px;
+  color: #bbb;
+  font-size: 14px;
+}
+
+.heroSynopsis {
+  font-size: 14px;
+  color: #ccc;
+  line-height: 1.5;
+  margin-bottom: 24px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.heroBtns {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.btnPlay {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #fff;
+  color: #000;
+  border: none;
+  padding: 13px 28px;
+  font-size: 16px;
+  font-weight: 700;
+  border-radius: 6px;
+  cursor: pointer;
+  outline: none;
+  border: 3px solid transparent;
+  transition: background 0.15s, transform 0.12s;
+}
+
+.btnPlay:hover {
+  background: rgba(255,255,255,0.85);
+}
+
+.btnInfo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(109,109,110,0.7);
+  color: #fff;
+  border: none;
+  padding: 13px 28px;
+  font-size: 16px;
+  font-weight: 700;
+  border-radius: 6px;
+  cursor: pointer;
+  outline: none;
+  border: 3px solid transparent;
+  transition: background 0.15s, transform 0.12s;
+}
+
+.btnFocused {
+  border-color: #fff !important;
+  transform: scale(1.05);
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.3);
+}
+
+/* ── Content rows ─────────────────────────────────────── */
+.rows {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px 0 32px 80px;
+  scrollbar-width: none;
+}
+
+.rows::-webkit-scrollbar { display: none; }
+
+.row {
+  margin-bottom: 24px;
+  transition: opacity 0.2s;
+}
+
+.row:not(.rowFocused) {
+  opacity: 0.6;
+}
+
+.rowTitle {
+  font-size: 15px;
+  font-weight: 700;
+  color: #e5e5e5;
+  margin: 0 0 10px;
+  padding-left: 4px;
+  letter-spacing: 0.5px;
+}
+
+.rowFocused .rowTitle {
+  color: #fff;
+}
+
+.rowCards {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: visible;
+  scrollbar-width: none;
+  padding: 8px 40px 8px 0;
+}
+
+.rowCards::-webkit-scrollbar { display: none; }
+
+/* ── Cards ────────────────────────────────────────────── */
+.card {
+  position: relative;
+  flex-shrink: 0;
+  width: 240px;
+  height: 135px;
+  border-radius: 5px;
+  overflow: visible;
+  cursor: pointer;
+  transition: transform 0.15s cubic-bezier(.4,0,.2,1);
+  border: 3px solid transparent;
+}
+
+.cardInner {
+  width: 100%;
+  height: 100%;
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+
+.card:not(.cardFocused) .cardInner {
+  filter: brightness(0.75);
+  transition: filter 0.15s;
+}
+
+.cardFocused {
+  transform: scale(1.1);
+  border-color: #fff;
+  z-index: 5;
+  border-radius: 5px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.2);
+}
+
+.cardFocused .cardInner {
+  filter: brightness(1);
+}
+
+.cardImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  border-radius: 4px;
+}
+
+.cardNetflixN {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  background: #E50914;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 900;
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+
+.cardPlaceholder {
+  width: 100%;
+  height: 100%;
+  background: #1a1a1a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: #444;
+  border-radius: 4px;
+}
+
+.cardTooltip {
+  position: absolute;
+  bottom: -38px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,0.9);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 10;
+  border: 1px solid rgba(255,255,255,0.15);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Loading / Empty ──────────────────────────────────── */
+.loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  gap: 16px;
+}
+
+.spinner {
+  width: 48px;
+  height: 48px;
+  border: 4px solid rgba(255,255,255,0.1);
+  border-top-color: #E50914;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loadingText {
+  color: #666;
+  font-size: 14px;
+}
+
+/* ── Focus hint ───────────────────────────────────────── */
+.hint {
+  position: fixed;
+  bottom: 20px;
+  right: 24px;
+  color: rgba(255,255,255,0.3);
+  font-size: 11px;
+  display: flex;
+  gap: 14px;
+}
+
+.hint span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
