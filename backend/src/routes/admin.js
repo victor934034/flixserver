@@ -201,6 +201,16 @@ router.post('/series', async (req, res) => {
   }
 });
 
+router.get('/series/:id', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('series').select('*').eq('id', req.params.id).single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.put('/series/:id', async (req, res) => {
   try {
     const { data, error } = await supabase

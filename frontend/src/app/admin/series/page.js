@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
+import Link from 'next/link';
 import Image from 'next/image';
 import api from '../../../lib/api';
 import styles from '../filmes/page.module.css';
@@ -85,6 +86,7 @@ export default function AdminSeries() {
                 </td>
                 <td>
                   <div className={styles.actions}>
+                    <Link href={`/admin/series/${s.id}`} className={styles.btnEdit}>Editar</Link>
                     <button onClick={() => deleteSerie(s.id, s.title)} className={styles.btnDelete}>Excluir</button>
                   </div>
                 </td>

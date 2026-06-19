@@ -1,0 +1,177 @@
+.epSection {
+  margin-top: 3rem;
+  max-width: 1100px;
+}
+
+.epHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+}
+
+.epTitle {
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.btnAddEp {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 0.5rem 1.25rem;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btnAddEp:hover { opacity: 0.85; }
+
+.epFormBox {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.epFormTitle {
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 1.25rem;
+  color: var(--accent);
+}
+
+.epFormActions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+}
+
+.btnSaveEp {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 0.5rem 1.5rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btnSaveEp:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.btnCancelEp {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.seasonBlock {
+  margin-bottom: 2.5rem;
+}
+
+.seasonTitle {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.epTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.epTable th {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.epTable td {
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.rowEditing td {
+  background: rgba(0, 113, 235, 0.06);
+}
+
+.epNum {
+  font-weight: 700;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.noThumb {
+  width: 64px;
+  height: 36px;
+  background: var(--bg-secondary);
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 1rem;
+  border: 1px solid var(--border);
+}
+
+.epTitleText { font-weight: 500; }
+
+.epMeta { font-size: 0.75rem; color: var(--text-muted); }
+
+.yes { color: #4caf50; font-weight: 700; }
+.no { color: var(--text-muted); }
+
+.epActions { display: flex; gap: 0.5rem; }
+
+.btnEdit {
+  background: none;
+  color: #0071eb;
+  font-size: 0.8rem;
+  padding: 3px 10px;
+  border: 1px solid rgba(0, 113, 235, 0.3);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.btnEdit:hover { background: rgba(0, 113, 235, 0.1); }
+
+.btnDelete {
+  background: none;
+  color: #ff6b6b;
+  font-size: 0.8rem;
+  padding: 3px 10px;
+  border: 1px solid rgba(255, 60, 60, 0.3);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.btnDelete:hover { background: rgba(255, 60, 60, 0.1); }
+
+.epFormCell {
+  padding: 1.25rem 1rem;
+  background: rgba(0, 113, 235, 0.03);
+  border-bottom: 2px solid rgba(0, 113, 235, 0.2);
+}
+
+.grid3 { display: grid; grid-template-columns: 80px 80px 1fr; gap: 1rem; }
+.grid4 { display: grid; grid-template-columns: 1fr 1fr 100px 100px; gap: 1rem; }
+.grid3eq { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; }
+.formGap { display: flex; flex-direction: column; gap: 1rem; }
