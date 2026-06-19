@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  Alert, AppState, Platform,
+  Alert, AppState, Platform, ActivityIndicator,
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -28,10 +28,11 @@ export default function AdminUploadScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const taskRef = useRef(null);
+  const cacheUriRef = useRef(null); // rastrea arquivo copiado para cache (Android)
 
   const [file, setFile] = useState(null);
   const [version, setVersion] = useState('dubbing');
-  const [status, setStatus] = useState('idle'); // idle | uploading | done | error
+  const [status, setStatus] = useState('idle'); // idle | preparing | uploading | done | error
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
@@ -47,16 +48,42 @@ export default function AdminUploadScreen() {
     try {
       const res = await DocumentPicker.getDocumentAsync({
         type: 'video/*',
-        copyToCacheDirectory: false,
+        copyToCacheDirectory: false, // retorna content:// URI no Android
       });
       if (res.canceled || !res.assets?.[0]) return;
       const asset = res.assets[0];
-      setFile(asset);
+
+      let finalUri = asset.uri;
+
+      // Android: content:// URIs não funcionam com createUploadTask
+      // É necessário copiar para o cache primeiro
+      if (Platform.OS === 'android' && !asset.uri.startsWith('file://')) {
+        setStatus('preparing');
+        try {
+          // Limpa cache anterior se existir
+          if (cacheUriRef.current) {
+            FileSystem.deleteAsync(cacheUriRef.current, { idempotent: true }).catch(() => {});
+            cacheUriRef.current = null;
+          }
+          const ext = (asset.name || 'video').split('.').pop() || 'mp4';
+          const dest = `${FileSystem.cacheDirectory}upload_${Date.now()}.${ext}`;
+          await FileSystem.copyAsync({ from: asset.uri, to: dest });
+          cacheUriRef.current = dest;
+          finalUri = dest;
+        } catch {
+          setStatus('idle');
+          Alert.alert('Erro', 'Não foi possível preparar o arquivo. Verifique o espaço disponível.');
+          return;
+        }
+      }
+
+      setFile({ ...asset, uri: finalUri });
       setStatus('idle');
       setProgress(0);
       setError(null);
       setResult(null);
     } catch (e) {
+      setStatus('idle');
       Alert.alert('Erro', 'Não foi possível selecionar o arquivo.');
     }
   };
@@ -130,6 +157,11 @@ export default function AdminUploadScreen() {
       setResult(tmdbResult);
       await AsyncStorage.removeItem(RESUME_KEY);
       setPending(null);
+      // Limpa arquivo de cache criado para Android
+      if (cacheUriRef.current) {
+        FileSystem.deleteAsync(cacheUriRef.current, { idempotent: true }).catch(() => {});
+        cacheUriRef.current = null;
+      }
     } catch (err) {
       if (err.message !== 'Upload cancelled') {
         const msg = err.response?.data?.error || err.message;
@@ -151,6 +183,10 @@ export default function AdminUploadScreen() {
     setStatus('idle');
     setProgress(0);
     setError(null);
+    if (cacheUriRef.current) {
+      FileSystem.deleteAsync(cacheUriRef.current, { idempotent: true }).catch(() => {});
+      cacheUriRef.current = null;
+    }
   };
 
   const resumePending = () => {
@@ -166,6 +202,7 @@ export default function AdminUploadScreen() {
     setPending(null);
   };
 
+  const isPreparing = status === 'preparing';
   const isUploading = status === 'uploading';
 
   return (
@@ -205,9 +242,9 @@ export default function AdminUploadScreen() {
 
       <View style={styles.section}>
         <TouchableOpacity
-          style={[styles.pickBtn, isUploading && styles.disabled]}
+          style={[styles.pickBtn, (isUploading || isPreparing) && styles.disabled]}
           onPress={pickFile}
-          disabled={isUploading}
+          disabled={isUploading || isPreparing}
         >
           <Ionicons name="document-outline" size={24} color={isUploading ? '#333' : '#E50914'} />
           <Text style={[styles.pickBtnText, isUploading && { color: '#444' }]}>
@@ -250,6 +287,18 @@ export default function AdminUploadScreen() {
         </View>
       )}
 
+      {isPreparing && (
+        <View style={styles.section}>
+          <View style={styles.preparingBox}>
+            <ActivityIndicator size="small" color="#E50914" />
+            <View style={{ marginLeft: 12 }}>
+              <Text style={styles.preparingTitle}>Preparando arquivo...</Text>
+              <Text style={styles.preparingNote}>Copiando para armazenamento temporário. Pode levar alguns minutos para arquivos grandes.</Text>
+            </View>
+          </View>
+        </View>
+      )}
+
       {isUploading && (
         <View style={styles.section}>
           <View style={styles.progressHeader}>
@@ -267,7 +316,7 @@ export default function AdminUploadScreen() {
         </View>
       )}
 
-      {file && !isUploading && status !== 'done' && (
+      {file && !isUploading && !isPreparing && status !== 'done' && (
         <TouchableOpacity style={styles.btnUpload} onPress={() => startUpload()}>
           <Ionicons name="cloud-upload-outline" size={20} color="#000" />
           <Text style={styles.btnUploadText}>Iniciar Upload</Text>
@@ -373,6 +422,13 @@ const styles = StyleSheet.create({
   },
   versionRowActive: { backgroundColor: 'rgba(229,9,20,0.1)', borderWidth: 1, borderColor: 'rgba(229,9,20,0.4)' },
   versionLabel: { flex: 1, color: '#666', fontSize: 15 },
+  preparingBox: {
+    flexDirection: 'row', alignItems: 'flex-start',
+    backgroundColor: '#111', borderRadius: 10, padding: 16,
+    borderWidth: 1, borderColor: '#222',
+  },
+  preparingTitle: { color: '#fff', fontSize: 14, fontWeight: '600', marginBottom: 4 },
+  preparingNote: { color: '#555', fontSize: 12, lineHeight: 16, maxWidth: 260 },
   progressHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   progressLabel: { color: '#fff', fontSize: 14, fontWeight: '600' },
   cancelText: { color: '#E50914', fontSize: 13 },
