@@ -2,16 +2,18 @@
   "expo": {
     "name": "Flixhome",
     "slug": "flixhome",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
+    "icon": "./assets/icon.png",
     "assetBundlePatterns": [
       "**/*"
     ],
     "android": {
       "package": "com.flixhome.app",
-      "versionCode": 4,
+      "versionCode": 5,
       "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#0a0a0a"
       }
     },
@@ -32,7 +34,15 @@
       "expo-router",
       "expo-screen-orientation",
       "expo-video",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#0a0a0a",
+          "sounds": []
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

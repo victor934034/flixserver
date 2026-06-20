@@ -3,9 +3,14 @@ import { Stack, useRouter, useSegments, useRootNavigationState } from 'expo-rout
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import * as Notifications from 'expo-notifications';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { DownloadProvider } from '../contexts/DownloadContext';
 import { ParentalProvider } from '../contexts/ParentalContext';
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({ shouldShowAlert: true, shouldPlaySound: false, shouldSetBadge: false }),
+});
 
 function AuthGuard() {
   const { token, loading } = useAuth();
@@ -23,7 +28,16 @@ function AuthGuard() {
   return null;
 }
 
+async function requestNotificationPermission() {
+  const { status } = await Notifications.getPermissionsAsync();
+  if (status !== 'granted') {
+    await Notifications.requestPermissionsAsync();
+  }
+}
+
 export default function RootLayout() {
+  useEffect(() => { requestNotificationPermission(); }, []);
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
