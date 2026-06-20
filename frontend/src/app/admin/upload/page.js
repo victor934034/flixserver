@@ -82,53 +82,75 @@ async function doLargeUploadXHR(item, onProgress, signal, resumeState) {
     onProgress({ pct: Math.round((done / totalParts) * 88), fileId, partsDone });
   }
 
-  async function uploadOnePart(i) {
-    if (signal?.aborted) throw new Error('paused');
-    const start = i * PART_SIZE;
-    const chunk = file.slice(start, Math.min(start + PART_SIZE, file.size));
-    const partNumber = i + 1;
+  const parallelCount = Math.min(PARALLEL_PARTS, totalParts - startPart);
+  if (parallelCount > 0) {
+    // Busca uma URL por worker antecipadamente.
+    // O B2 permite reusar a mesma URL para múltiplas partes sequenciais —
+    // assim o backend recebe apenas PARALLEL_PARTS chamadas no total (não uma por parte).
+    const initUrls = await Promise.all(
+      Array.from({ length: parallelCount }, () =>
+        api.post('/upload/part-url', { fileId }).then(r => r.data)
+      )
+    );
 
-    const { data: partInfo } = await api.post('/upload/part-url', { fileId });
+    let nextPart = startPart;
 
-    await new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', partInfo.uploadUrl);
-      xhr.setRequestHeader('Authorization', partInfo.authorizationToken);
-      xhr.setRequestHeader('X-Bz-Part-Number', String(partNumber));
-      // do_not_verify: B2 aceita a parte e armazena o SHA1 real internamente.
-      // O backend busca esses SHA1s no finish-large via list-parts.
-      xhr.setRequestHeader('X-Bz-Content-Sha1', 'do_not_verify');
+    // Cada worker reutiliza sua URL; só pede uma nova se B2 retornar 503.
+    async function worker(partUrl) {
+      let url = partUrl;
+      while (true) {
+        if (signal?.aborted) throw new Error('paused');
+        const i = nextPart++;
+        if (i >= totalParts) break;
 
-      xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable) {
-          partProg[i] = e.loaded / e.total;
-          reportProgress();
+        const start = i * PART_SIZE;
+        const chunk = file.slice(start, Math.min(start + PART_SIZE, file.size));
+        const partNumber = i + 1;
+        let attempts = 0;
+
+        while (true) {
+          try {
+            await new Promise((resolve, reject) => {
+              const xhr = new XMLHttpRequest();
+              xhr.open('POST', url.uploadUrl);
+              xhr.setRequestHeader('Authorization', url.authorizationToken);
+              xhr.setRequestHeader('X-Bz-Part-Number', String(partNumber));
+              // do_not_verify: B2 aceita a parte e armazena o SHA1 real internamente.
+              xhr.setRequestHeader('X-Bz-Content-Sha1', 'do_not_verify');
+
+              xhr.upload.onprogress = (e) => {
+                if (e.lengthComputable) {
+                  partProg[i] = e.loaded / e.total;
+                  reportProgress();
+                }
+              };
+              xhr.onload = () => {
+                if (xhr.status < 300) { partProg[i] = 1; resolve(); }
+                else reject(Object.assign(new Error(`HTTP ${xhr.status}`), { status: xhr.status }));
+              };
+              xhr.onerror = () => reject(new Error('connection'));
+              signal?.addEventListener('abort', () => { xhr.abort(); reject(new Error('paused')); });
+              xhr.send(chunk);
+            });
+            break; // parte enviada com sucesso
+          } catch (err) {
+            if (err.message === 'paused') throw err;
+            // B2 503 = servidor ocupado: pega nova URL e tenta de novo
+            if (err.status === 503 && attempts < 3) {
+              attempts++;
+              await new Promise(r => setTimeout(r, 1000 * attempts));
+              const { data } = await api.post('/upload/part-url', { fileId });
+              url = data;
+            } else {
+              throw err;
+            }
+          }
         }
-      };
-      xhr.onload = () => {
-        if (xhr.status < 300) { partProg[i] = 1; resolve(); }
-        else reject(Object.assign(new Error(`HTTP ${xhr.status}`), { isServer: true }));
-      };
-      xhr.onerror = () => reject(new Error('connection'));
-      signal?.addEventListener('abort', () => { xhr.abort(); reject(new Error('paused')); });
-      xhr.send(chunk);
-    });
-  }
-
-  // Janela deslizante: PARALLEL_PARTS workers independentes, cada um pega a
-  // próxima parte disponível assim que termina a anterior — sem esperar o lote.
-  let nextPart = startPart;
-  async function worker() {
-    while (true) {
-      if (signal?.aborted) throw new Error('paused');
-      const i = nextPart++;
-      if (i >= totalParts) break;
-      await uploadOnePart(i);
+      }
     }
+
+    await Promise.all(initUrls.map(url => worker(url)));
   }
-  await Promise.all(
-    Array.from({ length: Math.min(PARALLEL_PARTS, totalParts - startPart) }, worker)
-  );
 
   // partSha1Array vazio → backend usa list-parts para pegar SHA1s reais do B2
   const { data: { cdnUrl } } = await api.post('/upload/finish-large', {
