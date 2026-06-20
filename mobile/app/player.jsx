@@ -372,7 +372,7 @@ export default function PlayerScreen() {
         style={StyleSheet.absoluteFill}
         contentFit="contain"
         nativeControls={false}
-        allowsFullscreen={false}
+        fullscreenOptions={{ isFullscreenSupported: false }}
         allowsExternalPlayback={true}
         requiresLinearPlayback={false}
       />
@@ -515,7 +515,7 @@ export default function PlayerScreen() {
               {availSubs.length > 0 && <>
                 <View style={styles.actionDiv} />
                 <TouchableOpacity style={styles.actionBtn} onPress={() => openSheet('subtitles')}>
-                  <Ionicons name="closed-captioning-outline" size={15} color={activeSub ? '#E50914' : '#fff'} />
+                  <Ionicons name="reader-outline" size={15} color={activeSub ? '#E50914' : '#fff'} />
                   <Text style={[styles.actionBtnText, activeSub && { color: '#E50914' }]}>
                     {activeSub ? SUB_LABELS[activeSub]?.split(' ')[0] : 'Legenda'}
                   </Text>
