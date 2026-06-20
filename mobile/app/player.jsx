@@ -51,6 +51,27 @@ function audioLabel(track, idx) {
   const lang = (track.language || '').toLowerCase();
   return AUDIO_LANG[lang] || track.label || `Faixa ${idx + 1}`;
 }
+
+function parseVtt(text) {
+  const cues = [];
+  const blocks = text.split(/\n{2,}/);
+  for (const block of blocks) {
+    const lines = block.trim().split('\n');
+    const tl = lines.find(l => l.includes('-->'));
+    if (!tl) continue;
+    function toSec(s) {
+      const p = s.trim().split(':');
+      return p.length === 3
+        ? Number(p[0]) * 3600 + Number(p[1]) * 60 + parseFloat(p[2])
+        : Number(p[0]) * 60 + parseFloat(p[1]);
+    }
+    const [s, e] = tl.split('-->').map(toSec);
+    const txt = lines.slice(lines.indexOf(tl) + 1).join('\n')
+      .replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ').trim();
+    if (txt && !isNaN(s) && !isNaN(e)) cues.push({ start: s, end: e, text: txt });
+  }
+  return cues;
+}
 const SLIDER_H = 140;
 
 function pad(n) { return String(n).padStart(2, '0'); }
@@ -80,13 +101,7 @@ export default function PlayerScreen() {
   const nextEp = useRef(params.nextEpisode ? JSON.parse(params.nextEpisode) : null).current;
   const introEnd = params.introEnd ? Number(params.introEnd) : 0;
 
-  // Initial video source (with all available text tracks)
-  const initialSource = useRef({
-    uri: versions[initVer],
-    textTracks: availSubs.map(([lang, url]) => ({
-      uri: url, language: lang, title: SUB_LABELS[lang] || lang, type: 'text/vtt',
-    })),
-  }).current;
+  const initialSource = useRef({ uri: versions[initVer] }).current;
 
   // ─── expo-video player ────────────────────────────────────────────────────
   const player = useVideoPlayer(initialSource, p => {
@@ -114,6 +129,7 @@ export default function PlayerScreen() {
   const [activeSub, setActiveSub] = useState(null);
   const [audioTracks, setAudioTracks] = useState([]);
   const [activeAudio, setActiveAudio] = useState(null);
+  const [subtitleCues, setSubtitleCues] = useState([]);
   const [speed, setSpeed] = useState(1);
   const [ctrlVisible, setCtrlVisible] = useState(true);
   const [locked, setLocked] = useState(false);
@@ -169,20 +185,18 @@ export default function PlayerScreen() {
     }
   }, [status]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Aplica a faixa de áudio selecionada
+  // Aplica a faixa de áudio selecionada — API correta: player.audioTrack
   useEffect(() => {
     if (!activeAudio) return;
-    try { player.selectedAudioTrack = activeAudio; } catch {}
+    try { player.audioTrack = activeAudio; } catch {}
   }, [activeAudio]);
 
-  // Apply subtitle selection
+  // Carrega e parseia VTT externo quando legenda muda (overlay custom)
   useEffect(() => {
-    if (!activeSub) {
-      player.selectedTextTrack = null;
-      return;
-    }
-    const track = (player.textTracks || []).find(t => t.language === activeSub);
-    if (track) player.selectedTextTrack = track;
+    if (!activeSub) { setSubtitleCues([]); return; }
+    const url = subtitles[activeSub];
+    if (!url) { setSubtitleCues([]); return; }
+    fetch(url).then(r => r.text()).then(parseVtt).then(setSubtitleCues).catch(() => setSubtitleCues([]));
   }, [activeSub]);
 
   // Load episodes for sheet
@@ -294,12 +308,7 @@ export default function PlayerScreen() {
         if (track) setActiveAudio(track);
       } else {
         setSavedPosSec(currentTime);
-        player.replace({
-          uri: versions[v],
-          textTracks: availSubs.map(([lang, url]) => ({
-            uri: url, language: lang, title: SUB_LABELS[lang] || lang, type: 'text/vtt',
-          })),
-        });
+        player.replace({ uri: versions[v] });
       }
       setActiveVer(v);
     }
@@ -374,6 +383,16 @@ export default function PlayerScreen() {
           <ActivityIndicator size="large" color="#fff" />
         </View>
       )}
+
+      {/* Legenda overlay (VTT externo parseado — sempre visível) */}
+      {subtitleCues.length > 0 && (() => {
+        const cue = subtitleCues.find(c => currentTime >= c.start && currentTime <= c.end);
+        return cue ? (
+          <View style={styles.subtitleOverlay} pointerEvents="none">
+            <Text style={styles.subtitleText}>{cue.text}</Text>
+          </View>
+        ) : null;
+      })()}
 
       {/* Tap area */}
       <TouchableOpacity style={StyleSheet.absoluteFill} onPress={onTap} activeOpacity={1} />
@@ -840,6 +859,12 @@ const styles = StyleSheet.create({
   castNote: { flexDirection: 'row', gap: 8, marginHorizontal: 20, marginTop: 16, alignItems: 'flex-start' },
   castNoteText: { color: '#555', fontSize: 11, lineHeight: 16, flex: 1 },
 
+  subtitleOverlay: { position: 'absolute', bottom: 72, left: 24, right: 24, alignItems: 'center', zIndex: 10 },
+  subtitleText: {
+    color: '#fff', fontSize: 17, fontWeight: '600', textAlign: 'center',
+    backgroundColor: 'rgba(0,0,0,0.65)', paddingHorizontal: 14, paddingVertical: 5,
+    borderRadius: 5, overflow: 'hidden', lineHeight: 24,
+  },
   sheetBg: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
   sheet: { backgroundColor: '#141414', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingTop: 8, paddingBottom: 40, maxHeight: '72%' },
   sheetTitle: {
