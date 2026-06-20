@@ -12,12 +12,21 @@ const execFileAsync = promisify(execFile);
 
 // ─── FFmpeg helpers ──────────────────────────────────────────────────────────
 
-async function probeAudio(filePath) {
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36';
+
+async function probeAudio(input) {
+  const isUrl = input.startsWith('http://') || input.startsWith('https://');
+  const args = [
+    '-v', 'quiet',
+    '-print_format', 'json',
+    '-show_streams',
+    '-select_streams', 'a',
+  ];
+  if (isUrl) args.push('-user_agent', UA);
+  args.push(input);
+
   try {
-    const { stdout } = await execFileAsync('ffprobe', [
-      '-v', 'quiet', '-print_format', 'json', '-show_streams', '-select_streams', 'a',
-      filePath,
-    ]);
+    const { stdout } = await execFileAsync('ffprobe', args, { timeout: 30_000 });
     const stream = JSON.parse(stdout).streams?.[0];
     if (!stream) return null;
     return {
@@ -25,8 +34,9 @@ async function probeAudio(filePath) {
       profile:  stream.profile || '',
       channels: stream.channels || 0,
     };
-  } catch {
-    return null; // ffprobe não disponível
+  } catch (e) {
+    console.error('[ffprobe] erro:', e.message?.slice(0, 200));
+    return null;
   }
 }
 
@@ -37,18 +47,21 @@ function needsRemux(info) {
   return heAac || info.channels > 2;
 }
 
-async function remuxToWebAac(inputPath) {
-  const outputPath = inputPath.replace(/(\.[^.]+)$/, '_fixed$1');
+async function remuxToWebAac(input, outputPath) {
+  const out = outputPath || input.replace(/(\.[^.]+)$/, '_fixed$1');
+  const isUrl = input.startsWith('http://') || input.startsWith('https://');
+  const args = [
+    ...(isUrl ? ['-user_agent', UA] : []),
+    '-i', input,
+    '-c:v', 'copy',
+    '-c:a', 'aac', '-profile:a', 'aac_low', '-ac', '2', '-b:a', '192k',
+    '-y', out,
+  ];
   try {
-    await execFileAsync('ffmpeg', [
-      '-i', inputPath,
-      '-c:v', 'copy',
-      '-c:a', 'aac', '-profile:a', 'aac_low', '-ac', '2', '-b:a', '192k',
-      '-y', outputPath,
-    ], { maxBuffer: 1024 * 1024 });
-    return outputPath;
+    await execFileAsync('ffmpeg', args, { maxBuffer: 10 * 1024 * 1024, timeout: 7_200_000 });
+    return out;
   } catch (e) {
-    console.error('[ffmpeg] remux falhou:', e.message);
+    console.error('[ffmpeg] remux falhou:', e.message?.slice(0, 300));
     return null;
   }
 }
@@ -81,7 +94,8 @@ router.post('/video', upload.single('file'), async (req, res) => {
 
     if (needsRemux(audioInfo)) {
       console.log('[upload/video] HE-AAC ou surround detectado → remuxando para AAC-LC estéreo…');
-      tmpOutput = await remuxToWebAac(tmpInput);
+      const fixedPath = tmpInput.replace(/(\.[^.]+)$/, '_fixed$1');
+      tmpOutput = await remuxToWebAac(tmpInput, fixedPath);
       if (tmpOutput) {
         buffer   = fs.readFileSync(tmpOutput);
         console.log(`[upload/video] remux OK: ${buffer.length} bytes`);
@@ -259,15 +273,8 @@ router.post('/fix-audio', async (req, res) => {
     tmpOutput = path.join(os.tmpdir(), `fh_fix_${Date.now()}${ext}`);
 
     console.log(`[fix-audio] remuxando ${origName} → ${tmpOutput}`);
-    await execFileAsync('ffmpeg', [
-      '-i', cdnUrl,
-      '-c:v', 'copy',
-      '-c:a', 'aac', '-profile:a', 'aac_low', '-ac', '2', '-b:a', '192k',
-      '-y', tmpOutput,
-    ], {
-      maxBuffer: 10 * 1024 * 1024,
-      timeout: 7_200_000, // 2 horas
-    });
+    const remuxed = await remuxToWebAac(cdnUrl, tmpOutput);
+    if (!remuxed) throw new Error('ffmpeg falhou ao remuxar. Verifique os logs do servidor.');
 
     const sizeBytes = fs.statSync(tmpOutput).size;
     console.log(`[fix-audio] remux OK: ${(sizeBytes / 1024 / 1024).toFixed(0)} MB`);
