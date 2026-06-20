@@ -92,19 +92,34 @@ export default function EditarFilme() {
     const cdnUrl = form[field];
     if (!cdnUrl) return;
     setFixingAudio(p => ({ ...p, [field]: true }));
-    setFixMsg(p => ({ ...p, [field]: '' }));
+    setFixMsg(p => ({ ...p, [field]: 'Verificando áudio…' }));
     try {
+      // 1) verificação rápida
+      const chk = await api.post('/upload/check-audio', { cdnUrl });
+      const { audioInfo, needsRemux } = chk.data;
+      const desc = `${audioInfo.codec?.toUpperCase() || '?'} ${audioInfo.profile || ''} ${audioInfo.channels}ch`;
+
+      if (!needsRemux) {
+        setFixMsg(p => ({ ...p, [field]: `✓ Áudio OK (${desc}) — sem necessidade de remux` }));
+        return;
+      }
+
+      // 2) precisa remux — avisa e aguarda confirmação implícita (botão já foi clicado)
+      setFixMsg(p => ({ ...p, [field]: `Remuxando (${desc}) → AAC-LC estéreo… pode demorar minutos` }));
+
       const { data } = await api.post('/upload/fix-audio', {
         cdnUrl, movieId: id, movieType: 'movie', field,
-      });
+      }, { timeout: 7_200_000 }); // 2h
+
       if (data.skipped) {
-        setFixMsg(p => ({ ...p, [field]: 'Áudio já compatível, sem alterações' }));
+        setFixMsg(p => ({ ...p, [field]: `✓ Áudio já compatível (${desc})` }));
       } else {
         set(field, data.cdnUrl);
-        setFixMsg(p => ({ ...p, [field]: '✓ Remuxado e salvo (salve o filme para confirmar)' }));
+        setFixMsg(p => ({ ...p, [field]: `✓ Remuxado! Salve o filme para confirmar.` }));
       }
     } catch (e) {
-      setFixMsg(p => ({ ...p, [field]: `Erro: ${e.response?.data?.error || e.message}` }));
+      const msg = e.response?.data?.error || e.message || 'Erro desconhecido';
+      setFixMsg(p => ({ ...p, [field]: `Erro: ${msg}` }));
     } finally {
       setFixingAudio(p => ({ ...p, [field]: false }));
     }

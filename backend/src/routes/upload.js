@@ -230,49 +230,53 @@ router.post('/finish-large', async (req, res) => {
   }
 });
 
-// Corrigir áudio AAC de arquivo já enviado ao B2 (download → ffprobe → remux → re-upload)
+// Corrigir áudio AAC de arquivo já no B2
+// ffprobe e ffmpeg leem a URL diretamente — sem baixar o arquivo manualmente
 router.post('/fix-audio', async (req, res) => {
   const { cdnUrl, movieId, movieType, field } = req.body;
   if (!cdnUrl) return res.status(400).json({ error: 'cdnUrl é obrigatório' });
 
-  const ext = path.extname(new URL(cdnUrl).pathname) || '.mp4';
-  const tmpInput  = path.join(os.tmpdir(), `fh_fix_in_${Date.now()}${ext}`);
-  const tmpOutput = path.join(os.tmpdir(), `fh_fix_out_${Date.now()}${ext}`);
+  let tmpOutput = null;
 
   try {
-    // Baixa arquivo do B2/CDN
-    console.log('[fix-audio] baixando:', cdnUrl);
-    const https = cdnUrl.startsWith('https') ? require('https') : require('http');
-    await new Promise((resolve, reject) => {
-      const out = fs.createWriteStream(tmpInput);
-      https.get(cdnUrl, (res) => {
-        res.pipe(out);
-        out.on('finish', resolve);
-        out.on('error', reject);
-        res.on('error', reject);
-      }).on('error', reject);
-    });
-
-    const audioInfo = await probeAudio(tmpInput);
+    // Passo 1: probe direto na URL (ffprobe baixa apenas os primeiros KB do container)
+    console.log('[fix-audio] probing:', cdnUrl);
+    const audioInfo = await probeAudio(cdnUrl);
     console.log('[fix-audio] audio info:', audioInfo);
 
-    if (!needsRemux(audioInfo)) {
-      return res.json({ skipped: true, reason: 'Áudio já compatível com navegadores', audioInfo });
+    if (!audioInfo) {
+      return res.status(422).json({ error: 'Não foi possível ler as faixas de áudio. Verifique se a URL é acessível e o arquivo é um vídeo válido.' });
     }
 
-    // Remux
+    if (!needsRemux(audioInfo)) {
+      return res.json({ skipped: true, reason: 'Áudio já compatível (AAC-LC estéreo)', audioInfo });
+    }
+
+    // Passo 2: remux com ffmpeg — lê direto da URL, grava em arquivo temporário
+    const urlObj  = new URL(cdnUrl);
+    const origName = path.basename(urlObj.pathname);
+    const ext      = path.extname(origName) || '.mkv';
+    tmpOutput = path.join(os.tmpdir(), `fh_fix_${Date.now()}${ext}`);
+
+    console.log(`[fix-audio] remuxando ${origName} → ${tmpOutput}`);
     await execFileAsync('ffmpeg', [
-      '-i', tmpInput,
+      '-i', cdnUrl,
       '-c:v', 'copy',
       '-c:a', 'aac', '-profile:a', 'aac_low', '-ac', '2', '-b:a', '192k',
       '-y', tmpOutput,
-    ], { maxBuffer: 1024 * 1024 });
+    ], {
+      maxBuffer: 10 * 1024 * 1024,
+      timeout: 7_200_000, // 2 horas
+    });
 
-    const filename = path.basename(new URL(cdnUrl).pathname);
-    const buffer   = fs.readFileSync(tmpOutput);
-    const result   = await uploadFile(buffer, filename, 'video/mp4');
+    const sizeBytes = fs.statSync(tmpOutput).size;
+    console.log(`[fix-audio] remux OK: ${(sizeBytes / 1024 / 1024).toFixed(0)} MB`);
 
-    // Atualiza DB se informado
+    // Passo 3: upload para B2 em partes (sem carregar tudo na memória)
+    const { uploadFileFromPath } = require('../services/backblaze');
+    const result = await uploadFileFromPath(tmpOutput, origName, 'video/x-matroska');
+
+    // Passo 4: atualiza DB se movieId/field informados
     if (movieId && field) {
       const { supabase } = require('../services/supabase');
       const table = movieType === 'series' ? 'episodes' : 'movies';
@@ -281,11 +285,23 @@ router.post('/fix-audio', async (req, res) => {
 
     res.json({ ok: true, cdnUrl: result.cdnUrl, audioInfo });
   } catch (err) {
-    console.error('[fix-audio]', err.message);
-    res.status(500).json({ error: err.message });
+    console.error('[fix-audio] erro:', err.message);
+    res.status(500).json({ error: err.message || 'Erro desconhecido' });
   } finally {
-    try { fs.unlinkSync(tmpInput); } catch {}
-    try { fs.unlinkSync(tmpOutput); } catch {}
+    try { if (tmpOutput) fs.unlinkSync(tmpOutput); } catch {}
+  }
+});
+
+// Apenas verifica o áudio (sem remuxar) — rápido, só lê os headers do container
+router.post('/check-audio', async (req, res) => {
+  const { cdnUrl } = req.body;
+  if (!cdnUrl) return res.status(400).json({ error: 'cdnUrl é obrigatório' });
+  try {
+    const audioInfo = await probeAudio(cdnUrl);
+    if (!audioInfo) return res.status(422).json({ error: 'Não foi possível ler o arquivo' });
+    res.json({ audioInfo, needsRemux: needsRemux(audioInfo) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

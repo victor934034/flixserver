@@ -160,4 +160,80 @@ async function setupCors() {
   }
 }
 
-module.exports = { authorize, getUploadUrl, uploadFile, deleteFile, listFiles, setupCors, startLargeFile, getUploadPartUrl, listParts, finishLargeFile };
+// Upload de arquivo local para B2 usando multipart (100 MB por parte)
+// Não carrega o arquivo inteiro na memória — ideal para remux de grandes vídeos
+async function uploadFileFromPath(filePath, filename, contentType = 'video/mp4') {
+  const crypto = require('crypto');
+  const PART_SIZE = 100 * 1024 * 1024; // 100 MB
+
+  const stat = fs.statSync(filePath);
+  const fileSize = stat.size;
+
+  // Arquivos pequenos: upload direto (sem multipart)
+  if (fileSize <= PART_SIZE) {
+    const buffer = fs.readFileSync(filePath);
+    return uploadFile(buffer, filename, contentType);
+  }
+
+  // Arquivos grandes: multipart
+  const auth = await authorize();
+  const startRes = await axios.post(
+    `${auth.apiUrl}/b2api/v2/b2_start_large_file`,
+    { bucketId: process.env.BACKBLAZE_BUCKET_ID, fileName: encodeURIComponent(filename), contentType },
+    { headers: { Authorization: auth.authorizationToken } }
+  );
+  const fileId = startRes.data.fileId;
+
+  const partCount = Math.ceil(fileSize / PART_SIZE);
+  const partSha1Array = [];
+  const fd = fs.openSync(filePath, 'r');
+
+  try {
+    for (let i = 0; i < partCount; i++) {
+      const offset = i * PART_SIZE;
+      const length = Math.min(PART_SIZE, fileSize - offset);
+      const chunk = Buffer.alloc(length);
+      fs.readSync(fd, chunk, 0, length, offset);
+
+      const sha1 = crypto.createHash('sha1').update(chunk).digest('hex');
+
+      const partUrlRes = await axios.post(
+        `${auth.apiUrl}/b2api/v2/b2_get_upload_part_url`,
+        { fileId },
+        { headers: { Authorization: auth.authorizationToken } }
+      );
+
+      await axios.post(partUrlRes.data.uploadUrl, chunk, {
+        headers: {
+          Authorization: partUrlRes.data.authorizationToken,
+          'X-Bz-Part-Number': i + 1,
+          'Content-Length': length,
+          'X-Bz-Content-Sha1': sha1,
+        },
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity,
+      });
+
+      partSha1Array.push(sha1);
+      console.log(`[B2] parte ${i + 1}/${partCount} enviada (${Math.round(length / 1024 / 1024)} MB)`);
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+
+  await axios.post(
+    `${auth.apiUrl}/b2api/v2/b2_finish_large_file`,
+    { fileId, partSha1Array },
+    { headers: { Authorization: auth.authorizationToken } }
+  );
+
+  return {
+    fileId,
+    fileName: filename,
+    cdnUrl: `${process.env.CDN_BASE_URL}/${filename}`,
+  };
+}
+
+const fs = require('fs');
+
+module.exports = { authorize, getUploadUrl, uploadFile, uploadFileFromPath, deleteFile, listFiles, setupCors, startLargeFile, getUploadPartUrl, listParts, finishLargeFile };
