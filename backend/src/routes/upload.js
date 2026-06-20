@@ -5,7 +5,7 @@ const { promisify } = require('util');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { uploadFile } = require('../services/backblaze');
+const { uploadFile, getDirectDownloadInfo } = require('../services/backblaze');
 const { adminMiddleware } = require('../middleware/admin');
 
 const execFileAsync = promisify(execFile);
@@ -284,7 +284,7 @@ router.post('/finish-large', async (req, res) => {
 });
 
 // Corrigir áudio AAC de arquivo já no B2
-// ffprobe e ffmpeg leem a URL diretamente — sem baixar o arquivo manualmente
+// Usa URL direta do B2 (bypassa CDN Cloudflare que bloqueia ffprobe/ffmpeg)
 router.post('/fix-audio', async (req, res) => {
   const { cdnUrl, movieId, movieType, field } = req.body;
   if (!cdnUrl) return res.status(400).json({ error: 'cdnUrl é obrigatório' });
@@ -292,28 +292,62 @@ router.post('/fix-audio', async (req, res) => {
   let tmpOutput = null;
 
   try {
-    // Passo 1: probe direto na URL (ffprobe baixa apenas os primeiros KB do container)
-    console.log('[fix-audio] probing:', cdnUrl);
-    const audioInfo = await probeAudio(cdnUrl);
+    // Extrai o nome do arquivo da URL da CDN
+    const origName = decodeURIComponent(path.basename(new URL(cdnUrl).pathname));
+    const ext = path.extname(origName) || '.mkv';
+
+    // Obtém URL direta do B2 (contorna Cloudflare Workers CDN)
+    console.log('[fix-audio] obtendo URL direta do B2 para:', origName);
+    const { url: b2Url, token: b2Token } = await getDirectDownloadInfo(origName);
+    console.log('[fix-audio] B2 URL:', b2Url);
+
+    // Passo 1: probe usando URL B2 direta com token de autorização
+    const b2AuthHdr = `Authorization: ${b2Token}\r\nUser-Agent: ${UA}\r\n`;
+    let audioInfo = null;
+    try {
+      const { stdout } = await execFileAsync('ffprobe', [
+        '-v', 'error',
+        '-headers', b2AuthHdr,
+        '-print_format', 'json',
+        '-show_streams', '-select_streams', 'a',
+        b2Url,
+      ], { timeout: 30_000 });
+      const stream = JSON.parse(stdout).streams?.[0];
+      if (stream) {
+        audioInfo = { codec: stream.codec_name, profile: stream.profile || '', channels: stream.channels || 0 };
+      }
+    } catch (fpErr) {
+      console.error('[fix-audio] ffprobe direto falhou:', fpErr.message?.slice(0, 200));
+    }
+
     console.log('[fix-audio] audio info:', audioInfo);
 
     if (!audioInfo) {
-      return res.status(422).json({ error: 'Não foi possível ler as faixas de áudio. Verifique se a URL é acessível e o arquivo é um vídeo válido.' });
+      return res.status(422).json({ error: 'Não foi possível ler as faixas de áudio mesmo com acesso direto ao B2. Verifique os logs do servidor.' });
     }
 
     if (!needsRemux(audioInfo)) {
       return res.json({ skipped: true, reason: 'Áudio já compatível (AAC-LC estéreo)', audioInfo });
     }
 
-    // Passo 2: remux com ffmpeg — lê direto da URL, grava em arquivo temporário
-    const urlObj  = new URL(cdnUrl);
-    const origName = path.basename(urlObj.pathname);
-    const ext      = path.extname(origName) || '.mkv';
+    // Passo 2: remux com ffmpeg via URL direta B2 + token
     tmpOutput = path.join(os.tmpdir(), `fh_fix_${Date.now()}${ext}`);
-
     console.log(`[fix-audio] remuxando ${origName} → ${tmpOutput}`);
-    const remuxed = await remuxToWebAac(cdnUrl, tmpOutput);
-    if (!remuxed) throw new Error('ffmpeg falhou ao remuxar. Verifique os logs do servidor.');
+
+    const ffArgs = [
+      '-headers', b2AuthHdr,
+      '-i', b2Url,
+      '-c:v', 'copy',
+      '-c:a', 'aac', '-profile:a', 'aac_low', '-ac', '2', '-b:a', '192k',
+      '-y', tmpOutput,
+    ];
+
+    try {
+      await execFileAsync('ffmpeg', ffArgs, { maxBuffer: 10 * 1024 * 1024, timeout: 7_200_000 });
+    } catch (ffErr) {
+      console.error('[fix-audio] ffmpeg falhou:', ffErr.message?.slice(0, 300));
+      throw new Error('ffmpeg falhou ao remuxar. Verifique os logs do servidor.');
+    }
 
     const sizeBytes = fs.statSync(tmpOutput).size;
     console.log(`[fix-audio] remux OK: ${(sizeBytes / 1024 / 1024).toFixed(0)} MB`);
@@ -338,99 +372,31 @@ router.post('/fix-audio', async (req, res) => {
   }
 });
 
-// Verifica o áudio (sem remuxar) — com diagnóstico detalhado
+// Verifica o áudio (sem remuxar) — usa URL direta B2 para contornar CDN Cloudflare
 router.post('/check-audio', async (req, res) => {
   const { cdnUrl } = req.body;
   if (!cdnUrl) return res.status(400).json({ error: 'cdnUrl é obrigatório' });
 
-  const log = [];
-  const tmpProbe = path.join(os.tmpdir(), `fh_probe_${Date.now()}.tmp`);
-
   try {
-    // Tenta baixar parcialmente via axios
-    log.push('Tentando download parcial (20 MB)…');
-    const axios = require('axios');
-    let downloadOk = false;
-    let httpStatus = null;
-    let bytesReceived = 0;
-
-    try {
-      const resp = await axios.get(cdnUrl, {
-        responseType: 'stream',
-        timeout: 60_000,
-        headers: {
-          'User-Agent': UA,
-          'Accept': '*/*',
-          'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
-          'Range': `bytes=0-${PARTIAL_BYTES - 1}`,
-        },
-        validateStatus: s => s < 500, // aceita 200, 206, 302, 403, etc.
-      });
-
-      httpStatus = resp.status;
-      log.push(`HTTP status: ${httpStatus}`);
-
-      if (resp.status === 200 || resp.status === 206) {
-        await new Promise((resolve, reject) => {
-          const out = fs.createWriteStream(tmpProbe);
-          resp.data.on('data', chunk => {
-            bytesReceived += chunk.length;
-            if (bytesReceived >= PARTIAL_BYTES) resp.data.destroy();
-          });
-          resp.data.pipe(out);
-          out.on('finish', resolve);
-          out.on('error', reject);
-          resp.data.on('error', err => (err.code === 'ECONNRESET' ? resolve() : reject(err)));
-        });
-        log.push(`Bytes recebidos: ${bytesReceived}`);
-        downloadOk = true;
-      } else {
-        log.push(`CDN retornou status inesperado — não é possível baixar parcialmente`);
-      }
-    } catch (dlErr) {
-      log.push(`Download falhou: ${dlErr.message}`);
-    }
-
-    // Tenta probe no arquivo local
-    if (downloadOk && bytesReceived > 1024) {
-      log.push('Executando ffprobe no arquivo parcial…');
-      try {
-        const { stdout, stderr } = await execFileAsync('ffprobe', [
-          '-v', 'error', '-print_format', 'json', '-show_streams', '-select_streams', 'a',
-          tmpProbe,
-        ], { timeout: 20_000 });
-        const stream = JSON.parse(stdout).streams?.[0];
-        if (stream) {
-          const audioInfo = { codec: stream.codec_name, profile: stream.profile || '', channels: stream.channels || 0 };
-          log.push(`Detectado: ${JSON.stringify(audioInfo)}`);
-          return res.json({ audioInfo, needsRemux: needsRemux(audioInfo) });
-        }
-        log.push(`ffprobe sem streams de áudio detectados`);
-        if (stderr) log.push(`ffprobe stderr: ${stderr.slice(0, 200)}`);
-      } catch (fpErr) {
-        log.push(`ffprobe falhou: ${fpErr.message?.slice(0, 200)}`);
-      }
-    }
-
-    // Fallback: heurística pelo nome do arquivo
     const filename = decodeURIComponent(path.basename(new URL(cdnUrl).pathname));
-    log.push(`Usando heurística no nome: ${filename}`);
-    const ch6 = /\b(6ch|5\.1|7\.1|ac3|dts|truehd)/i.test(filename);
-    const heAac = /\bhe[-_]?aac\b/i.test(filename);
-    if (ch6 || heAac) {
-      const guessed = { codec: 'aac', profile: ch6 ? 'surround-guess' : 'HE-AAC-guess', channels: ch6 ? 6 : 2 };
-      log.push(`Heurística: provável problema de áudio`);
-      return res.json({ audioInfo: guessed, needsRemux: true, guessed: true, log });
-    }
+    const { url: b2Url, token: b2Token } = await getDirectDownloadInfo(filename);
 
-    return res.status(422).json({
-      error: 'Não foi possível analisar o áudio deste arquivo. Veja o diagnóstico.',
-      log,
-    });
+    const { stdout } = await execFileAsync('ffprobe', [
+      '-v', 'error',
+      '-headers', `Authorization: ${b2Token}\r\nUser-Agent: ${UA}\r\n`,
+      '-print_format', 'json',
+      '-show_streams', '-select_streams', 'a',
+      b2Url,
+    ], { timeout: 30_000 });
+
+    const stream = JSON.parse(stdout).streams?.[0];
+    if (!stream) return res.status(422).json({ error: 'Nenhuma faixa de áudio encontrada no arquivo.' });
+
+    const audioInfo = { codec: stream.codec_name, profile: stream.profile || '', channels: stream.channels || 0 };
+    res.json({ audioInfo, needsRemux: needsRemux(audioInfo) });
   } catch (err) {
-    res.status(500).json({ error: err.message, log });
-  } finally {
-    try { fs.unlinkSync(tmpProbe); } catch {}
+    console.error('[check-audio] erro:', err.message?.slice(0, 300));
+    res.status(500).json({ error: err.message?.slice(0, 300) });
   }
 });
 

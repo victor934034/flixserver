@@ -2,6 +2,7 @@ const axios = require('axios');
 
 let authCache = null;
 let authExpiry = 0;
+let bucketNameCache = null;
 
 async function authorize() {
   if (authCache && Date.now() < authExpiry) return authCache;
@@ -234,6 +235,28 @@ async function uploadFileFromPath(filePath, filename, contentType = 'video/mp4')
   };
 }
 
+// Retorna a URL de download direta do B2 (sem passar pelo CDN Cloudflare).
+// Útil para operações de backend (ffprobe/ffmpeg) que não suportam Cloudflare Workers.
+async function getDirectDownloadInfo(filename) {
+  const auth = await authorize();
+
+  // Obtém o nome do bucket uma vez (fica em cache)
+  if (!bucketNameCache) {
+    const { data } = await axios.post(
+      `${auth.apiUrl}/b2api/v2/b2_list_buckets`,
+      { accountId: auth.accountId, bucketId: process.env.BACKBLAZE_BUCKET_ID },
+      { headers: { Authorization: auth.authorizationToken } }
+    );
+    bucketNameCache = data.buckets?.[0]?.bucketName;
+  }
+
+  // A URL direta do B2 precisa do token de autorização no cabeçalho
+  return {
+    url: `${auth.downloadUrl}/file/${bucketNameCache}/${encodeURIComponent(filename)}`,
+    token: auth.authorizationToken,
+  };
+}
+
 const fs = require('fs');
 
-module.exports = { authorize, getUploadUrl, uploadFile, uploadFileFromPath, deleteFile, listFiles, setupCors, startLargeFile, getUploadPartUrl, listParts, finishLargeFile };
+module.exports = { authorize, getUploadUrl, uploadFile, uploadFileFromPath, deleteFile, listFiles, setupCors, startLargeFile, getUploadPartUrl, listParts, finishLargeFile, getDirectDownloadInfo };
