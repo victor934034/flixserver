@@ -26,6 +26,13 @@ function formatSpeed(bps) {
   return `${(bps / 1024 / 1024).toFixed(1)} MB/s`;
 }
 
+function formatETA(seconds) {
+  if (!seconds || seconds <= 0 || !isFinite(seconds) || seconds > 86400) return '';
+  if (seconds < 60) return `~${Math.round(seconds)}s`;
+  if (seconds < 3600) return `~${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
+  return `~${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+}
+
 // Single-file upload (< 200 MB)
 function doUploadXHR(item, presign, onProgress, signal) {
   let _bps = 0, _t = Date.now(), _b = 0;
@@ -426,6 +433,11 @@ export default function UploadPage() {
                     {item.speed > 512 && (
                       <span style={{ color: '#46d369', fontWeight: 600 }}>{formatSpeed(item.speed)}</span>
                     )}
+                    {item.speed > 512 && item.progress > 0 && item.progress < 88 && (() => {
+                      const loaded = (item.progress / 88) * item.file.size;
+                      const eta = formatETA((item.file.size - loaded) / item.speed);
+                      return eta ? <span>{eta}</span> : null;
+                    })()}
                     {item.totalParts && item.resumeState && (
                       <span>Parte {item.resumeState.partsDone + 1}/{item.totalParts}</span>
                     )}
