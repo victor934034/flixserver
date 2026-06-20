@@ -110,12 +110,19 @@ async function getUploadPartUrl(fileId) {
 
 async function listParts(fileId) {
   const auth = await authorize();
-  const { data } = await axios.post(
-    `${auth.apiUrl}/b2api/v2/b2_list_parts`,
-    { fileId, maxPartCount: 10000 },
-    { headers: { Authorization: auth.authorizationToken } }
-  );
-  return data.parts; // [{partNumber, contentSha1, contentLength}]
+  const allParts = [];
+  let startPartNumber = 1;
+  while (true) {
+    const { data } = await axios.post(
+      `${auth.apiUrl}/b2api/v2/b2_list_parts`,
+      { fileId, maxPartCount: 1000, startPartNumber },
+      { headers: { Authorization: auth.authorizationToken } }
+    );
+    allParts.push(...data.parts);
+    if (!data.nextPartNumber) break;
+    startPartNumber = data.nextPartNumber;
+  }
+  return allParts; // [{partNumber, contentSha1, contentLength}]
 }
 
 async function finishLargeFile(fileId, partSha1Array) {
