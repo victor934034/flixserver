@@ -31,13 +31,19 @@ export function AuthProvider({ children }) {
     setUser(u);
   };
 
+  const loginWithToken = async (token, u) => {
+    await AsyncStorage.setItem('token', token);
+    await AsyncStorage.setItem('user', JSON.stringify(u));
+    setUser(u);
+  };
+
   const logout = async () => {
     await AsyncStorage.multiRemove(['token', 'user']);
     setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, loginWithToken, logout }}>
       {children}
     </AuthContext.Provider>
   );

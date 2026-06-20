@@ -97,6 +97,13 @@ export default function PerfilScreen() {
             desc={parentalConfig.enabled ? `Ativo · máx ${parentalConfig.maxRating}+` : 'Desativado'}
             onPress={() => router.push('/parental-controls')}
           />
+          <View style={styles.divider} />
+          <MenuItem
+            icon="tv-outline"
+            label="Autorizar TV"
+            desc="Conectar TV com código de acesso"
+            onPress={() => router.push('/autorizar-tv')}
+          />
         </View>
       </View>
 

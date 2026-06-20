@@ -1,105 +1,208 @@
 import React, { useEffect, useState, useRef } from 'react';
 import {
-  View, Text, StyleSheet, Image, TouchableHighlight,
-  ScrollView, FlatList, ActivityIndicator, Dimensions, BackHandler,
+  View, Text, StyleSheet, Image, Pressable,
+  FlatList, ActivityIndicator, Dimensions, BackHandler, findNodeHandle,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../lib/api';
 
+// ─── Scale ────────────────────────────────────────────────────────────────────
 const { width: W, height: H } = Dimensions.get('window');
+const S = Math.min(W / 1920, H / 1080);
+const r = v => Math.max(1, Math.round(v * S));
 
-function ActionButton({ label, icon, onPress, primary, hasTVPreferredFocus, onFocus, onBlur }) {
-  const [focused, setFocused] = useState(false);
+const EP_W = r(200);
+const EP_H = Math.round(EP_W * 9 / 16);
+
+// ─── TVPressable ──────────────────────────────────────────────────────────────
+const TVPressable = React.forwardRef(function TVPressable(
+  { children, style, onPress, onFocus, onBlur, hasTVPreferredFocus, nextFocusRight },
+  ref
+) {
   return (
-    <TouchableHighlight
+    <Pressable
+      ref={ref}
+      focusable={true}
       hasTVPreferredFocus={hasTVPreferredFocus}
+      nextFocusRight={nextFocusRight}
+      onFocus={onFocus}
+      onBlur={onBlur}
       onPress={onPress}
-      onFocus={() => { setFocused(true); onFocus?.(); }}
-      onBlur={() => { setFocused(false); onBlur?.(); }}
-      underlayColor="transparent"
-      style={[
-        styles.actionBtn,
-        primary ? styles.actionBtnPrimary : styles.actionBtnSecondary,
-        focused && styles.actionBtnFocused,
-      ]}
+      style={style}
     >
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-        <Ionicons name={icon} size={20} color={primary ? '#000' : '#fff'} />
-        <Text style={[styles.actionBtnText, primary && { color: '#000' }]}>{label}</Text>
-      </View>
-    </TouchableHighlight>
+      {children}
+    </Pressable>
+  );
+});
+
+// ─── Back button ──────────────────────────────────────────────────────────────
+function BackBtn({ onPress }) {
+  const [foc, setFoc] = useState(false);
+  return (
+    <TVPressable
+      onPress={onPress}
+      onFocus={() => setFoc(true)}
+      onBlur={() => setFoc(false)}
+      style={[s.backBtn, foc && s.backBtnFoc]}
+    >
+      <Ionicons name="arrow-back" size={r(22)} color="#fff" />
+      {foc && <Text style={s.backBtnTxt}>Voltar</Text>}
+    </TVPressable>
   );
 }
 
-function EpisodeItem({ ep, onPress }) {
-  const [focused, setFocused] = useState(false);
-  const hasFile = ep.file_dubbing || ep.file_subtitled || ep.file_cinema;
+// ─── Action button ────────────────────────────────────────────────────────────
+function ActionBtn({ label, sublabel, icon, onPress, primary, hasTVPreferredFocus, nextFocusRight }) {
+  const [foc, setFoc] = useState(false);
+  return (
+    <TVPressable
+      hasTVPreferredFocus={hasTVPreferredFocus}
+      nextFocusRight={nextFocusRight}
+      onPress={onPress}
+      onFocus={() => setFoc(true)}
+      onBlur={() => setFoc(false)}
+      style={[s.actionBtn, primary ? s.actionBtnPri : s.actionBtnSec, foc && s.actionBtnFoc]}
+    >
+      <View style={s.actionBtnRow}>
+        <View style={[s.actionBtnIcon, primary && !foc && s.actionBtnIconDark]}>
+          <Ionicons name={icon} size={r(18)} color={primary && !foc ? '#000' : '#fff'} />
+        </View>
+        <View>
+          <Text style={[s.actionBtnTxt, primary && !foc && { color: '#000' }]}>{label}</Text>
+          {!!sublabel && <Text style={[s.actionBtnSub, primary && !foc && { color: 'rgba(0,0,0,0.55)' }]}>{sublabel}</Text>}
+        </View>
+      </View>
+    </TVPressable>
+  );
+}
+
+// ─── Season selector  (< Temporada N >) ──────────────────────────────────────
+function SeasonArrowBtn({ icon, disabled, onPress }) {
+  const [foc, setFoc] = useState(false);
+  return (
+    <TVPressable
+      onPress={() => !disabled && onPress()}
+      onFocus={() => { setFoc(true); !disabled && onPress(); }}
+      onBlur={() => setFoc(false)}
+      style={[
+        s.seasonArrow,
+        foc && s.seasonArrowFoc,
+        disabled && s.seasonArrowOff,
+      ]}
+    >
+      <Ionicons
+        name={icon}
+        size={r(18)}
+        color={disabled ? '#2a2a2a' : foc ? '#fff' : '#888'}
+      />
+    </TVPressable>
+  );
+}
+
+function SeasonSelector({ seasons, season, onSelect }) {
+  const idx = seasons.indexOf(season);
+  return (
+    <View style={s.seasonSelector}>
+      <SeasonArrowBtn
+        icon="chevron-back"
+        disabled={idx <= 0}
+        onPress={() => onSelect(seasons[idx - 1])}
+      />
+      <View style={s.seasonCurrent}>
+        <Text style={s.seasonNum}>Temporada {season}</Text>
+        <Text style={s.seasonOf}>{idx + 1} de {seasons.length}</Text>
+      </View>
+      <SeasonArrowBtn
+        icon="chevron-forward"
+        disabled={idx >= seasons.length - 1}
+        onPress={() => onSelect(seasons[idx + 1])}
+      />
+    </View>
+  );
+}
+
+// ─── Episode item ─────────────────────────────────────────────────────────────
+const EpisodeItem = React.forwardRef(function EpisodeItem({ ep, onPress }, ref) {
+  const [foc, setFoc] = useState(false);
+  const hasFile = !!(ep.file_dubbing || ep.file_subtitled || ep.file_cinema);
 
   return (
-    <TouchableHighlight
+    <TVPressable
+      ref={ref}
+      onFocus={() => setFoc(true)}
+      onBlur={() => setFoc(false)}
       onPress={() => hasFile && onPress(ep)}
-      onFocus={() => setFocused(true)}
-      onBlur={() => setFocused(false)}
-      underlayColor="transparent"
-      style={[styles.epItem, focused && styles.epItemFocused, !hasFile && styles.epItemDisabled]}
+      style={[s.epItem, foc && s.epItemFoc, !hasFile && s.epItemOff]}
     >
-      <View style={styles.epItemInner}>
-        <View style={styles.epThumb}>
+      {/* Left accent bar when focused */}
+      {foc && <View style={s.epAccent} />}
+
+      <View style={s.epInner}>
+        {/* Thumbnail */}
+        <View style={[s.epThumb, foc && s.epThumbFoc]}>
           {ep.thumbnail_url
-            ? <Image source={{ uri: ep.thumbnail_url }} style={styles.epThumbImg} />
+            ? <Image source={{ uri: ep.thumbnail_url }} style={StyleSheet.absoluteFill} resizeMode="cover" />
             : (
-              <View style={styles.epThumbPlaceholder}>
-                <Text style={styles.epNumBig}>{ep.episode_number}</Text>
+              <View style={[StyleSheet.absoluteFill, s.epThumbPh]}>
+                <Text style={s.epThumbNum}>{ep.episode_number}</Text>
               </View>
             )
           }
-          {hasFile && (
-            <View style={[styles.epPlayIcon, focused && { opacity: 1 }]}>
-              <Ionicons name="play-circle" size={28} color="#fff" />
+          {foc && hasFile && (
+            <View style={s.epThumbOverlay}>
+              <Ionicons name="play-circle" size={r(44)} color="#fff" />
+            </View>
+          )}
+          {!foc && (
+            <View style={s.epDurBadge}>
+              <Text style={s.epDurTxt}>{ep.duration ? `${ep.duration}m` : '—'}</Text>
             </View>
           )}
         </View>
-        <View style={styles.epText}>
-          <Text style={styles.epCode}>
-            T{ep.season_number}E{String(ep.episode_number).padStart(2, '0')}
+
+        {/* Text */}
+        <View style={s.epText}>
+          <Text style={s.epCode}>
+            EP {String(ep.episode_number).padStart(2, '0')}
+            {ep.air_date ? `  ·  ${ep.air_date.slice(0, 4)}` : ''}
           </Text>
-          <Text style={styles.epTitle} numberOfLines={1}>
+          <Text style={[s.epTitle, foc && s.epTitleFoc]} numberOfLines={2}>
             {ep.title || `Episódio ${ep.episode_number}`}
           </Text>
-          {ep.synopsis
-            ? <Text style={styles.epSynopsis} numberOfLines={2}>{ep.synopsis}</Text>
-            : null
-          }
-          {ep.duration
-            ? <Text style={styles.epDur}>{ep.duration} min</Text>
-            : null
-          }
+          {!!ep.synopsis && (
+            <Text style={s.epSynopsis} numberOfLines={foc ? 3 : 2}>{ep.synopsis}</Text>
+          )}
+          {!hasFile && (
+            <Text style={s.epUnavail}>Não disponível</Text>
+          )}
         </View>
-        {focused && hasFile && (
-          <Ionicons name="chevron-forward" size={22} color="#fff" style={{ marginLeft: 'auto' }} />
-        )}
-      </View>
-    </TouchableHighlight>
-  );
-}
 
+        {/* Arrow hint */}
+        <View style={[s.epArrow, !foc && { opacity: 0 }]}>
+          <Ionicons name="play" size={r(16)} color="#fff" />
+        </View>
+      </View>
+    </TVPressable>
+  );
+});
+
+// ─── DetailScreen ─────────────────────────────────────────────────────────────
 export default function DetailScreen({ navigation, route }) {
   const { item, type } = route.params;
   const isSeries = type === 'series';
 
-  const [detail, setDetail] = useState(item);
+  const [detail, setDetail]     = useState(item);
   const [episodes, setEpisodes] = useState([]);
-  const [season, setSeason] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [focusedSeason, setFocusedSeason] = useState(null);
+  const [season, setSeason]     = useState(null);
+  const [loading, setLoading]   = useState(true);
+  const epListRef  = useRef(null);
+  const firstEpRef = useRef(null);
+  const [firstEpHandle, setFirstEpHandle] = useState(null);
 
   useEffect(() => {
-    const handler = BackHandler.addEventListener('hardwareBackPress', () => {
-      navigation.goBack();
-      return true;
-    });
-    return () => handler.remove();
+    const h = BackHandler.addEventListener('hardwareBackPress', () => { navigation.goBack(); return true; });
+    return () => h.remove();
   }, []);
 
   useEffect(() => {
@@ -117,174 +220,232 @@ export default function DetailScreen({ navigation, route }) {
     }).finally(() => setLoading(false));
   }, [item.id]);
 
+  // After first episode mounts, capture its node handle for nextFocusRight
+  useEffect(() => {
+    if (firstEpRef.current) {
+      const h = findNodeHandle(firstEpRef.current);
+      if (h) setFirstEpHandle(h);
+    }
+  }, [loading, season]);
+
   const seasons = [...new Set(episodes.map(e => e.season_number))].sort((a, b) => a - b);
   const currentEps = episodes
     .filter(e => e.season_number === season)
     .sort((a, b) => a.episode_number - b.episode_number);
 
+  function selectSeason(n) {
+    setSeason(n);
+    try { epListRef.current?.scrollToOffset({ offset: 0, animated: false }); } catch {}
+  }
+
   function playMovie(version) {
-    const url = detail[`file_${version}`] || detail.file_dubbing || detail.file_subtitled || detail.file_cinema || detail.file_4k;
+    const url = detail[`file_${version}`] || detail.file_dubbing || detail.file_subtitled || detail.file_cinema;
     if (!url) return;
-    navigation.navigate('Player', { url, title: detail.title, poster: detail.backdrop_url });
+    navigation.navigate('Player', {
+      url,
+      title: detail.title || detail.name,
+      poster: detail.backdrop_url,
+      tracks: {
+        dubbing:   detail.file_dubbing   || null,
+        subtitled: detail.file_subtitled || null,
+        cinema:    detail.file_cinema    || null,
+      },
+      subtitles: {
+        pt: detail.subtitle_pt || null,
+        en: detail.subtitle_en || null,
+        es: detail.subtitle_es || null,
+      },
+    });
   }
 
   function playEpisode(ep) {
     const url = ep.file_dubbing || ep.file_subtitled || ep.file_cinema;
     if (!url) return;
-    const title = `${detail.title} · T${ep.season_number}E${String(ep.episode_number).padStart(2, '0')}${ep.title ? ` · ${ep.title}` : ''}`;
-    navigation.navigate('Player', { url, title, poster: ep.thumbnail_url || detail.backdrop_url });
+    const epLabel = `T${ep.season_number}E${String(ep.episode_number).padStart(2, '0')}`;
+    const title = `${detail.title || detail.name} · ${epLabel}${ep.title ? ` · ${ep.title}` : ''}`;
+    navigation.navigate('Player', {
+      url,
+      title,
+      poster: ep.thumbnail_url || detail.backdrop_url,
+      tracks: {
+        dubbing:   ep.file_dubbing   || null,
+        subtitled: ep.file_subtitled || null,
+        cinema:    ep.file_cinema    || null,
+      },
+      subtitles: {
+        pt: ep.subtitle_pt || null,
+        en: ep.subtitle_en || null,
+        es: ep.subtitle_es || null,
+      },
+      skipIntroTo: 90_000,
+      seriesContext: {
+        seriesTitle: detail.title || detail.name,
+        backdropUrl: detail.backdrop_url,
+        episodes:    currentEps,
+        currentEpId: ep.id,
+      },
+    });
   }
 
-  const availableVersions = [];
-  if (detail.file_dubbing) availableVersions.push({ key: 'dubbing', label: 'Dublado' });
-  if (detail.file_subtitled) availableVersions.push({ key: 'subtitled', label: 'Legendado' });
-  if (detail.file_cinema) availableVersions.push({ key: 'cinema', label: 'Cinema' });
-  if (detail.file_4k) availableVersions.push({ key: '4k', label: '4K' });
+  const versions = [];
+  if (detail.file_dubbing)   versions.push({ key: 'dubbing',   label: 'Dublado',   sub: 'Áudio português', icon: 'volume-high' });
+  if (detail.file_subtitled) versions.push({ key: 'subtitled', label: 'Legendado',  sub: 'Áudio original',  icon: 'subtitles-outline' });
+  if (detail.file_cinema)    versions.push({ key: 'cinema',    label: 'Cinema',     sub: null,              icon: 'film-outline' });
+  if (detail.file_4k)        versions.push({ key: '4k',        label: '4K HDR',     sub: 'Ultra HD',        icon: 'diamond-outline' });
+
+  const firstEp = currentEps[0];
 
   return (
-    <View style={styles.container}>
-      {/* Backdrop */}
+    <View style={s.root}>
+      {/* Full-screen backdrop */}
       {detail.backdrop_url
-        ? <Image source={{ uri: detail.backdrop_url }} style={styles.backdrop} />
-        : <View style={[styles.backdrop, { backgroundColor: '#111' }]} />
+        ? <Image source={{ uri: detail.backdrop_url }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        : <View style={[StyleSheet.absoluteFill, { backgroundColor: '#0d0d0d' }]} />
       }
+      {/* Bottom-to-top dark overlay */}
       <LinearGradient
-        colors={['rgba(0,0,0,0.1)', 'rgba(0,0,0,0.6)', '#000']}
+        colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.55)', 'rgba(0,0,0,0.92)', '#000']}
+        locations={[0, 0.3, 0.6, 1]}
         style={StyleSheet.absoluteFill}
       />
+      {/* Left panel overlay */}
       <LinearGradient
-        colors={['rgba(0,0,0,0.88)', 'transparent']}
+        colors={['rgba(0,0,0,0.97)', 'rgba(0,0,0,0.7)', 'transparent']}
         style={[StyleSheet.absoluteFill, { width: W * 0.52 }]}
         start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }}
       />
 
       {/* Back button */}
-      <TouchableHighlight
-        onPress={() => navigation.goBack()}
-        underlayColor="rgba(255,255,255,0.1)"
-        style={styles.backBtn}
-      >
-        <Ionicons name="arrow-back" size={26} color="#fff" />
-      </TouchableHighlight>
+      <BackBtn onPress={() => navigation.goBack()} />
 
-      <View style={styles.layout}>
-        {/* Left: info */}
-        <View style={styles.infoPanel}>
-          <ScrollView showsVerticalScrollIndicator={false}>
-            <View style={styles.infoPadding}>
-              {detail.age_rating && (
-                <View style={styles.ageBadge}>
-                  <Text style={styles.ageBadgeText}>{detail.age_rating}+</Text>
+      <View style={s.layout}>
+        {/* ── Left: info ── */}
+        <View style={s.infoPanel}>
+          {/* Fixed top */}
+          <View style={s.infoTop}>
+            <View style={s.badgeRow}>
+              {!!detail.age_rating && (
+                <View style={s.ageBadge}><Text style={s.ageBadgeTxt}>{detail.age_rating}+</Text></View>
+              )}
+              {isSeries && !!detail.total_seasons && (
+                <View style={s.tagBadge}><Text style={s.tagBadgeTxt}>{detail.total_seasons} temporada{detail.total_seasons > 1 ? 's' : ''}</Text></View>
+              )}
+              {isSeries && !!detail.status && (
+                <View style={[s.tagBadge, detail.status === 'ongoing' && s.tagBadgeGreen]}>
+                  <Text style={s.tagBadgeTxt}>{detail.status === 'ongoing' ? 'Em exibição' : 'Encerrada'}</Text>
                 </View>
               )}
+            </View>
 
-              <Text style={styles.title} numberOfLines={3}>{detail.title}</Text>
+            <Text style={s.title} numberOfLines={2}>{detail.title || detail.name}</Text>
 
-              <View style={styles.metaRow}>
-                {(detail.year || detail.year_start) && (
-                  <Text style={styles.metaItem}>{detail.year || detail.year_start}</Text>
-                )}
-                {detail.total_seasons && (
-                  <Text style={styles.metaItem}>{detail.total_seasons} temp.</Text>
-                )}
-                {detail.duration && (
-                  <Text style={styles.metaItem}>{detail.duration} min</Text>
-                )}
-                {detail.rating > 0 && (
-                  <Text style={[styles.metaItem, { color: '#ffa500' }]}>
-                    ★ {Number(detail.rating).toFixed(1)}
-                  </Text>
-                )}
+            <View style={s.metaRow}>
+              {!!(detail.year || detail.year_start) && (
+                <Text style={s.metaItem}>{detail.year || detail.year_start}</Text>
+              )}
+              {!!detail.duration && (
+                <Text style={s.metaItem}>{detail.duration} min</Text>
+              )}
+              {detail.rating > 0 && (
+                <View style={s.ratingChip}>
+                  <Ionicons name="star" size={r(12)} color="#f59e0b" />
+                  <Text style={s.ratingTxt}>{Number(detail.rating).toFixed(1)}</Text>
+                </View>
+              )}
+            </View>
+
+            {Array.isArray(detail.genres) && detail.genres.length > 0 && (
+              <View style={s.genreRow}>
+                {detail.genres.slice(0, 4).map(g => (
+                  <View key={g} style={s.genreChip}>
+                    <Text style={s.genreTxt}>{g}</Text>
+                  </View>
+                ))}
               </View>
+            )}
+          </View>
 
-              {detail.synopsis ? (
-                <Text style={styles.synopsis} numberOfLines={5}>{detail.synopsis}</Text>
-              ) : null}
+          {/* Flexible middle: synopsis */}
+          {!!detail.synopsis && (
+            <Text style={s.synopsis} numberOfLines={4}>{detail.synopsis}</Text>
+          )}
 
-              {Array.isArray(detail.genres) && detail.genres.length > 0 && (
-                <Text style={styles.genres}>{detail.genres.join(' · ')}</Text>
-              )}
+          {/* Fixed bottom: buttons + season selector */}
+          <View style={s.infoBottom}>
+            {/* Filmes: botões empilhados */}
+            {!isSeries && (
+              <View style={s.actions}>
+                {versions.map((v, i) => (
+                  <ActionBtn
+                    key={v.key}
+                    label={v.label}
+                    sublabel={v.sub}
+                    icon={v.icon}
+                    primary={i === 0}
+                    hasTVPreferredFocus={i === 0}
+                    onPress={() => playMovie(v.key)}
+                  />
+                ))}
+              </View>
+            )}
 
-              {/* Movie: version buttons */}
-              {!isSeries && availableVersions.length > 0 && (
-                <View style={styles.versionBtns}>
-                  {availableVersions.map((v, i) => (
-                    <ActionButton
-                      key={v.key}
-                      label={v.label}
-                      icon={i === 0 ? 'play' : 'play-outline'}
-                      primary={i === 0}
-                      hasTVPreferredFocus={i === 0}
-                      onPress={() => playMovie(v.key)}
-                    />
-                  ))}
-                </View>
-              )}
-
-              {/* Series: play first episode */}
-              {isSeries && currentEps.length > 0 && (
-                <ActionButton
+            {/* Séries: Assistir e seletor de temporada empilhados */}
+            {isSeries && !!firstEp && (
+              <View style={s.seriesStack}>
+                <ActionBtn
                   label="Assistir"
+                  sublabel={`T${firstEp.season_number} · EP ${String(firstEp.episode_number).padStart(2, '0')}${firstEp.title ? ` — ${firstEp.title}` : ''}`}
                   icon="play"
                   primary
                   hasTVPreferredFocus
-                  onPress={() => playEpisode(currentEps[0])}
+                  nextFocusRight={firstEpHandle}
+                  onPress={() => playEpisode(firstEp)}
                 />
-              )}
-            </View>
-          </ScrollView>
+                {seasons.length > 1 && (
+                  <SeasonSelector seasons={seasons} season={season} onSelect={selectSeason} />
+                )}
+              </View>
+            )}
+          </View>
         </View>
 
-        {/* Right: episode list (series only) */}
+        {/* ── Right: episode list ── */}
         {isSeries && (
-          <View style={styles.episodePanel}>
-            {loading
-              ? <ActivityIndicator color="#E50914" style={{ marginTop: 60 }} />
-              : (
-                <>
-                  {/* Season tabs */}
-                  {seasons.length > 1 && (
-                    <ScrollView
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      style={styles.seasonTabs}
-                    >
-                      {seasons.map(s => (
-                        <TouchableHighlight
-                          key={s}
-                          onPress={() => setSeason(s)}
-                          onFocus={() => { setFocusedSeason(s); setSeason(s); }}
-                          onBlur={() => setFocusedSeason(null)}
-                          underlayColor="transparent"
-                          style={[
-                            styles.seasonTab,
-                            s === season && styles.seasonTabActive,
-                            focusedSeason === s && styles.seasonTabFocused,
-                          ]}
-                        >
-                          <Text style={[
-                            styles.seasonTabText,
-                            s === season && styles.seasonTabTextActive,
-                          ]}>
-                            T{s}
-                          </Text>
-                        </TouchableHighlight>
-                      ))}
-                    </ScrollView>
-                  )}
+          <View style={s.epPanel}>
+            {/* Header */}
+            <View style={s.epHeader}>
+              <Text style={s.epHeaderTitle}>
+                {seasons.length > 1 ? `Temporada ${season}` : 'Episódios'}
+              </Text>
+              {!loading && (
+                <Text style={s.epHeaderCount}>{currentEps.length} ep.</Text>
+              )}
+            </View>
 
-                  {/* Episodes */}
-                  <FlatList
-                    data={currentEps}
-                    keyExtractor={ep => String(ep.id)}
-                    showsVerticalScrollIndicator={false}
-                    renderItem={({ item: ep }) => (
-                      <EpisodeItem ep={ep} onPress={playEpisode} />
-                    )}
+            {/* Separator */}
+            <View style={s.epHeaderLine} />
+
+            {loading ? (
+              <View style={s.epLoading}>
+                <ActivityIndicator color="#E50914" size="large" />
+              </View>
+            ) : (
+              <FlatList
+                ref={epListRef}
+                data={currentEps}
+                keyExtractor={ep => String(ep.id)}
+                showsVerticalScrollIndicator={false}
+                removeClippedSubviews={false}
+                contentContainerStyle={{ paddingBottom: r(40) }}
+                renderItem={({ item: ep, index }) => (
+                  <EpisodeItem
+                    ref={index === 0 ? firstEpRef : null}
+                    ep={ep}
+                    onPress={playEpisode}
                   />
-                </>
-              )
-            }
+                )}
+              />
+            )}
           </View>
         )}
       </View>
@@ -292,106 +453,188 @@ export default function DetailScreen({ navigation, route }) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
-    width: W, height: H,
-    resizeMode: 'cover',
-  },
-  backBtn: {
-    position: 'absolute',
-    top: 24, left: 24, zIndex: 20,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    borderRadius: 24, padding: 10,
-  },
+// ─── Styles ───────────────────────────────────────────────────────────────────
+const s = StyleSheet.create({
+  root: { flex: 1, backgroundColor: '#000' },
   layout: { flex: 1, flexDirection: 'row' },
 
-  // Left info panel
-  infoPanel: { width: W * 0.44, paddingTop: 24 },
-  infoPadding: { paddingHorizontal: 48, paddingTop: 48, paddingBottom: 40 },
-  ageBadge: {
-    backgroundColor: '#E50914',
-    alignSelf: 'flex-start',
-    paddingHorizontal: 8, paddingVertical: 4,
-    borderRadius: 4, marginBottom: 14,
-  },
-  ageBadgeText: { color: '#fff', fontSize: 14, fontWeight: '800' },
-  title: {
-    fontSize: 46,
-    fontWeight: '900',
-    color: '#fff',
-    marginBottom: 14,
-    textShadowColor: 'rgba(0,0,0,0.8)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 8,
-  },
-  metaRow: { flexDirection: 'row', gap: 16, marginBottom: 16, flexWrap: 'wrap' },
-  metaItem: { color: '#aaa', fontSize: 16 },
-  synopsis: {
-    color: '#ccc', fontSize: 17, lineHeight: 26,
-    marginBottom: 14,
-  },
-  genres: { color: '#777', fontSize: 15, marginBottom: 28 },
-  versionBtns: { gap: 12 },
-  actionBtn: {
-    paddingHorizontal: 28, paddingVertical: 14,
-    borderRadius: 6, marginBottom: 4,
+  // Back
+  backBtn: {
+    position: 'absolute', top: r(20), left: r(20), zIndex: 30,
+    flexDirection: 'row', alignItems: 'center', gap: r(8),
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: r(30), paddingVertical: r(9), paddingHorizontal: r(14),
     borderWidth: 2, borderColor: 'transparent',
   },
-  actionBtnPrimary: { backgroundColor: '#fff' },
-  actionBtnSecondary: { backgroundColor: 'rgba(109,109,110,0.7)', borderColor: 'transparent' },
-  actionBtnFocused: { borderColor: '#fff', backgroundColor: 'rgba(255,255,255,0.15)' },
-  actionBtnText: { fontSize: 18, fontWeight: '700', color: '#fff' },
+  backBtnFoc: { borderColor: '#fff', backgroundColor: 'rgba(255,255,255,0.12)' },
+  backBtnTxt: { color: '#fff', fontSize: r(15), fontWeight: '700' },
 
-  // Right episode panel
-  episodePanel: {
-    flex: 1,
-    paddingTop: 72,
-    paddingRight: 32,
-    paddingLeft: 16,
+  // Info panel — content starts from top, uses all available space
+  infoPanel: {
+    width: W * 0.44,
+    paddingTop: r(68),
+    paddingHorizontal: r(44),
+    paddingBottom: r(28),
+    flexDirection: 'column',
+    justifyContent: 'flex-start',
   },
-  seasonTabs: { marginBottom: 20 },
-  seasonTab: {
-    paddingHorizontal: 18, paddingVertical: 9,
-    borderRadius: 20, marginRight: 10,
-    borderWidth: 1, borderColor: '#333',
+  infoTop: { marginBottom: r(10) },
+
+  badgeRow: { flexDirection: 'row', gap: r(8), marginBottom: r(14), flexWrap: 'wrap' },
+  ageBadge: {
+    backgroundColor: '#E50914', borderRadius: r(4),
+    paddingHorizontal: r(8), paddingVertical: r(3),
   },
-  seasonTabActive: { backgroundColor: '#E50914', borderColor: '#E50914' },
-  seasonTabFocused: { borderColor: '#fff' },
-  seasonTabText: { color: '#aaa', fontSize: 16, fontWeight: '600' },
-  seasonTabTextActive: { color: '#fff' },
+  ageBadgeTxt: { color: '#fff', fontSize: r(12), fontWeight: '900' },
+  tagBadge: {
+    backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: r(4),
+    paddingHorizontal: r(10), paddingVertical: r(3),
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
+  },
+  tagBadgeGreen: { backgroundColor: 'rgba(34,197,94,0.15)', borderColor: 'rgba(34,197,94,0.3)' },
+  tagBadgeTxt: { color: '#ccc', fontSize: r(12), fontWeight: '600' },
+
+  title: {
+    fontSize: r(42), fontWeight: '900', color: '#fff',
+    lineHeight: r(50), marginBottom: r(10),
+    textShadowColor: 'rgba(0,0,0,0.9)', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: r(6),
+  },
+
+  metaRow: { flexDirection: 'row', alignItems: 'center', gap: r(12), marginBottom: r(10), flexWrap: 'wrap' },
+  metaItem: { color: '#888', fontSize: r(14) },
+  ratingChip: {
+    flexDirection: 'row', alignItems: 'center', gap: r(4),
+    backgroundColor: 'rgba(245,158,11,0.12)', borderRadius: r(6),
+    paddingHorizontal: r(8), paddingVertical: r(2),
+  },
+  ratingTxt: { color: '#f59e0b', fontSize: r(14), fontWeight: '700' },
+
+  genreRow: { flexDirection: 'row', gap: r(6), flexWrap: 'wrap', marginBottom: r(4) },
+  genreChip: {
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.13)',
+    borderRadius: r(16), paddingHorizontal: r(10), paddingVertical: r(3),
+  },
+  genreTxt: { color: '#888', fontSize: r(12) },
+
+  synopsis: {
+    color: '#aaa', fontSize: r(15), lineHeight: r(24),
+    marginBottom: r(20),
+  },
+
+  infoBottom: { marginTop: r(4) },
+
+  // Action buttons
+  actions: { gap: r(6), marginBottom: r(8) },
+  actionBtn: {
+    borderRadius: r(10), paddingVertical: r(10), paddingHorizontal: r(16),
+    borderWidth: r(2), borderColor: 'transparent',
+  },
+  actionBtnPri: { backgroundColor: '#fff' },
+  actionBtnSec: { backgroundColor: 'rgba(60,60,60,0.85)' },
+  actionBtnFoc: { borderColor: '#fff', backgroundColor: 'rgba(255,255,255,0.15)' },
+  actionBtnRow: { flexDirection: 'row', alignItems: 'center', gap: r(12) },
+  actionBtnIcon: {
+    width: r(32), height: r(32), borderRadius: r(16),
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  actionBtnIconDark: { backgroundColor: 'rgba(0,0,0,0.12)' },
+  actionBtnTxt: { fontSize: r(16), fontWeight: '800', color: '#fff' },
+  actionBtnSub: { fontSize: r(12), color: 'rgba(255,255,255,0.55)', marginTop: r(1) },
+
+  // Series stacked: Assistir then season selector below
+  seriesStack: {
+    gap: r(8),
+  },
+
+  // Season selector
+  seasonSelector: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: r(10), paddingVertical: r(4), paddingHorizontal: r(4),
+    flexDirection: 'row', alignItems: 'center',
+    minWidth: r(130),
+  },
+  seasonSelectorLabel: { display: 'none' },
+  seasonRow: { flex: 1, flexDirection: 'row', alignItems: 'center' },
+  seasonArrow: {
+    width: r(36), height: r(36),
+    justifyContent: 'center', alignItems: 'center',
+    borderRadius: r(8),
+    borderWidth: 2, borderColor: 'transparent',
+  },
+  seasonArrowFoc: {
+    borderColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  seasonArrowOff: { opacity: 0.2 },
+  seasonCurrent: { flex: 1, alignItems: 'center', paddingVertical: r(2) },
+  seasonNum: { fontSize: r(13), fontWeight: '800', color: '#fff' },
+  seasonOf: { fontSize: r(10), color: '#555', fontWeight: '600' },
+
+  // Episode panel
+  epPanel: {
+    flex: 1, paddingTop: r(20),
+    paddingLeft: r(8), paddingRight: r(28),
+  },
+  epHeader: { flexDirection: 'row', alignItems: 'baseline', gap: r(10), marginBottom: r(8) },
+  epHeaderTitle: { color: '#fff', fontSize: r(18), fontWeight: '800' },
+  epHeaderCount: { color: '#444', fontSize: r(13), fontWeight: '600' },
+  epHeaderLine: { height: 1, backgroundColor: 'rgba(255,255,255,0.07)', marginBottom: r(8) },
+  epLoading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
 
   // Episode item
   epItem: {
-    borderRadius: 8,
-    marginBottom: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    borderRadius: r(10), marginBottom: r(4),
+    borderWidth: 2, borderColor: 'transparent',
+    overflow: 'hidden',
   },
-  epItemFocused: { backgroundColor: 'rgba(255,255,255,0.12)' },
-  epItemDisabled: { opacity: 0.4 },
-  epItemInner: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  epItemFoc: {
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderColor: 'rgba(255,255,255,0.18)',
+  },
+  epItemOff: { opacity: 0.35 },
+  epAccent: {
+    position: 'absolute', left: 0, top: r(10), bottom: r(10),
+    width: r(3), backgroundColor: '#E50914', borderRadius: r(2),
+    zIndex: 1,
+  },
+  epInner: {
+    flexDirection: 'row', alignItems: 'center',
+    gap: r(12), padding: r(10),
+  },
+
   epThumb: {
-    width: 128, height: 72, borderRadius: 6,
-    overflow: 'hidden', backgroundColor: '#1a1a1a',
-    position: 'relative',
+    width: EP_W, height: EP_H,
+    borderRadius: r(6), overflow: 'hidden',
+    backgroundColor: '#161616', flexShrink: 0,
+    borderWidth: 2, borderColor: 'transparent',
   },
-  epThumbImg: { width: '100%', height: '100%', resizeMode: 'cover' },
-  epThumbPlaceholder: {
-    width: '100%', height: '100%',
-    justifyContent: 'center', alignItems: 'center',
-  },
-  epNumBig: { color: '#444', fontSize: 22, fontWeight: '700' },
-  epPlayIcon: {
+  epThumbFoc: { borderColor: 'rgba(255,255,255,0.3)' },
+  epThumbPh: { justifyContent: 'center', alignItems: 'center' },
+  epThumbNum: { color: '#2a2a2a', fontSize: r(28), fontWeight: '900' },
+  epThumbOverlay: {
     ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center', alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    opacity: 0,
   },
+  epDurBadge: {
+    position: 'absolute', bottom: r(4), right: r(4),
+    backgroundColor: 'rgba(0,0,0,0.78)',
+    paddingHorizontal: r(5), paddingVertical: r(2), borderRadius: r(4),
+  },
+  epDurTxt: { color: '#ccc', fontSize: r(11), fontWeight: '600' },
+
   epText: { flex: 1 },
-  epCode: { color: '#666', fontSize: 13, marginBottom: 4 },
-  epTitle: { color: '#fff', fontSize: 16, fontWeight: '600', marginBottom: 4 },
-  epSynopsis: { color: '#777', fontSize: 14, lineHeight: 20 },
-  epDur: { color: '#555', fontSize: 13, marginTop: 4 },
+  epCode: { color: '#555', fontSize: r(11), fontWeight: '700', marginBottom: r(3), letterSpacing: 0.5 },
+  epTitle: { color: '#bbb', fontSize: r(14), fontWeight: '600', marginBottom: r(4), lineHeight: r(18) },
+  epTitleFoc: { color: '#fff', fontWeight: '800' },
+  epSynopsis: { color: '#555', fontSize: r(12), lineHeight: r(17) },
+  epUnavail: { color: '#3a3a3a', fontSize: r(12), fontStyle: 'italic', marginTop: r(4) },
+
+  epArrow: {
+    width: r(28), height: r(28), borderRadius: r(14),
+    backgroundColor: '#E50914',
+    justifyContent: 'center', alignItems: 'center', flexShrink: 0,
+  },
 });

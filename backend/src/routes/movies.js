@@ -29,6 +29,24 @@ router.get('/', optionalAuth, async (req, res) => {
   }
 });
 
+// Busca por título
+router.get('/search', async (req, res) => {
+  const { q = '' } = req.query;
+  if (!q.trim()) return res.json([]);
+  try {
+    const { data, error } = await supabase
+      .from('movies')
+      .select(PUBLIC_FIELDS)
+      .eq('is_active', true)
+      .ilike('title', `%${q}%`)
+      .limit(20);
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Detalhes de um filme
 router.get('/:id', optionalAuth, async (req, res) => {
   try {
