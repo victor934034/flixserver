@@ -83,6 +83,43 @@ function detectVersion(filename) {
   return 'dubbing';
 }
 
+function isDualAudio(filename) {
+  const lower = filename.toLowerCase();
+  return /dual[\s._\-]?(audio|áudio|udio)?/i.test(lower);
+}
+
+function srtToVtt(srt) {
+  return 'WEBVTT\n\n' + srt
+    .replace(/\r\n/g, '\n')
+    .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2')
+    .trim();
+}
+
+async function autoFetchSubtitles({ movieId, tmdbId, movieType, seasonNumber, episodeNumber }) {
+  if (!process.env.OPENSUBTITLES_API_KEY) return;
+  const { searchSubtitles, getDownloadLink, downloadContent } = require('./src/services/opensubtitles');
+  const { uploadFile } = require('./src/services/backblaze');
+  const langMap = { pt: 'pt-BR', en: 'en', es: 'es' };
+  for (const [dbLang, apiLang] of Object.entries(langMap)) {
+    try {
+      const hits = await searchSubtitles({ tmdbId, type: movieType, lang: apiLang, seasonNumber, episodeNumber });
+      if (!hits.length) { console.log(`  [subtitles] ${dbLang}: não encontrado`); continue; }
+      const sorted = hits.sort((a, b) => (b.attributes?.download_count || 0) - (a.attributes?.download_count || 0));
+      const file = sorted[0]?.attributes?.files?.[0];
+      if (!file?.file_id) continue;
+      const link = await getDownloadLink(file.file_id);
+      const srtBuffer = await downloadContent(link);
+      const vttBuffer = Buffer.from(srtToVtt(srtBuffer.toString('utf-8')), 'utf-8');
+      const uploaded = await uploadFile(vttBuffer, `subtitles/${movieId}_${dbLang}.vtt`, 'text/vtt');
+      const table = movieType === 'episode' ? 'episodes' : 'movies';
+      await supabase.from(table).update({ [`subtitle_${dbLang}`]: uploaded.cdnUrl }).eq('id', movieId);
+      console.log(`  [subtitles] ${dbLang}: ok`);
+    } catch (e) {
+      console.warn(`  [subtitles] ${dbLang}:`, e.message);
+    }
+  }
+}
+
 async function searchTMDB(name, type, year = null) {
   const endpoint = type === 'movie' ? 'search/movie' : 'search/tv';
   const params = { api_key: TMDB_API_KEY, query: name, language: 'pt-BR' };
@@ -138,7 +175,7 @@ async function getEpisodeDetails(tmdbId, season, episode) {
   }
 }
 
-async function saveMovie(details, fileUrl, version) {
+async function saveMovie(details, fileUrl, version, dual = false) {
   const trailer = details.videos?.results?.find(v => v.type === 'Trailer' && v.site === 'YouTube');
 
   const movieData = {
@@ -156,7 +193,11 @@ async function saveMovie(details, fileUrl, version) {
     trailer_url: trailer ? `https://www.youtube.com/watch?v=${trailer.key}` : null,
   };
 
-  if (fileUrl) movieData[`file_${version}`] = fileUrl;
+  if (fileUrl) {
+    movieData[`file_${version}`] = fileUrl;
+    // Dual audio: mesmo arquivo serve para Dublado e Legendado (faixas diferentes)
+    if (dual && version === 'dubbing') movieData.file_subtitled = fileUrl;
+  }
 
   const { data, error } = await supabase
     .from('movies')
@@ -199,7 +240,7 @@ async function saveSeries(details) {
   return data;
 }
 
-async function saveEpisode(seriesId, tmdbId, season, episode, fileUrl, version) {
+async function saveEpisode(seriesId, tmdbId, season, episode, fileUrl, version, dual = false) {
   const epDetails = await getEpisodeDetails(tmdbId, season, episode);
 
   const epData = {
@@ -214,7 +255,10 @@ async function saveEpisode(seriesId, tmdbId, season, episode, fileUrl, version) 
     tmdb_episode_id: epDetails?.id || null,
   };
 
-  if (fileUrl) epData[`file_${version}`] = fileUrl;
+  if (fileUrl) {
+    epData[`file_${version}`] = fileUrl;
+    if (dual && version === 'dubbing') epData.file_subtitled = fileUrl;
+  }
 
   const { data, error } = await supabase
     .from('episodes')
@@ -240,8 +284,9 @@ async function processFiles(fileList) {
     try {
       const { type, name, season, episode, year } = extractInfo(filename);
       const version = forcedVersion || detectVersion(filename);
+      const dual = isDualAudio(filename);
 
-      console.log(`  Tipo: ${type} | Nome: "${name}" | Ano: ${year} | Temp: ${season} | Ep: ${episode} | Versão: ${version}`);
+      console.log(`  Tipo: ${type} | Nome: "${name}" | Ano: ${year} | Temp: ${season} | Ep: ${episode} | Versão: ${version}${dual ? ' | DUAL AUDIO' : ''}`);
 
       const tmdbResult = await searchTMDB(name, type, year);
 
@@ -256,14 +301,21 @@ async function processFiles(fileList) {
       const details = await getDetails(tmdbResult.id, type);
 
       if (type === 'movie') {
-        const saved = await saveMovie(details, fileUrl, version);
-        report.success.push({ filename, fileUrl, type: 'movie', title: saved.title });
+        const saved = await saveMovie(details, fileUrl, version, dual);
+        report.success.push({ filename, fileUrl, type: 'movie', title: saved.title, dual });
+        // Busca legendas em background (não bloqueia a resposta)
+        autoFetchSubtitles({ movieId: saved.id, tmdbId: saved.tmdb_id, movieType: 'movie' })
+          .catch(e => console.warn('  [subtitles] movie:', e.message));
       } else {
         const seriesRecord = await saveSeries(details);
         if (season && episode) {
-          await saveEpisode(seriesRecord.id, details.id, season, episode, fileUrl, version);
+          const savedEp = await saveEpisode(seriesRecord.id, details.id, season, episode, fileUrl, version, dual);
+          autoFetchSubtitles({
+            movieId: savedEp.id, tmdbId: details.id, movieType: 'episode',
+            seasonNumber: season, episodeNumber: episode,
+          }).catch(e => console.warn('  [subtitles] episode:', e.message));
         }
-        report.success.push({ filename, fileUrl, type: 'series', title: details.name, season, episode });
+        report.success.push({ filename, fileUrl, type: 'series', title: details.name, season, episode, dual });
       }
 
       await new Promise(r => setTimeout(r, 260)); // respeita rate limit TMDB
