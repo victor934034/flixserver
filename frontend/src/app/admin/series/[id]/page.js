@@ -77,7 +77,15 @@ function EpForm({ ep, setEp, onFetchSubs }) {
           <input className={f.input} value={ep.file_dubbing || ''} onChange={e => setEp('file_dubbing', e.target.value)} placeholder="https://..." />
         </div>
         <div>
-          <label className={f.label}>Vídeo — Legendado</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.25rem' }}>
+            <label className={f.label} style={{ margin: 0 }}>Vídeo — Legendado</label>
+            {ep.file_dubbing && (
+              <button type="button" onClick={() => setEp('file_subtitled', ep.file_dubbing)}
+                style={{ fontSize: '0.7rem', padding: '0.1rem 0.4rem', background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-muted)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                = Dublado
+              </button>
+            )}
+          </div>
           <input className={f.input} value={ep.file_subtitled || ''} onChange={e => setEp('file_subtitled', e.target.value)} placeholder="https://..." />
         </div>
         <div>

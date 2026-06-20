@@ -32,6 +32,21 @@ const AUDIO_LANG = {
   jpn: 'Japonês 🇯🇵',  ja: 'Japonês 🇯🇵',
   fre: 'Français 🇫🇷',  fr: 'Français 🇫🇷', fra: 'Français 🇫🇷',
 };
+// Preferência de faixa de áudio por versão (dual audio: mesmo arquivo, faixa diferente)
+const VER_AUDIO_PREF = {
+  dubbing:   ['por', 'pt'],
+  subtitled: ['eng', 'en'],
+  cinema:    ['eng', 'en'],
+  '4k':      ['eng', 'en'],
+};
+function findTrackForVer(tracks, ver) {
+  const prefs = VER_AUDIO_PREF[ver] || [];
+  for (const pref of prefs) {
+    const t = tracks.find(tr => (tr.language || '').toLowerCase().startsWith(pref));
+    if (t) return t;
+  }
+  return tracks[0] || null;
+}
 function audioLabel(track, idx) {
   const lang = (track.language || '').toLowerCase();
   return AUDIO_LANG[lang] || track.label || `Faixa ${idx + 1}`;
@@ -144,15 +159,15 @@ export default function PlayerScreen() {
   useEffect(() => { player.playbackRate = speed; }, [speed]);
 
   // Detecta faixas de áudio quando o vídeo fica pronto (ou troca de fonte)
+  // Se dual audio, pré-seleciona a faixa certa para a versão ativa
   useEffect(() => {
     if (status !== 'readyToPlay') return;
     const tracks = player.availableAudioTracks || [];
     setAudioTracks(tracks);
-    // Mantém a faixa ativa se ainda existir após troca de fonte
-    if (tracks.length > 0 && !activeAudio) {
-      setActiveAudio(tracks[0]);
+    if (tracks.length > 0) {
+      setActiveAudio(findTrackForVer(tracks, activeVer));
     }
-  }, [status]);
+  }, [status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Aplica a faixa de áudio selecionada
   useEffect(() => {
@@ -272,13 +287,20 @@ export default function PlayerScreen() {
 
   const switchVer = (v) => {
     if (v !== activeVer) {
-      setSavedPosSec(currentTime);
-      player.replace({
-        uri: versions[v],
-        textTracks: availSubs.map(([lang, url]) => ({
-          uri: url, language: lang, title: SUB_LABELS[lang] || lang, type: 'text/vtt',
-        })),
-      });
+      const isDualAudio = versions[v] === versions[activeVer] && audioTracks.length > 1;
+      if (isDualAudio) {
+        // Mesmo arquivo — só troca a faixa de áudio, sem recarregar o vídeo
+        const track = findTrackForVer(audioTracks, v);
+        if (track) setActiveAudio(track);
+      } else {
+        setSavedPosSec(currentTime);
+        player.replace({
+          uri: versions[v],
+          textTracks: availSubs.map(([lang, url]) => ({
+            uri: url, language: lang, title: SUB_LABELS[lang] || lang, type: 'text/vtt',
+          })),
+        });
+      }
       setActiveVer(v);
     }
     setSheet(null);

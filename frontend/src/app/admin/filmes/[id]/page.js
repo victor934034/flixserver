@@ -201,10 +201,24 @@ export default function EditarFilme() {
 
         {['dubbing', 'subtitled', 'cinema', '4k'].map(key => (
           <div key={key}>
-            <label className={styles.label}>
-              {key === 'dubbing' ? 'Dublado' : key === 'subtitled' ? 'Legendado' : key === 'cinema' ? 'Cinema/Original' : '4K'}
-              {' '}— URL CDN
-            </label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+              <label className={styles.label} style={{ margin: 0 }}>
+                {key === 'dubbing' ? 'Dublado' : key === 'subtitled' ? 'Legendado' : key === 'cinema' ? 'Cinema/Original' : '4K'}
+                {' '}— URL CDN
+              </label>
+              {key === 'subtitled' && form.file_dubbing && (
+                <button type="button" onClick={() => set('file_subtitled', form.file_dubbing)}
+                  style={{ fontSize: '0.72rem', padding: '0.15rem 0.5rem', background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-muted)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                  = Usar Dublado (Dual Audio)
+                </button>
+              )}
+              {key === 'cinema' && form.file_dubbing && (
+                <button type="button" onClick={() => set('file_cinema', form.file_dubbing)}
+                  style={{ fontSize: '0.72rem', padding: '0.15rem 0.5rem', background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-muted)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                  = Usar Dublado
+                </button>
+              )}
+            </div>
             <input
               className={styles.input}
               value={form[`file_${key}`] || ''}
