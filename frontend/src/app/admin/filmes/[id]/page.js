@@ -118,7 +118,9 @@ export default function EditarFilme() {
         setFixMsg(p => ({ ...p, [field]: `✓ Remuxado! Salve o filme para confirmar.` }));
       }
     } catch (e) {
-      const msg = e.response?.data?.error || e.message || 'Erro desconhecido';
+      const d = e.response?.data;
+      const log = d?.log ? `\n${d.log.join('\n')}` : '';
+      const msg = (d?.error || e.message || 'Erro desconhecido') + log;
       setFixMsg(p => ({ ...p, [field]: `Erro: ${msg}` }));
     } finally {
       setFixingAudio(p => ({ ...p, [field]: false }));
@@ -264,7 +266,7 @@ export default function EditarFilme() {
                   </button>
                 )}
                 {fixMsg[field] && (
-                  <span style={{ fontSize: '0.72rem', color: fixMsg[field].startsWith('Erro') ? '#ff6b6b' : '#4caf50' }}>
+                  <span style={{ fontSize: '0.72rem', color: fixMsg[field].startsWith('Erro') ? '#ff6b6b' : '#4caf50', whiteSpace: 'pre-wrap', display: 'block', marginTop: '0.25rem' }}>
                     {fixMsg[field]}
                   </span>
                 )}

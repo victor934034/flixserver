@@ -338,16 +338,99 @@ router.post('/fix-audio', async (req, res) => {
   }
 });
 
-// Apenas verifica o áudio (sem remuxar) — rápido, só lê os headers do container
+// Verifica o áudio (sem remuxar) — com diagnóstico detalhado
 router.post('/check-audio', async (req, res) => {
   const { cdnUrl } = req.body;
   if (!cdnUrl) return res.status(400).json({ error: 'cdnUrl é obrigatório' });
+
+  const log = [];
+  const tmpProbe = path.join(os.tmpdir(), `fh_probe_${Date.now()}.tmp`);
+
   try {
-    const audioInfo = await probeAudio(cdnUrl);
-    if (!audioInfo) return res.status(422).json({ error: 'Não foi possível ler o arquivo' });
-    res.json({ audioInfo, needsRemux: needsRemux(audioInfo) });
+    // Tenta baixar parcialmente via axios
+    log.push('Tentando download parcial (20 MB)…');
+    const axios = require('axios');
+    let downloadOk = false;
+    let httpStatus = null;
+    let bytesReceived = 0;
+
+    try {
+      const resp = await axios.get(cdnUrl, {
+        responseType: 'stream',
+        timeout: 60_000,
+        headers: {
+          'User-Agent': UA,
+          'Accept': '*/*',
+          'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
+          'Range': `bytes=0-${PARTIAL_BYTES - 1}`,
+        },
+        validateStatus: s => s < 500, // aceita 200, 206, 302, 403, etc.
+      });
+
+      httpStatus = resp.status;
+      log.push(`HTTP status: ${httpStatus}`);
+
+      if (resp.status === 200 || resp.status === 206) {
+        await new Promise((resolve, reject) => {
+          const out = fs.createWriteStream(tmpProbe);
+          resp.data.on('data', chunk => {
+            bytesReceived += chunk.length;
+            if (bytesReceived >= PARTIAL_BYTES) resp.data.destroy();
+          });
+          resp.data.pipe(out);
+          out.on('finish', resolve);
+          out.on('error', reject);
+          resp.data.on('error', err => (err.code === 'ECONNRESET' ? resolve() : reject(err)));
+        });
+        log.push(`Bytes recebidos: ${bytesReceived}`);
+        downloadOk = true;
+      } else {
+        log.push(`CDN retornou status inesperado — não é possível baixar parcialmente`);
+      }
+    } catch (dlErr) {
+      log.push(`Download falhou: ${dlErr.message}`);
+    }
+
+    // Tenta probe no arquivo local
+    if (downloadOk && bytesReceived > 1024) {
+      log.push('Executando ffprobe no arquivo parcial…');
+      try {
+        const { stdout, stderr } = await execFileAsync('ffprobe', [
+          '-v', 'error', '-print_format', 'json', '-show_streams', '-select_streams', 'a',
+          tmpProbe,
+        ], { timeout: 20_000 });
+        const stream = JSON.parse(stdout).streams?.[0];
+        if (stream) {
+          const audioInfo = { codec: stream.codec_name, profile: stream.profile || '', channels: stream.channels || 0 };
+          log.push(`Detectado: ${JSON.stringify(audioInfo)}`);
+          return res.json({ audioInfo, needsRemux: needsRemux(audioInfo) });
+        }
+        log.push(`ffprobe sem streams de áudio detectados`);
+        if (stderr) log.push(`ffprobe stderr: ${stderr.slice(0, 200)}`);
+      } catch (fpErr) {
+        log.push(`ffprobe falhou: ${fpErr.message?.slice(0, 200)}`);
+      }
+    }
+
+    // Fallback: heurística pelo nome do arquivo
+    const filename = decodeURIComponent(path.basename(new URL(cdnUrl).pathname));
+    log.push(`Usando heurística no nome: ${filename}`);
+    const ch6 = /\b(6ch|5\.1|7\.1|ac3|dts|truehd)/i.test(filename);
+    const heAac = /\bhe[-_]?aac\b/i.test(filename);
+    if (ch6 || heAac) {
+      const guessed = { codec: 'aac', profile: ch6 ? 'surround-guess' : 'HE-AAC-guess', channels: ch6 ? 6 : 2 };
+      log.push(`Heurística: provável problema de áudio`);
+      return res.json({ audioInfo: guessed, needsRemux: true, guessed: true, log });
+    }
+
+    return res.status(422).json({
+      error: 'Não foi possível analisar o áudio deste arquivo. Veja o diagnóstico.',
+      log,
+    });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message, log });
+  } finally {
+    try { fs.unlinkSync(tmpProbe); } catch {}
   }
 });
 
