@@ -55,26 +55,31 @@ const PARALLEL_PARTS = 6;
 async function doLargeUploadXHR(item, onProgress, signal, resumeState) {
   const file = item.file;
   let fileId = resumeState?.fileId;
-  let startPart = 0;
 
+  const totalParts = Math.ceil(file.size / PART_SIZE);
+  const partProg = new Array(totalParts).fill(0);
+
+  // Fila de índices de partes que precisam ser enviadas.
+  // Resume usa números reais de parte (não contagem) para detectar buracos
+  // deixados por uploads paralelos que falharam no meio.
+  const toUpload = [];
   if (fileId) {
-    // Resume: quantas partes já chegaram ao B2
     const { data } = await api.post('/upload/list-parts', { fileId });
-    startPart = data.parts.length;
-    onProgress({ pct: Math.round((startPart / Math.ceil(file.size / PART_SIZE)) * 88), fileId, partsDone: startPart });
+    const done = new Set(data.parts.map(p => p.partNumber)); // números 1-based
+    for (let i = 0; i < totalParts; i++) {
+      if (done.has(i + 1)) partProg[i] = 1;
+      else toUpload.push(i);
+    }
+    onProgress({ pct: Math.round(((totalParts - toUpload.length) / totalParts) * 88), fileId, partsDone: totalParts - toUpload.length });
   } else {
     const { data: { fileId: newId } } = await api.post('/upload/start-large', {
       filename: file.name,
       contentType: file.type || 'video/mp4',
     });
     fileId = newId;
+    for (let i = 0; i < totalParts; i++) toUpload.push(i);
     onProgress({ pct: 0, fileId, partsDone: 0 });
   }
-
-  const totalParts = Math.ceil(file.size / PART_SIZE);
-  // Progresso individual de cada parte (0–1). Partes já concluídas no resume = 1.
-  const partProg = new Array(totalParts).fill(0);
-  for (let i = 0; i < startPart; i++) partProg[i] = 1;
 
   function reportProgress() {
     const done = partProg.reduce((s, p) => s + p, 0);
@@ -82,26 +87,25 @@ async function doLargeUploadXHR(item, onProgress, signal, resumeState) {
     onProgress({ pct: Math.round((done / totalParts) * 88), fileId, partsDone });
   }
 
-  const parallelCount = Math.min(PARALLEL_PARTS, totalParts - startPart);
+  const parallelCount = Math.min(PARALLEL_PARTS, toUpload.length);
   if (parallelCount > 0) {
-    // Busca uma URL por worker antecipadamente.
-    // O B2 permite reusar a mesma URL para múltiplas partes sequenciais —
-    // assim o backend recebe apenas PARALLEL_PARTS chamadas no total (não uma por parte).
+    // Uma URL por worker, reutilizada para todas as suas partes.
+    // B2 permite reuso — reduz chamadas ao backend de N partes para PARALLEL_PARTS.
     const initUrls = await Promise.all(
       Array.from({ length: parallelCount }, () =>
         api.post('/upload/part-url', { fileId }).then(r => r.data)
       )
     );
 
-    let nextPart = startPart;
+    let queueIdx = 0; // ponteiro atômico na fila toUpload
 
-    // Cada worker reutiliza sua URL; só pede uma nova se B2 retornar 503.
     async function worker(partUrl) {
       let url = partUrl;
       while (true) {
         if (signal?.aborted) throw new Error('paused');
-        const i = nextPart++;
-        if (i >= totalParts) break;
+        const qi = queueIdx++;
+        if (qi >= toUpload.length) break;
+        const i = toUpload[qi]; // índice real da parte (0-based)
 
         const start = i * PART_SIZE;
         const chunk = file.slice(start, Math.min(start + PART_SIZE, file.size));
@@ -115,7 +119,7 @@ async function doLargeUploadXHR(item, onProgress, signal, resumeState) {
               xhr.open('POST', url.uploadUrl);
               xhr.setRequestHeader('Authorization', url.authorizationToken);
               xhr.setRequestHeader('X-Bz-Part-Number', String(partNumber));
-              // do_not_verify: B2 aceita a parte e armazena o SHA1 real internamente.
+              // do_not_verify: B2 armazena SHA1 real; backend busca via list-parts.
               xhr.setRequestHeader('X-Bz-Content-Sha1', 'do_not_verify');
 
               xhr.upload.onprogress = (e) => {
@@ -128,17 +132,19 @@ async function doLargeUploadXHR(item, onProgress, signal, resumeState) {
                 if (xhr.status < 300) { partProg[i] = 1; resolve(); }
                 else reject(Object.assign(new Error(`HTTP ${xhr.status}`), { status: xhr.status }));
               };
-              xhr.onerror = () => reject(new Error('connection'));
+              // onerror inclui ERR_CONNECTION_REFUSED, pod B2 offline, etc.
+              xhr.onerror = () => reject(Object.assign(new Error('connection'), { status: 0 }));
               signal?.addEventListener('abort', () => { xhr.abort(); reject(new Error('paused')); });
               xhr.send(chunk);
             });
-            break; // parte enviada com sucesso
+            break; // sucesso
           } catch (err) {
             if (err.message === 'paused') throw err;
-            // B2 503 = servidor ocupado: pega nova URL e tenta de novo
-            if (err.status === 503 && attempts < 3) {
+            // Qualquer erro de rede ou 503: tenta até 3x com nova URL do B2
+            if (attempts < 3) {
               attempts++;
-              await new Promise(r => setTimeout(r, 1000 * attempts));
+              partProg[i] = 0; // zera progresso para não mostrar barra incompleta
+              await new Promise(r => setTimeout(r, 1500 * attempts));
               const { data } = await api.post('/upload/part-url', { fileId });
               url = data;
             } else {
