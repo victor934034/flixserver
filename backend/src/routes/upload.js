@@ -1,7 +1,57 @@
 const router = require('express').Router();
 const multer = require('multer');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 const { uploadFile } = require('../services/backblaze');
 const { adminMiddleware } = require('../middleware/admin');
+
+const execFileAsync = promisify(execFile);
+
+// ─── FFmpeg helpers ──────────────────────────────────────────────────────────
+
+async function probeAudio(filePath) {
+  try {
+    const { stdout } = await execFileAsync('ffprobe', [
+      '-v', 'quiet', '-print_format', 'json', '-show_streams', '-select_streams', 'a',
+      filePath,
+    ]);
+    const stream = JSON.parse(stdout).streams?.[0];
+    if (!stream) return null;
+    return {
+      codec:    stream.codec_name,
+      profile:  stream.profile || '',
+      channels: stream.channels || 0,
+    };
+  } catch {
+    return null; // ffprobe não disponível
+  }
+}
+
+function needsRemux(info) {
+  if (!info) return false;
+  const p = info.profile.toLowerCase();
+  const heAac = p.includes('he') || p === 'lc+sbr' || p === 'lc+sbr+ps';
+  return heAac || info.channels > 2;
+}
+
+async function remuxToWebAac(inputPath) {
+  const outputPath = inputPath.replace(/(\.[^.]+)$/, '_fixed$1');
+  try {
+    await execFileAsync('ffmpeg', [
+      '-i', inputPath,
+      '-c:v', 'copy',
+      '-c:a', 'aac', '-profile:a', 'aac_low', '-ac', '2', '-b:a', '192k',
+      '-y', outputPath,
+    ], { maxBuffer: 1024 * 1024 });
+    return outputPath;
+  } catch (e) {
+    console.error('[ffmpeg] remux falhou:', e.message);
+    return null;
+  }
+}
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -10,15 +60,41 @@ const upload = multer({
 
 router.use(adminMiddleware);
 
-// Upload de vídeo (multipart)
+// Upload de vídeo (multipart) — com detecção e remux automático de AAC incompatível
 router.post('/video', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado' });
 
+  const ext = path.extname(req.file.originalname) || '.tmp';
+  const tmpInput = path.join(os.tmpdir(), `fh_in_${Date.now()}${ext}`);
+  let tmpOutput = null;
+
   try {
-    const result = await uploadFile(req.file.buffer, req.file.originalname, req.file.mimetype);
-    res.json(result);
+    fs.writeFileSync(tmpInput, req.file.buffer);
+
+    let buffer   = req.file.buffer;
+    let filename = req.file.originalname;
+
+    const audioInfo = await probeAudio(tmpInput);
+    if (audioInfo) {
+      console.log(`[upload/video] audio: codec=${audioInfo.codec} profile="${audioInfo.profile}" ch=${audioInfo.channels}`);
+    }
+
+    if (needsRemux(audioInfo)) {
+      console.log('[upload/video] HE-AAC ou surround detectado → remuxando para AAC-LC estéreo…');
+      tmpOutput = await remuxToWebAac(tmpInput);
+      if (tmpOutput) {
+        buffer   = fs.readFileSync(tmpOutput);
+        console.log(`[upload/video] remux OK: ${buffer.length} bytes`);
+      }
+    }
+
+    const result = await uploadFile(buffer, filename, req.file.mimetype);
+    res.json({ ...result, remuxed: !!tmpOutput, audioInfo });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  } finally {
+    try { fs.unlinkSync(tmpInput); } catch {}
+    try { if (tmpOutput) fs.unlinkSync(tmpOutput); } catch {}
   }
 });
 
@@ -151,6 +227,65 @@ router.post('/finish-large', async (req, res) => {
     res.json({ cdnUrl });
   } catch (err) {
     res.status(500).json({ error: err.response?.data?.message || err.message });
+  }
+});
+
+// Corrigir áudio AAC de arquivo já enviado ao B2 (download → ffprobe → remux → re-upload)
+router.post('/fix-audio', async (req, res) => {
+  const { cdnUrl, movieId, movieType, field } = req.body;
+  if (!cdnUrl) return res.status(400).json({ error: 'cdnUrl é obrigatório' });
+
+  const ext = path.extname(new URL(cdnUrl).pathname) || '.mp4';
+  const tmpInput  = path.join(os.tmpdir(), `fh_fix_in_${Date.now()}${ext}`);
+  const tmpOutput = path.join(os.tmpdir(), `fh_fix_out_${Date.now()}${ext}`);
+
+  try {
+    // Baixa arquivo do B2/CDN
+    console.log('[fix-audio] baixando:', cdnUrl);
+    const https = cdnUrl.startsWith('https') ? require('https') : require('http');
+    await new Promise((resolve, reject) => {
+      const out = fs.createWriteStream(tmpInput);
+      https.get(cdnUrl, (res) => {
+        res.pipe(out);
+        out.on('finish', resolve);
+        out.on('error', reject);
+        res.on('error', reject);
+      }).on('error', reject);
+    });
+
+    const audioInfo = await probeAudio(tmpInput);
+    console.log('[fix-audio] audio info:', audioInfo);
+
+    if (!needsRemux(audioInfo)) {
+      return res.json({ skipped: true, reason: 'Áudio já compatível com navegadores', audioInfo });
+    }
+
+    // Remux
+    await execFileAsync('ffmpeg', [
+      '-i', tmpInput,
+      '-c:v', 'copy',
+      '-c:a', 'aac', '-profile:a', 'aac_low', '-ac', '2', '-b:a', '192k',
+      '-y', tmpOutput,
+    ], { maxBuffer: 1024 * 1024 });
+
+    const filename = path.basename(new URL(cdnUrl).pathname);
+    const buffer   = fs.readFileSync(tmpOutput);
+    const result   = await uploadFile(buffer, filename, 'video/mp4');
+
+    // Atualiza DB se informado
+    if (movieId && field) {
+      const { supabase } = require('../services/supabase');
+      const table = movieType === 'series' ? 'episodes' : 'movies';
+      await supabase.from(table).update({ [field]: result.cdnUrl }).eq('id', movieId);
+    }
+
+    res.json({ ok: true, cdnUrl: result.cdnUrl, audioInfo });
+  } catch (err) {
+    console.error('[fix-audio]', err.message);
+    res.status(500).json({ error: err.message });
+  } finally {
+    try { fs.unlinkSync(tmpInput); } catch {}
+    try { fs.unlinkSync(tmpOutput); } catch {}
   }
 });
 

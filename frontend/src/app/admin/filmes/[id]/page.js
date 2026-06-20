@@ -15,6 +15,8 @@ export default function EditarFilme() {
   const [error, setError] = useState('');
   const [fetchingSubs, setFetchingSubs] = useState(false);
   const [subsMsg, setSubsMsg] = useState('');
+  const [fixingAudio, setFixingAudio] = useState({});
+  const [fixMsg, setFixMsg] = useState({});
 
   useEffect(() => {
     api.get(`/admin/movies?q=&page=1&limit=1000`)
@@ -83,6 +85,28 @@ export default function EditarFilme() {
       setSubsMsg(`Erro: ${e.response?.data?.error || e.message}`);
     } finally {
       setFetchingSubs(false);
+    }
+  }
+
+  async function fixAudio(field) {
+    const cdnUrl = form[field];
+    if (!cdnUrl) return;
+    setFixingAudio(p => ({ ...p, [field]: true }));
+    setFixMsg(p => ({ ...p, [field]: '' }));
+    try {
+      const { data } = await api.post('/upload/fix-audio', {
+        cdnUrl, movieId: id, movieType: 'movie', field,
+      });
+      if (data.skipped) {
+        setFixMsg(p => ({ ...p, [field]: 'Áudio já compatível, sem alterações' }));
+      } else {
+        set(field, data.cdnUrl);
+        setFixMsg(p => ({ ...p, [field]: '✓ Remuxado e salvo (salve o filme para confirmar)' }));
+      }
+    } catch (e) {
+      setFixMsg(p => ({ ...p, [field]: `Erro: ${e.response?.data?.error || e.message}` }));
+    } finally {
+      setFixingAudio(p => ({ ...p, [field]: false }));
     }
   }
 
@@ -199,33 +223,45 @@ export default function EditarFilme() {
         <hr className={styles.divider} />
         <h3 className={styles.sectionTitle}>Arquivos de Vídeo</h3>
 
-        {['dubbing', 'subtitled', 'cinema', '4k'].map(key => (
-          <div key={key}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
-              <label className={styles.label} style={{ margin: 0 }}>
-                {key === 'dubbing' ? 'Dublado' : key === 'subtitled' ? 'Legendado' : key === 'cinema' ? 'Cinema/Original' : '4K'}
-                {' '}— URL CDN
-              </label>
-              {key === 'subtitled' && form.file_dubbing && (
-                <button type="button" onClick={() => set('file_subtitled', form.file_dubbing)}
-                  style={{ fontSize: '0.72rem', padding: '0.15rem 0.5rem', background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-muted)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                  = Usar Dublado (Dual Audio)
-                </button>
-              )}
-              {key === 'cinema' && form.file_dubbing && (
-                <button type="button" onClick={() => set('file_cinema', form.file_dubbing)}
-                  style={{ fontSize: '0.72rem', padding: '0.15rem 0.5rem', background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-muted)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                  = Usar Dublado
-                </button>
-              )}
+        {['dubbing', 'subtitled', 'cinema', '4k'].map(key => {
+          const field = `file_${key}`;
+          const label = key === 'dubbing' ? 'Dublado' : key === 'subtitled' ? 'Legendado' : key === 'cinema' ? 'Cinema/Original' : '4K';
+          return (
+            <div key={key}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem', flexWrap: 'wrap' }}>
+                <label className={styles.label} style={{ margin: 0 }}>{label} — URL CDN</label>
+                {key === 'subtitled' && form.file_dubbing && (
+                  <button type="button" onClick={() => set('file_subtitled', form.file_dubbing)}
+                    style={{ fontSize: '0.72rem', padding: '0.15rem 0.5rem', background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-muted)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                    = Usar Dublado (Dual Audio)
+                  </button>
+                )}
+                {key === 'cinema' && form.file_dubbing && (
+                  <button type="button" onClick={() => set('file_cinema', form.file_dubbing)}
+                    style={{ fontSize: '0.72rem', padding: '0.15rem 0.5rem', background: 'none', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-muted)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                    = Usar Dublado
+                  </button>
+                )}
+                {form[field] && (
+                  <button type="button" onClick={() => fixAudio(field)} disabled={fixingAudio[field]}
+                    style={{ fontSize: '0.72rem', padding: '0.15rem 0.5rem', background: 'none', border: '1px solid #ff9800', borderRadius: 4, color: '#ff9800', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                    {fixingAudio[field] ? 'Corrigindo…' : '🔧 Corrigir Áudio AAC'}
+                  </button>
+                )}
+                {fixMsg[field] && (
+                  <span style={{ fontSize: '0.72rem', color: fixMsg[field].startsWith('Erro') ? '#ff6b6b' : '#4caf50' }}>
+                    {fixMsg[field]}
+                  </span>
+                )}
+              </div>
+              <input
+                className={styles.input}
+                value={form[field] || ''}
+                onChange={e => set(field, e.target.value)}
+              />
             </div>
-            <input
-              className={styles.input}
-              value={form[`file_${key}`] || ''}
-              onChange={e => set(`file_${key}`, e.target.value)}
-            />
-          </div>
-        ))}
+          );
+        })}
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
           <h3 className={styles.sectionTitle}>Legendas (.vtt)</h3>
