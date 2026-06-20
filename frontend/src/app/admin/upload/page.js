@@ -20,8 +20,15 @@ function formatSize(bytes) {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
-// Single-file upload (< 5GB)
+function formatSpeed(bps) {
+  if (!bps || bps < 0) return '';
+  if (bps < 1024 * 1024) return `${(bps / 1024).toFixed(0)} KB/s`;
+  return `${(bps / 1024 / 1024).toFixed(1)} MB/s`;
+}
+
+// Single-file upload (< 200 MB)
 function doUploadXHR(item, presign, onProgress, signal) {
+  let _bps = 0, _t = Date.now(), _b = 0;
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', presign.uploadUrl);
@@ -31,7 +38,15 @@ function doUploadXHR(item, presign, onProgress, signal) {
     xhr.setRequestHeader('X-Bz-Content-Sha1', 'do_not_verify');
 
     xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 88));
+      if (e.lengthComputable) {
+        const now = Date.now();
+        const dt = (now - _t) / 1000;
+        if (dt >= 0.5) {
+          _bps = _bps * 0.6 + ((e.loaded - _b) / dt) * 0.4;
+          _t = now; _b = e.loaded;
+        }
+        onProgress({ pct: Math.round((e.loaded / e.total) * 88), speed: _bps });
+      }
     };
     xhr.onload = () => {
       if (xhr.status < 300) resolve();
@@ -58,6 +73,7 @@ async function doLargeUploadXHR(item, onProgress, signal, resumeState) {
 
   const totalParts = Math.ceil(file.size / PART_SIZE);
   const partProg = new Array(totalParts).fill(0);
+  const partBytes = new Array(totalParts).fill(0); // bytes carregados por parte (para velocidade)
 
   // Fila de índices de partes que precisam ser enviadas.
   // Resume usa números reais de parte (não contagem) para detectar buracos
@@ -67,10 +83,10 @@ async function doLargeUploadXHR(item, onProgress, signal, resumeState) {
     const { data } = await api.post('/upload/list-parts', { fileId });
     const done = new Set(data.parts.map(p => p.partNumber)); // números 1-based
     for (let i = 0; i < totalParts; i++) {
-      if (done.has(i + 1)) partProg[i] = 1;
+      if (done.has(i + 1)) { partProg[i] = 1; partBytes[i] = PART_SIZE; }
       else toUpload.push(i);
     }
-    onProgress({ pct: Math.round(((totalParts - toUpload.length) / totalParts) * 88), fileId, partsDone: totalParts - toUpload.length });
+    onProgress({ pct: Math.round(((totalParts - toUpload.length) / totalParts) * 88), fileId, partsDone: totalParts - toUpload.length, totalParts, speed: 0 });
   } else {
     const { data: { fileId: newId } } = await api.post('/upload/start-large', {
       filename: file.name,
@@ -78,13 +94,27 @@ async function doLargeUploadXHR(item, onProgress, signal, resumeState) {
     });
     fileId = newId;
     for (let i = 0; i < totalParts; i++) toUpload.push(i);
-    onProgress({ pct: 0, fileId, partsDone: 0 });
+    onProgress({ pct: 0, fileId, partsDone: 0, totalParts, speed: 0 });
   }
+
+  // Rastreamento de velocidade com média exponencial (suaviza picos)
+  let _bps = 0, _speedT = Date.now(), _speedB = 0;
 
   function reportProgress() {
     const done = partProg.reduce((s, p) => s + p, 0);
     const partsDone = partProg.filter(p => p >= 1).length;
-    onProgress({ pct: Math.round((done / totalParts) * 88), fileId, partsDone });
+
+    const totalLoaded = partBytes.reduce((s, b) => s + b, 0);
+    const now = Date.now();
+    const dt = (now - _speedT) / 1000;
+    if (dt >= 0.5) {
+      const sample = (totalLoaded - _speedB) / dt;
+      _bps = _bps * 0.6 + sample * 0.4; // EMA suaviza variações
+      _speedT = now;
+      _speedB = totalLoaded;
+    }
+
+    onProgress({ pct: Math.round((done / totalParts) * 88), fileId, partsDone, totalParts, speed: _bps });
   }
 
   const parallelCount = Math.min(PARALLEL_PARTS, toUpload.length);
@@ -124,6 +154,7 @@ async function doLargeUploadXHR(item, onProgress, signal, resumeState) {
 
               xhr.upload.onprogress = (e) => {
                 if (e.lengthComputable) {
+                  partBytes[i] = e.loaded;
                   partProg[i] = e.loaded / e.total;
                   reportProgress();
                 }
@@ -189,6 +220,8 @@ export default function UploadPage() {
       result: null,
       error: null,
       resumeState: null, // {fileId, partsDone}
+      speed: 0,          // bytes/s
+      totalParts: null,  // total de partes (null = arquivo pequeno)
     }));
     setFiles(prev => [...prev, ...items]);
   }, []);
@@ -216,10 +249,12 @@ export default function UploadPage() {
         if (isLarge) {
           cdnUrl = await doLargeUploadXHR(
             item,
-            ({ pct, fileId, partsDone }) => {
+            ({ pct, fileId, partsDone, totalParts, speed }) => {
               updateFile(item.id, {
                 progress: pct,
                 resumeState: { fileId, partsDone },
+                totalParts,
+                speed,
               });
             },
             controller.signal,
@@ -227,7 +262,7 @@ export default function UploadPage() {
           );
         } else {
           const { data: presign } = await api.get('/upload/presign');
-          await doUploadXHR(item, presign, (pct) => updateFile(item.id, { progress: pct }), controller.signal);
+          await doUploadXHR(item, presign, ({ pct, speed }) => updateFile(item.id, { progress: pct, speed }), controller.signal);
           cdnUrl = `${presign.cdnBase}/${encodeURIComponent(item.file.name)}`;
         }
 
@@ -383,6 +418,20 @@ export default function UploadPage() {
                         backgroundColor: item.status === 'paused' ? '#ffa500' : undefined,
                       }}
                     />
+                  </div>
+                )}
+
+                {item.status === 'uploading' && (
+                  <div style={{ display: 'flex', gap: 14, marginTop: 5, fontSize: '0.72rem', color: '#888' }}>
+                    {item.speed > 512 && (
+                      <span style={{ color: '#46d369', fontWeight: 600 }}>{formatSpeed(item.speed)}</span>
+                    )}
+                    {item.totalParts && item.resumeState && (
+                      <span>Parte {item.resumeState.partsDone + 1}/{item.totalParts}</span>
+                    )}
+                    {item.progress > 0 && (
+                      <span>{item.progress}%</span>
+                    )}
                   </div>
                 )}
 

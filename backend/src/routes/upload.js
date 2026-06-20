@@ -139,7 +139,16 @@ router.post('/finish-large', async (req, res) => {
     }
 
     await finishLargeFile(fileId, sha1Array);
-    res.json({ cdnUrl: `${process.env.CDN_BASE_URL}/${filename}` });
+    const cdnUrl = `${process.env.CDN_BASE_URL}/${filename}`;
+
+    // Notificação de email (fire-and-forget: falha não quebra o upload)
+    if (req.user?.email) {
+      const { sendUploadComplete } = require('../services/email');
+      sendUploadComplete(req.user.email, filename, cdnUrl)
+        .catch(e => console.warn('[email] upload-complete:', e.message));
+    }
+
+    res.json({ cdnUrl });
   } catch (err) {
     res.status(500).json({ error: err.response?.data?.message || err.message });
   }
