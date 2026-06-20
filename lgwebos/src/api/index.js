@@ -44,4 +44,10 @@ export const seriesAPI = {
   popular: () => api.get('/series/section/popular'),
 };
 
+// ── Cast ──────────────────────────────────────────────────────────────────────
+export const castAPI = {
+  get: () => api.get('/cast'),
+  clear: () => api.delete('/cast'),
+};
+
 export default api;

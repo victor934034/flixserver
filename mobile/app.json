@@ -15,6 +15,12 @@
         "backgroundColor": "#0a0a0a"
       }
     },
+    "ios": {
+      "bundleIdentifier": "com.flixhome.app",
+      "infoPlist": {
+        "UIBackgroundModes": ["audio"]
+      }
+    },
     "updates": {
       "url": "https://u.expo.dev/003e6f97-72d9-49d4-a9aa-2360f01b3fcf"
     },

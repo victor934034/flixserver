@@ -108,6 +108,7 @@ export default function PlayerScreen() {
     p.play();
     p.preservesPitch = true;
     p.timeUpdateEventInterval = 0.5;
+    p.showNowPlayingNotification = true; // background playback + controles na tela de bloqueio
   });
 
   const { currentTime = 0 } = useEvent(player, 'timeUpdate', { currentTime: 0 });
@@ -135,6 +136,7 @@ export default function PlayerScreen() {
   const [locked, setLocked] = useState(false);
   const [brightness, setBrightness] = useState(0.8);
   const [sheet, setSheet] = useState(null);
+  const [castSent, setCastSent] = useState(false);
   const [timerRemaining, setTimerRemaining] = useState(null);
   const [nextCountdown, setNextCountdown] = useState(null);
   const [episodes, setEpisodes] = useState([]);
@@ -357,6 +359,22 @@ export default function PlayerScreen() {
       },
     });
   };
+
+  const sendCastToTV = useCallback(async () => {
+    const videoUrl = versions[activeVer];
+    if (!videoUrl || castSent) return;
+    try {
+      await api.post('/cast', {
+        url: videoUrl,
+        title,
+        position: Math.floor(currentTime),
+        subtitleUrl: activeSub ? subtitles[activeSub] : null,
+        version: activeVer,
+      });
+      setCastSent(true);
+      setTimeout(() => setCastSent(false), 4000);
+    } catch {}
+  }, [versions, activeVer, title, currentTime, activeSub, subtitles, castSent]);
 
   const sortedEps = [...episodes].sort((a, b) =>
     a.season_number !== b.season_number ? a.season_number - b.season_number : a.episode_number - b.episode_number
@@ -659,6 +677,24 @@ export default function PlayerScreen() {
               const isLocal = videoUrl?.startsWith('file://');
               return <>
                 <Text style={styles.sheetTitle}>Transmitir para TV</Text>
+
+                {/* FlixHome TV — envia ao app LG WebOS via backend */}
+                {!isLocal && (
+                  <TouchableOpacity style={styles.castOption} onPress={sendCastToTV} activeOpacity={0.8}>
+                    <View style={[styles.castIconBox, castSent && { backgroundColor: '#E50914' }]}>
+                      <Ionicons name="tv-outline" size={24} color="#fff" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.castOptionTitle}>FlixHome TV</Text>
+                      <Text style={styles.castOptionDesc}>
+                        {castSent
+                          ? '✓ Enviado! O vídeo abrirá na TV em instantes.'
+                          : 'Enviar para o app FlixHome na sua LG Smart TV. A TV precisa estar com o app aberto.'}
+                      </Text>
+                    </View>
+                    {castSent && <Ionicons name="checkmark-circle" size={22} color="#E50914" />}
+                  </TouchableOpacity>
+                )}
 
                 {Platform.OS === 'ios' && (
                   <View style={styles.castOption}>

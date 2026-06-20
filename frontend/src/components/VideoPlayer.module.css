@@ -97,6 +97,10 @@
 
 .select:focus { outline: none; border-color: var(--accent); }
 
+.castSent {
+  color: #4ade80;
+}
+
 .audioWarning {
   position: absolute;
   top: 1rem;

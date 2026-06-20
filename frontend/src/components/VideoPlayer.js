@@ -1,6 +1,7 @@
 'use client';
 import { useRef, useState, useEffect, useCallback } from 'react';
 import styles from './VideoPlayer.module.css';
+import api from '../lib/api';
 
 export default function VideoPlayer({ content, onProgress }) {
   const videoRef = useRef(null);
@@ -18,6 +19,7 @@ export default function VideoPlayer({ content, onProgress }) {
   const [showControls, setShowControls] = useState(true);
   const [currentTime, setCurrentTime] = useState(0);
   const [audioWarning, setAudioWarning] = useState(false);
+  const [castStatus, setCastStatus] = useState('idle'); // 'idle' | 'sending' | 'sent'
 
   const versions = [
     { key: 'dubbing', label: 'Dublado', url: content.file_dubbing },
@@ -167,6 +169,23 @@ export default function VideoPlayer({ content, onProgress }) {
     }, 50);
   }
 
+  async function castToTV() {
+    if (castStatus !== 'idle') return;
+    setCastStatus('sending');
+    try {
+      await api.post('/cast', {
+        url: currentUrl,
+        title: content.title || '',
+        position: Math.floor(videoRef.current?.currentTime || 0),
+        version,
+      });
+      setCastStatus('sent');
+      setTimeout(() => setCastStatus('idle'), 3500);
+    } catch {
+      setCastStatus('idle');
+    }
+  }
+
   function changeSubtitle(key) {
     setSubtitle(key);
     const tracks = videoRef.current?.textTracks;
@@ -207,8 +226,8 @@ export default function VideoPlayer({ content, onProgress }) {
 
       {audioWarning && (
         <div className={styles.audioWarning}>
-          ⚠️ Sem áudio — codec AAC não suportado neste navegador.{' '}
-          Use <strong>Chrome</strong> ou <strong>Edge</strong>, ou reenvie o vídeo com áudio AAC-LC estéreo.
+          ⚠️ Sem áudio — codec AAC incompatível neste navegador.{' '}
+          Use <strong>Chrome</strong> ou <strong>Edge</strong>, ou transmita para a TV com o botão 📺 abaixo.
         </div>
       )}
 
@@ -248,6 +267,13 @@ export default function VideoPlayer({ content, onProgress }) {
               </select>
             )}
 
+            <button
+              onClick={castToTV}
+              className={`${styles.btn} ${castStatus === 'sent' ? styles.castSent : ''}`}
+              title={castStatus === 'sent' ? 'Enviado para a TV!' : 'Enviar para FlixHome TV'}
+            >
+              {castStatus === 'sending' ? '⏳' : castStatus === 'sent' ? '📺✓' : '📺'}
+            </button>
             <button onClick={toggleFullscreen} className={styles.btn}>{fullscreen ? '⊡' : '⛶'}</button>
           </div>
         </div>
