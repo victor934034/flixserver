@@ -12,31 +12,68 @@ const execFileAsync = promisify(execFile);
 
 // ─── FFmpeg helpers ──────────────────────────────────────────────────────────
 
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36';
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+const PARTIAL_BYTES = 20 * 1024 * 1024; // 20 MB — suficiente para ffprobe ler o container
 
-async function probeAudio(input) {
-  const isUrl = input.startsWith('http://') || input.startsWith('https://');
-  const args = [
-    '-v', 'quiet',
-    '-print_format', 'json',
-    '-show_streams',
-    '-select_streams', 'a',
-  ];
-  if (isUrl) args.push('-user_agent', UA);
-  args.push(input);
+// Baixa os primeiros N bytes de uma URL via axios com headers de browser completos
+async function downloadPartial(url, destPath, maxBytes) {
+  const axios = require('axios');
+  const resp = await axios.get(url, {
+    responseType: 'stream',
+    timeout: 60_000,
+    headers: {
+      'User-Agent': UA,
+      'Accept': '*/*',
+      'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
+      'Range': `bytes=0-${maxBytes - 1}`,
+    },
+  });
+  return new Promise((resolve, reject) => {
+    const out = fs.createWriteStream(destPath);
+    let total = 0;
+    resp.data.on('data', chunk => {
+      total += chunk.length;
+      if (total >= maxBytes) { resp.data.destroy(); }
+    });
+    resp.data.pipe(out);
+    out.on('finish', resolve);
+    out.on('error', reject);
+    // ECONNRESET é esperado quando destruímos o stream antes do fim
+    resp.data.on('error', err => (err.code === 'ECONNRESET' ? resolve() : reject(err)));
+  });
+}
 
+// Probe local (sempre funciona, sem depender do cliente HTTP do ffprobe)
+async function probeLocalFile(filePath) {
   try {
-    const { stdout } = await execFileAsync('ffprobe', args, { timeout: 30_000 });
+    const { stdout } = await execFileAsync('ffprobe', [
+      '-v', 'quiet', '-print_format', 'json', '-show_streams', '-select_streams', 'a',
+      filePath,
+    ], { timeout: 20_000 });
     const stream = JSON.parse(stdout).streams?.[0];
     if (!stream) return null;
-    return {
-      codec:    stream.codec_name,
-      profile:  stream.profile || '',
-      channels: stream.channels || 0,
-    };
+    return { codec: stream.codec_name, profile: stream.profile || '', channels: stream.channels || 0 };
   } catch (e) {
-    console.error('[ffprobe] erro:', e.message?.slice(0, 200));
+    console.error('[ffprobe] erro local:', e.message?.slice(0, 200));
     return null;
+  }
+}
+
+async function probeAudio(input) {
+  const isUrl = /^https?:\/\//i.test(input);
+  if (!isUrl) return probeLocalFile(input);
+
+  // Para URLs: baixa parcialmente via axios (evita bloqueio de CDN/Cloudflare)
+  const tmpProbe = path.join(os.tmpdir(), `fh_probe_${Date.now()}.tmp`);
+  try {
+    console.log('[probe] baixando parcial:', input);
+    await downloadPartial(input, tmpProbe, PARTIAL_BYTES);
+    return await probeLocalFile(tmpProbe);
+  } catch (e) {
+    console.error('[probe] download parcial falhou:', e.message?.slice(0, 200));
+    return null;
+  } finally {
+    try { fs.unlinkSync(tmpProbe); } catch {}
   }
 }
 
@@ -49,9 +86,11 @@ function needsRemux(info) {
 
 async function remuxToWebAac(input, outputPath) {
   const out = outputPath || input.replace(/(\.[^.]+)$/, '_fixed$1');
-  const isUrl = input.startsWith('http://') || input.startsWith('https://');
+  const isUrl = /^https?:\/\//i.test(input);
+  // ffmpeg aceita múltiplos headers via -headers "H1: v1\r\nH2: v2\r\n"
+  const hdrs = `User-Agent: ${UA}\r\nAccept: */*\r\nAccept-Language: pt-BR,pt;q=0.9,en;q=0.8\r\n`;
   const args = [
-    ...(isUrl ? ['-user_agent', UA] : []),
+    ...(isUrl ? ['-headers', hdrs] : []),
     '-i', input,
     '-c:v', 'copy',
     '-c:a', 'aac', '-profile:a', 'aac_low', '-ac', '2', '-b:a', '192k',
