@@ -76,17 +76,47 @@ export default function AdminUploadScreen() {
     const target = overrideFile || file;
     if (!target) return;
 
-    setStatus('uploading');
+    setStatus('preparing');
     setProgress(0);
     setError(null);
     setResult(null);
+
+    // ── Garante URI file:// ────────────────────────────────────────────────────
+    // content:// URIs do Android não funcionam com createUploadTask nativo.
+    // Mesmo com copyToCacheDirectory:true, alguns dispositivos retornam content://.
+    let uploadUri = target.uri;
+    if (!uploadUri.startsWith('file://') && !uploadUri.startsWith('/')) {
+      const ext = (target.name || 'video.mp4').split('.').pop().toLowerCase();
+      const destUri = `${FileSystem.cacheDirectory}upload_temp.${ext}`;
+      try {
+        await FileSystem.copyAsync({ from: uploadUri, to: destUri });
+        uploadUri = destUri;
+        cacheUriRef.current = destUri;
+      } catch {
+        setError('Não foi possível ler o arquivo. Tente selecionar o vídeo novamente.');
+        setStatus('error');
+        return;
+      }
+    }
+
+    // ── Verifica se o arquivo ainda existe no cache ────────────────────────────
+    // O cache pode ser limpo pelo Android sob pressão de memória.
+    let info;
+    try { info = await FileSystem.getInfoAsync(uploadUri); } catch {}
+    if (!info?.exists) {
+      setError('Arquivo não encontrado — pode ter expirado. Selecione o vídeo novamente.');
+      setStatus('error');
+      return;
+    }
+
+    setStatus('uploading');
     await KeepAwake.activateKeepAwakeAsync('admin-upload');
 
     try {
       await AsyncStorage.setItem(RESUME_KEY, JSON.stringify({
         name: target.name,
         size: target.size,
-        uri: target.uri,
+        uri: uploadUri,
         version,
       }));
 
@@ -98,7 +128,7 @@ export default function AdminUploadScreen() {
 
       taskRef.current = FileSystem.createUploadTask(
         presign.uploadUrl,
-        target.uri,
+        uploadUri,
         {
           httpMethod: 'POST',
           uploadType: BINARY_CONTENT,
@@ -129,7 +159,8 @@ export default function AdminUploadScreen() {
       }
 
       setProgress(90);
-      cdnUrl = `${presign.cdnBase}/${target.name}`;
+      // encodedName garante URL válida para nomes com espaços ou acentos
+      cdnUrl = `${presign.cdnBase}/${encodedName}`;
 
       const { data: tmdbResult } = await api.post('/tmdb/detect', {
         fileUrl: cdnUrl,
@@ -186,7 +217,7 @@ export default function AdminUploadScreen() {
     setPending(null);
   };
 
-  const isUploading = status === 'uploading';
+  const isUploading = status === 'uploading' || status === 'preparing';
 
   return (
     <ScrollView
@@ -273,7 +304,13 @@ export default function AdminUploadScreen() {
         </View>
       )}
 
-      {isUploading && (
+      {status === 'preparing' && (
+        <View style={styles.section}>
+          <Text style={styles.progressLabel}>Preparando arquivo…</Text>
+        </View>
+      )}
+
+      {status === 'uploading' && (
         <View style={styles.section}>
           <View style={styles.progressHeader}>
             <Text style={styles.progressLabel}>Enviando... {progress}%</Text>

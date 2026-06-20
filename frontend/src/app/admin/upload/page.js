@@ -44,28 +44,20 @@ function doUploadXHR(item, presign, onProgress, signal) {
   });
 }
 
-const LARGE_FILE_THRESHOLD = 5 * 1024 * 1024 * 1024;
+// Qualquer arquivo > 200 MB usa upload em partes (mais resiliente a quedas de conexão).
+// Abaixo disso, um único XHR é suficiente e mais simples.
+const LARGE_FILE_THRESHOLD = 200 * 1024 * 1024;
 const PART_SIZE = 100 * 1024 * 1024;
-
-// Calcula SHA1 real de um Blob — obrigatório para b2_finish_large_file
-async function sha1Hex(blob) {
-  const buf = await blob.arrayBuffer();
-  const hash = await crypto.subtle.digest('SHA-1', buf);
-  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
-}
 
 async function doLargeUploadXHR(item, onProgress, signal, resumeState) {
   const file = item.file;
   let fileId = resumeState?.fileId;
   let startPart = 0;
-  const allSha1s = []; // índice i → SHA1 da parte i+1
 
   if (fileId) {
-    // Resume: busca SHA1s das partes já enviadas no B2
+    // Resume: quantas partes já chegaram ao B2
     const { data } = await api.post('/upload/list-parts', { fileId });
-    const doneParts = data.parts.sort((a, b) => a.partNumber - b.partNumber);
-    startPart = doneParts.length;
-    for (const p of doneParts) allSha1s[p.partNumber - 1] = p.contentSha1;
+    startPart = data.parts.length;
     onProgress({ pct: Math.round((startPart / Math.ceil(file.size / PART_SIZE)) * 88), fileId, partsDone: startPart });
   } else {
     const { data: { fileId: newId } } = await api.post('/upload/start-large', {
@@ -85,11 +77,6 @@ async function doLargeUploadXHR(item, onProgress, signal, resumeState) {
     const chunk = file.slice(start, Math.min(start + PART_SIZE, file.size));
     const partNumber = i + 1;
 
-    // Calcula SHA1 antes de enviar (necessário — B2 armazena "do_not_verify" como marcador
-    // e rejeita em finish_large_file; precisamos do SHA1 real)
-    const sha1 = await sha1Hex(chunk);
-    allSha1s[i] = sha1;
-
     const { data: partInfo } = await api.post('/upload/part-url', { fileId });
 
     await new Promise((resolve, reject) => {
@@ -97,7 +84,9 @@ async function doLargeUploadXHR(item, onProgress, signal, resumeState) {
       xhr.open('POST', partInfo.uploadUrl);
       xhr.setRequestHeader('Authorization', partInfo.authorizationToken);
       xhr.setRequestHeader('X-Bz-Part-Number', String(partNumber));
-      xhr.setRequestHeader('X-Bz-Content-Sha1', sha1);
+      // do_not_verify: B2 aceita a parte e armazena o SHA1 real internamente.
+      // O backend busca esses SHA1s no finish-large via list-parts.
+      xhr.setRequestHeader('X-Bz-Content-Sha1', 'do_not_verify');
 
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable) {
@@ -117,10 +106,11 @@ async function doLargeUploadXHR(item, onProgress, signal, resumeState) {
     onProgress({ pct: Math.round(((i + 1) / totalParts) * 88), fileId, partsDone: i + 1 });
   }
 
+  // partSha1Array vazio → backend usa list-parts para pegar SHA1s reais do B2
   const { data: { cdnUrl } } = await api.post('/upload/finish-large', {
     fileId,
     filename: file.name,
-    partSha1Array: allSha1s,
+    partSha1Array: [],
   });
   return cdnUrl;
 }
@@ -186,7 +176,7 @@ export default function UploadPage() {
         } else {
           const { data: presign } = await api.get('/upload/presign');
           await doUploadXHR(item, presign, (pct) => updateFile(item.id, { progress: pct }), controller.signal);
-          cdnUrl = `${presign.cdnBase}/${item.file.name}`;
+          cdnUrl = `${presign.cdnBase}/${encodeURIComponent(item.file.name)}`;
         }
 
         updateFile(item.id, { progress: 92 });
