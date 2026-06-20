@@ -48,7 +48,9 @@ function doUploadXHR(item, presign, onProgress, signal) {
 // Abaixo disso, um único XHR é suficiente e mais simples.
 const LARGE_FILE_THRESHOLD = 200 * 1024 * 1024;
 const PART_SIZE = 100 * 1024 * 1024;
-const PARALLEL_PARTS = 3; // 3 partes simultâneas → ~3x mais rápido
+// 6 streams simultâneos direto ao B2 (não passa pelo backend).
+// Janela deslizante: quando uma parte termina, a próxima começa imediatamente.
+const PARALLEL_PARTS = 6;
 
 async function doLargeUploadXHR(item, onProgress, signal, resumeState) {
   const file = item.file;
@@ -113,13 +115,20 @@ async function doLargeUploadXHR(item, onProgress, signal, resumeState) {
     });
   }
 
-  // Envia PARALLEL_PARTS partes em paralelo; aguarda o lote antes do próximo.
-  for (let i = startPart; i < totalParts; i += PARALLEL_PARTS) {
-    if (signal?.aborted) throw new Error('paused');
-    const batchEnd = Math.min(i + PARALLEL_PARTS, totalParts);
-    await Promise.all(Array.from({ length: batchEnd - i }, (_, k) => uploadOnePart(i + k)));
-    reportProgress();
+  // Janela deslizante: PARALLEL_PARTS workers independentes, cada um pega a
+  // próxima parte disponível assim que termina a anterior — sem esperar o lote.
+  let nextPart = startPart;
+  async function worker() {
+    while (true) {
+      if (signal?.aborted) throw new Error('paused');
+      const i = nextPart++;
+      if (i >= totalParts) break;
+      await uploadOnePart(i);
+    }
   }
+  await Promise.all(
+    Array.from({ length: Math.min(PARALLEL_PARTS, totalParts - startPart) }, worker)
+  );
 
   // partSha1Array vazio → backend usa list-parts para pegar SHA1s reais do B2
   const { data: { cdnUrl } } = await api.post('/upload/finish-large', {
