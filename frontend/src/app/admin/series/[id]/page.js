@@ -7,7 +7,26 @@ import f from '../../filmes/novo/page.module.css';
 import s from './page.module.css';
 
 // ---- Episode inline form ----
-function EpForm({ ep, setEp }) {
+function EpForm({ ep, setEp, onFetchSubs }) {
+  const [fetchingSubs, setFetchingSubs] = useState(false);
+  const [subsMsg, setSubsMsg] = useState('');
+
+  async function handleFetchSubs() {
+    setFetchingSubs(true);
+    setSubsMsg('');
+    try {
+      const { found, results } = await onFetchSubs();
+      if (results?.pt) setEp('subtitle_pt', results.pt);
+      if (results?.en) setEp('subtitle_en', results.en);
+      if (results?.es) setEp('subtitle_es', results.es);
+      setSubsMsg(found?.length ? `Importadas: ${found.map(l => l.toUpperCase()).join(', ')}` : 'Nenhuma encontrada');
+    } catch (e) {
+      setSubsMsg(`Erro: ${e.response?.data?.error || e.message}`);
+    } finally {
+      setFetchingSubs(false);
+    }
+  }
+
   return (
     <div className={s.formGap}>
       <div className={s.grid3}>
@@ -67,6 +86,17 @@ function EpForm({ ep, setEp }) {
         </div>
       </div>
 
+      {onFetchSubs && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <button type="button" onClick={handleFetchSubs} disabled={fetchingSubs} className={f.btnSearch}
+            style={{ fontSize: '0.8rem', padding: '0.35rem 0.75rem' }}>
+            {fetchingSubs ? 'Buscando...' : 'Buscar legendas'}
+          </button>
+          {subsMsg && (
+            <span style={{ fontSize: '0.75rem', color: subsMsg.startsWith('Erro') ? '#ff6b6b' : '#4caf50' }}>{subsMsg}</span>
+          )}
+        </div>
+      )}
       <div className={s.grid3eq}>
         <div>
           <label className={f.label}>Legenda PT (.vtt)</label>
@@ -194,6 +224,19 @@ export default function EditarSerie() {
 
   function cancelEdit() {
     setEditingId(null);
+  }
+
+  async function fetchSubsForEp() {
+    if (!form?.tmdb_id) throw new Error('Série sem TMDB ID');
+    const { data } = await api.post('/upload/fetch-subtitles', {
+      tmdbId: form.tmdb_id,
+      movieId: epForm.id,
+      movieType: 'episode',
+      seasonNumber: epForm.season_number,
+      episodeNumber: epForm.episode_number,
+    });
+    const found = Object.keys(data.results || {});
+    return { found, results: data.results };
   }
 
   async function saveEp() {
@@ -455,7 +498,7 @@ export default function EditarSerie() {
                     {editingId === ep.id && (
                       <tr key={`${ep.id}-form`}>
                         <td colSpan={8} className={s.epFormCell}>
-                          <EpForm ep={epForm} setEp={setEp} />
+                          <EpForm ep={epForm} setEp={setEp} onFetchSubs={form?.tmdb_id ? fetchSubsForEp : undefined} />
                           <div className={s.epFormActions}>
                             <button className={s.btnSaveEp} onClick={saveEp} disabled={savingEp}>
                               {savingEp ? 'Salvando...' : 'Salvar'}

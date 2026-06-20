@@ -13,6 +13,8 @@ export default function EditarFilme() {
   const [tmdbLoading, setTmdbLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [fetchingSubs, setFetchingSubs] = useState(false);
+  const [subsMsg, setSubsMsg] = useState('');
 
   useEffect(() => {
     api.get(`/admin/movies?q=&page=1&limit=1000`)
@@ -57,6 +59,30 @@ export default function EditarFilme() {
       setError(err.response?.data?.error || 'Erro ao buscar no TMDB');
     } finally {
       setTmdbLoading(false);
+    }
+  }
+
+  async function fetchSubs() {
+    if (!form?.tmdb_id) { setSubsMsg('Erro: filme sem TMDB ID — busque no TMDB primeiro'); return; }
+    setFetchingSubs(true);
+    setSubsMsg('');
+    try {
+      const { data } = await api.post('/upload/fetch-subtitles', { tmdbId: form.tmdb_id, movieId: id, movieType: 'movie' });
+      const found = Object.keys(data.results || {});
+      if (found.length) {
+        const updates = {};
+        if (data.results.pt) updates.subtitle_pt = data.results.pt;
+        if (data.results.en) updates.subtitle_en = data.results.en;
+        if (data.results.es) updates.subtitle_es = data.results.es;
+        setForm(prev => ({ ...prev, ...updates }));
+        setSubsMsg(`Importadas: ${found.map(l => l.toUpperCase()).join(', ')}`);
+      } else {
+        setSubsMsg('Nenhuma legenda encontrada');
+      }
+    } catch (e) {
+      setSubsMsg(`Erro: ${e.response?.data?.error || e.message}`);
+    } finally {
+      setFetchingSubs(false);
     }
   }
 
@@ -187,7 +213,16 @@ export default function EditarFilme() {
           </div>
         ))}
 
-        <h3 className={styles.sectionTitle}>Legendas (.vtt)</h3>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <h3 className={styles.sectionTitle}>Legendas (.vtt)</h3>
+          <button type="button" onClick={fetchSubs} disabled={fetchingSubs} className={styles.btnSearch}
+            style={{ fontSize: '0.8rem', padding: '0.35rem 0.75rem' }}>
+            {fetchingSubs ? 'Buscando...' : 'Buscar legendas'}
+          </button>
+          {subsMsg && (
+            <span style={{ fontSize: '0.75rem', color: subsMsg.startsWith('Erro') ? '#ff6b6b' : '#4caf50' }}>{subsMsg}</span>
+          )}
+        </div>
         {[['subtitle_pt', 'Português'], ['subtitle_en', 'Inglês'], ['subtitle_es', 'Espanhol']].map(([key, label]) => (
           <div key={key}>
             <label className={styles.label}>{label}</label>

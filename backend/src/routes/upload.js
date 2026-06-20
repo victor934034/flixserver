@@ -154,6 +154,51 @@ router.post('/finish-large', async (req, res) => {
   }
 });
 
+// Buscar e importar legendas do OpenSubtitles automaticamente pelo TMDB ID
+router.post('/fetch-subtitles', async (req, res) => {
+  const { tmdbId, movieId, movieType, seasonNumber, episodeNumber } = req.body;
+  if (!tmdbId || !movieId) return res.status(400).json({ error: 'tmdbId e movieId são obrigatórios' });
+
+  const { searchSubtitles, getDownloadLink, downloadContent } = require('../services/opensubtitles');
+  const { uploadFile } = require('../services/backblaze');
+  const { supabase } = require('../services/supabase');
+
+  const langMap = { pt: 'pt-BR', en: 'en', es: 'es' };
+  const results = {};
+  const errors = {};
+
+  for (const [dbLang, apiLang] of Object.entries(langMap)) {
+    try {
+      const hits = await searchSubtitles({
+        tmdbId, type: movieType || 'movie', lang: apiLang, seasonNumber, episodeNumber,
+      });
+      if (!hits.length) { errors[dbLang] = 'Não encontrado'; continue; }
+
+      const sorted = hits.sort((a, b) => (b.attributes?.download_count || 0) - (a.attributes?.download_count || 0));
+      const file = sorted[0]?.attributes?.files?.[0];
+      if (!file?.file_id) { errors[dbLang] = 'Arquivo indisponível'; continue; }
+
+      const link = await getDownloadLink(file.file_id);
+      const srtBuffer = await downloadContent(link);
+      const vttBuffer = Buffer.from(convertSrtToVtt(srtBuffer.toString('utf-8')), 'utf-8');
+
+      const filename = `subtitles/${movieId}_${dbLang}.vtt`;
+      const uploaded = await uploadFile(vttBuffer, filename, 'text/vtt');
+
+      const table = movieType === 'episode' ? 'episodes' : 'movies';
+      const { error: dbErr } = await supabase.from(table).update({ [`subtitle_${dbLang}`]: uploaded.cdnUrl }).eq('id', movieId);
+      if (dbErr) throw new Error(`DB: ${dbErr.message}`);
+
+      results[dbLang] = uploaded.cdnUrl;
+    } catch (e) {
+      console.warn(`[opensubtitles] ${dbLang}:`, e.message);
+      errors[dbLang] = e.message;
+    }
+  }
+
+  res.json({ results, errors });
+});
+
 function convertSrtToVtt(srt) {
   return 'WEBVTT\n\n' + srt
     .replace(/\r\n/g, '\n')
