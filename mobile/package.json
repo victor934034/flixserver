@@ -1,12 +1,13 @@
 {
   "name": "flixhome-mobile",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "main": "expo-router/entry",
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "build:apk": "eas build --platform android --profile preview"
+    "build:apk": "eas build --platform android --profile preview",
+    "update": "eas update --branch production --message \"v1.0.2\""
   },
   "dependencies": {
     "@expo/ngrok": "^4.1.0",

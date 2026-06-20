@@ -2,7 +2,7 @@
   "expo": {
     "name": "Flixhome",
     "slug": "flixhome",
-    "version": "1.0.0",
+    "version": "1.0.2",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "assetBundlePatterns": [
@@ -10,9 +10,16 @@
     ],
     "android": {
       "package": "com.flixhome.app",
+      "versionCode": 3,
       "adaptiveIcon": {
         "backgroundColor": "#0a0a0a"
       }
+    },
+    "updates": {
+      "url": "https://u.expo.dev/003e6f97-72d9-49d4-a9aa-2360f01b3fcf"
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
     },
     "scheme": "flixhome",
     "plugins": [
