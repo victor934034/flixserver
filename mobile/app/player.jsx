@@ -445,24 +445,42 @@ export default function PlayerScreen() {
               <Text style={styles.timeText}>{fmtSec(durSec)}</Text>
             </View>
 
-            {/* Action bar — idêntico ao Netflix */}
+            {/* Action bar */}
             <View style={styles.actionBar}>
               <TouchableOpacity style={styles.actionBtn} onPress={() => openSheet('speed')}>
                 <Ionicons name="speedometer-outline" size={15} color="#fff" />
-                <Text style={styles.actionBtnText}>Velocidade ({speed}x)</Text>
+                <Text style={styles.actionBtnText}>{speed}x</Text>
               </TouchableOpacity>
               <View style={styles.actionDiv} />
               <TouchableOpacity style={styles.actionBtn} onPress={() => setLocked(true)}>
                 <Ionicons name="lock-open-outline" size={15} color="#fff" />
                 <Text style={styles.actionBtnText}>Bloquear</Text>
               </TouchableOpacity>
-              {audioTracks.length > 1 && <>
+
+              {/* Áudio: versão (Dublado/Legendado) + faixas embutidas se houver */}
+              {(availVer.length > 1 || audioTracks.length > 1) && <>
                 <View style={styles.actionDiv} />
                 <TouchableOpacity style={styles.actionBtn} onPress={() => openSheet('audio')}>
                   <Ionicons name="musical-notes-outline" size={15} color="#fff" />
-                  <Text style={styles.actionBtnText}>Áudio</Text>
+                  <Text style={styles.actionBtnText}>
+                    {audioTracks.length > 1 && activeAudio
+                      ? audioLabel(activeAudio, audioTracks.indexOf(activeAudio))
+                      : (VER_LABELS[activeVer] || 'Áudio')}
+                  </Text>
                 </TouchableOpacity>
               </>}
+
+              {/* Legenda: só aparece se houver legendas disponíveis */}
+              {availSubs.length > 0 && <>
+                <View style={styles.actionDiv} />
+                <TouchableOpacity style={styles.actionBtn} onPress={() => openSheet('subtitles')}>
+                  <Ionicons name="closed-captioning-outline" size={15} color={activeSub ? '#E50914' : '#fff'} />
+                  <Text style={[styles.actionBtnText, activeSub && { color: '#E50914' }]}>
+                    {activeSub ? SUB_LABELS[activeSub]?.split(' ')[0] : 'Legenda'}
+                  </Text>
+                </TouchableOpacity>
+              </>}
+
               {seriesId && <>
                 <View style={styles.actionDiv} />
                 <TouchableOpacity style={styles.actionBtn} onPress={() => openSheet('episodes')}>
@@ -470,11 +488,6 @@ export default function PlayerScreen() {
                   <Text style={styles.actionBtnText}>Episódios</Text>
                 </TouchableOpacity>
               </>}
-              <View style={styles.actionDiv} />
-              <TouchableOpacity style={styles.actionBtn} onPress={() => openSheet('subtitles')}>
-                <Ionicons name="text-outline" size={15} color="#fff" />
-                <Text style={styles.actionBtnText}>Idioma e legendas</Text>
-              </TouchableOpacity>
               <View style={styles.actionDiv} />
               <TouchableOpacity style={styles.actionBtn} onPress={() => openSheet('cast')}>
                 <Ionicons name="tv-outline" size={15} color="#fff" />
@@ -539,49 +552,51 @@ export default function PlayerScreen() {
               ))}
             </>}
 
+            {/* Sheet Legenda: só legendas externas (.vtt) */}
             {sheet === 'subtitles' && <>
-              <Text style={styles.sheetTitle}>Idioma e legendas</Text>
-              {availVer.length > 0 && <>
-                <Text style={styles.sheetSection}>FAIXA DE ÁUDIO</Text>
+              <Text style={styles.sheetTitle}>Legenda</Text>
+              <TouchableOpacity style={styles.sheetRow} onPress={() => { setActiveSub(null); setSheet(null); schedHide(); }}>
+                <Text style={[styles.sheetRowText, !activeSub && styles.sheetRowActive]}>Desativado</Text>
+                {!activeSub && <Ionicons name="checkmark" size={20} color="#E50914" />}
+              </TouchableOpacity>
+              {availSubs.map(([lang]) => (
+                <TouchableOpacity key={lang} style={styles.sheetRow} onPress={() => { setActiveSub(lang); setSheet(null); schedHide(); }}>
+                  <Text style={[styles.sheetRowText, activeSub === lang && styles.sheetRowActive]}>{SUB_LABELS[lang] || lang}</Text>
+                  {activeSub === lang && <Ionicons name="checkmark" size={20} color="#E50914" />}
+                </TouchableOpacity>
+              ))}
+            </>}
+
+            {/* Sheet Áudio: versões (Dublado/Legendado/Cinema) + faixas embutidas no arquivo */}
+            {sheet === 'audio' && <>
+              <Text style={styles.sheetTitle}>Áudio</Text>
+              {availVer.length > 1 && <>
+                <Text style={styles.sheetSection}>VERSÃO</Text>
                 {availVer.map(v => (
-                  <TouchableOpacity key={v} style={styles.sheetRow} onPress={() => switchVer(v)}>
+                  <TouchableOpacity key={v} style={styles.sheetRow} onPress={() => { switchVer(v); setSheet(null); schedHide(); }}>
                     <Text style={[styles.sheetRowText, v === activeVer && styles.sheetRowActive]}>{VER_LABELS[v] || v}</Text>
                     {v === activeVer && <Ionicons name="checkmark" size={20} color="#E50914" />}
                   </TouchableOpacity>
                 ))}
               </>}
-              {availSubs.length > 0 && <>
-                <Text style={styles.sheetSection}>LEGENDAS</Text>
-                <TouchableOpacity style={styles.sheetRow} onPress={() => { setActiveSub(null); setSheet(null); }}>
-                  <Text style={[styles.sheetRowText, !activeSub && styles.sheetRowActive]}>Desativado</Text>
-                  {!activeSub && <Ionicons name="checkmark" size={20} color="#E50914" />}
-                </TouchableOpacity>
-                {availSubs.map(([lang]) => (
-                  <TouchableOpacity key={lang} style={styles.sheetRow} onPress={() => { setActiveSub(lang); setSheet(null); }}>
-                    <Text style={[styles.sheetRowText, activeSub === lang && styles.sheetRowActive]}>{SUB_LABELS[lang] || lang}</Text>
-                    {activeSub === lang && <Ionicons name="checkmark" size={20} color="#E50914" />}
+              {audioTracks.length > 1 && <>
+                <Text style={styles.sheetSection}>FAIXA NO ARQUIVO</Text>
+                {audioTracks.map((track, idx) => (
+                  <TouchableOpacity
+                    key={track.id ?? idx}
+                    style={styles.sheetRow}
+                    onPress={() => { setActiveAudio(track); setSheet(null); schedHide(); }}
+                  >
+                    <Text style={[styles.sheetRowText, activeAudio?.id === track.id && styles.sheetRowActive]}>
+                      {audioLabel(track, idx)}
+                    </Text>
+                    {activeAudio?.id === track.id && <Ionicons name="checkmark" size={20} color="#E50914" />}
                   </TouchableOpacity>
                 ))}
               </>}
-              {availVer.length === 0 && availSubs.length === 0 && (
+              {availVer.length <= 1 && audioTracks.length <= 1 && (
                 <Text style={styles.sheetEmpty}>Nenhuma opção disponível</Text>
               )}
-            </>}
-
-            {sheet === 'audio' && <>
-              <Text style={styles.sheetTitle}>Faixa de áudio</Text>
-              {audioTracks.map((track, idx) => (
-                <TouchableOpacity
-                  key={track.id ?? idx}
-                  style={styles.sheetRow}
-                  onPress={() => { setActiveAudio(track); setSheet(null); schedHide(); }}
-                >
-                  <Text style={[styles.sheetRowText, activeAudio?.id === track.id && styles.sheetRowActive]}>
-                    {audioLabel(track, idx)}
-                  </Text>
-                  {activeAudio?.id === track.id && <Ionicons name="checkmark" size={20} color="#E50914" />}
-                </TouchableOpacity>
-              ))}
             </>}
 
             {sheet === 'timer' && <>
