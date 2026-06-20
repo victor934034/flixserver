@@ -25,6 +25,17 @@ const TIMER_OPTS = [
 ];
 const VER_LABELS = { dubbing: 'Dublado', subtitled: 'Legendado', cinema: 'Cinema / Original', '4k': '4K UHD' };
 const SUB_LABELS = { pt: 'Português 🇧🇷', en: 'English 🇺🇸', es: 'Español 🇪🇸' };
+const AUDIO_LANG = {
+  por: 'Português 🇧🇷', pt: 'Português 🇧🇷',
+  eng: 'English 🇺🇸',  en: 'English 🇺🇸',
+  spa: 'Español 🇪🇸',  es: 'Español 🇪🇸',
+  jpn: 'Japonês 🇯🇵',  ja: 'Japonês 🇯🇵',
+  fre: 'Français 🇫🇷',  fr: 'Français 🇫🇷', fra: 'Français 🇫🇷',
+};
+function audioLabel(track, idx) {
+  const lang = (track.language || '').toLowerCase();
+  return AUDIO_LANG[lang] || track.label || `Faixa ${idx + 1}`;
+}
 const SLIDER_H = 140;
 
 function pad(n) { return String(n).padStart(2, '0'); }
@@ -86,6 +97,8 @@ export default function PlayerScreen() {
   const [activeVer, setActiveVer] = useState(initVer);
   const [savedPosSec, setSavedPosSec] = useState(null);
   const [activeSub, setActiveSub] = useState(null);
+  const [audioTracks, setAudioTracks] = useState([]);
+  const [activeAudio, setActiveAudio] = useState(null);
   const [speed, setSpeed] = useState(1);
   const [ctrlVisible, setCtrlVisible] = useState(true);
   const [locked, setLocked] = useState(false);
@@ -129,6 +142,23 @@ export default function PlayerScreen() {
 
   // Apply speed
   useEffect(() => { player.playbackRate = speed; }, [speed]);
+
+  // Detecta faixas de áudio quando o vídeo fica pronto (ou troca de fonte)
+  useEffect(() => {
+    if (status !== 'readyToPlay') return;
+    const tracks = player.availableAudioTracks || [];
+    setAudioTracks(tracks);
+    // Mantém a faixa ativa se ainda existir após troca de fonte
+    if (tracks.length > 0 && !activeAudio) {
+      setActiveAudio(tracks[0]);
+    }
+  }, [status]);
+
+  // Aplica a faixa de áudio selecionada
+  useEffect(() => {
+    if (!activeAudio) return;
+    try { player.selectedAudioTrack = activeAudio; } catch {}
+  }, [activeAudio]);
 
   // Apply subtitle selection
   useEffect(() => {
@@ -426,6 +456,13 @@ export default function PlayerScreen() {
                 <Ionicons name="lock-open-outline" size={15} color="#fff" />
                 <Text style={styles.actionBtnText}>Bloquear</Text>
               </TouchableOpacity>
+              {audioTracks.length > 1 && <>
+                <View style={styles.actionDiv} />
+                <TouchableOpacity style={styles.actionBtn} onPress={() => openSheet('audio')}>
+                  <Ionicons name="musical-notes-outline" size={15} color="#fff" />
+                  <Text style={styles.actionBtnText}>Áudio</Text>
+                </TouchableOpacity>
+              </>}
               {seriesId && <>
                 <View style={styles.actionDiv} />
                 <TouchableOpacity style={styles.actionBtn} onPress={() => openSheet('episodes')}>
@@ -529,6 +566,22 @@ export default function PlayerScreen() {
               {availVer.length === 0 && availSubs.length === 0 && (
                 <Text style={styles.sheetEmpty}>Nenhuma opção disponível</Text>
               )}
+            </>}
+
+            {sheet === 'audio' && <>
+              <Text style={styles.sheetTitle}>Faixa de áudio</Text>
+              {audioTracks.map((track, idx) => (
+                <TouchableOpacity
+                  key={track.id ?? idx}
+                  style={styles.sheetRow}
+                  onPress={() => { setActiveAudio(track); setSheet(null); schedHide(); }}
+                >
+                  <Text style={[styles.sheetRowText, activeAudio?.id === track.id && styles.sheetRowActive]}>
+                    {audioLabel(track, idx)}
+                  </Text>
+                  {activeAudio?.id === track.id && <Ionicons name="checkmark" size={20} color="#E50914" />}
+                </TouchableOpacity>
+              ))}
             </>}
 
             {sheet === 'timer' && <>
