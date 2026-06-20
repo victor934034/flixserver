@@ -48,6 +48,7 @@ function doUploadXHR(item, presign, onProgress, signal) {
 // Abaixo disso, um único XHR é suficiente e mais simples.
 const LARGE_FILE_THRESHOLD = 200 * 1024 * 1024;
 const PART_SIZE = 100 * 1024 * 1024;
+const PARALLEL_PARTS = 3; // 3 partes simultâneas → ~3x mais rápido
 
 async function doLargeUploadXHR(item, onProgress, signal, resumeState) {
   const file = item.file;
@@ -69,10 +70,18 @@ async function doLargeUploadXHR(item, onProgress, signal, resumeState) {
   }
 
   const totalParts = Math.ceil(file.size / PART_SIZE);
+  // Progresso individual de cada parte (0–1). Partes já concluídas no resume = 1.
+  const partProg = new Array(totalParts).fill(0);
+  for (let i = 0; i < startPart; i++) partProg[i] = 1;
 
-  for (let i = startPart; i < totalParts; i++) {
+  function reportProgress() {
+    const done = partProg.reduce((s, p) => s + p, 0);
+    const partsDone = partProg.filter(p => p >= 1).length;
+    onProgress({ pct: Math.round((done / totalParts) * 88), fileId, partsDone });
+  }
+
+  async function uploadOnePart(i) {
     if (signal?.aborted) throw new Error('paused');
-
     const start = i * PART_SIZE;
     const chunk = file.slice(start, Math.min(start + PART_SIZE, file.size));
     const partNumber = i + 1;
@@ -90,20 +99,26 @@ async function doLargeUploadXHR(item, onProgress, signal, resumeState) {
 
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable) {
-          const pct = Math.round(((i + e.loaded / e.total) / totalParts) * 88);
-          onProgress({ pct, fileId, partsDone: i });
+          partProg[i] = e.loaded / e.total;
+          reportProgress();
         }
       };
       xhr.onload = () => {
-        if (xhr.status < 300) resolve();
+        if (xhr.status < 300) { partProg[i] = 1; resolve(); }
         else reject(Object.assign(new Error(`HTTP ${xhr.status}`), { isServer: true }));
       };
       xhr.onerror = () => reject(new Error('connection'));
       signal?.addEventListener('abort', () => { xhr.abort(); reject(new Error('paused')); });
       xhr.send(chunk);
     });
+  }
 
-    onProgress({ pct: Math.round(((i + 1) / totalParts) * 88), fileId, partsDone: i + 1 });
+  // Envia PARALLEL_PARTS partes em paralelo; aguarda o lote antes do próximo.
+  for (let i = startPart; i < totalParts; i += PARALLEL_PARTS) {
+    if (signal?.aborted) throw new Error('paused');
+    const batchEnd = Math.min(i + PARALLEL_PARTS, totalParts);
+    await Promise.all(Array.from({ length: batchEnd - i }, (_, k) => uploadOnePart(i + k)));
+    reportProgress();
   }
 
   // partSha1Array vazio → backend usa list-parts para pegar SHA1s reais do B2
