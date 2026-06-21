@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { DownloadProvider } from '../contexts/DownloadContext';
 import { ParentalProvider } from '../contexts/ParentalContext';
@@ -23,9 +24,12 @@ async function registerPushToken() {
   try {
     const { status } = await Notifications.getPermissionsAsync();
     if (status !== 'granted') return;
-    const { data: token } = await Notifications.getExpoPushTokenAsync();
+    const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? '003e6f97-72d9-49d4-a9aa-2360f01b3fcf';
+    const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
     if (token) await api.post('/auth/push-token', { token });
-  } catch {}
+  } catch (e) {
+    console.warn('[push] registerPushToken:', e.message);
+  }
 }
 
 function AppGate() {
