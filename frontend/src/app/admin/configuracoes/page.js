@@ -3,14 +3,29 @@ import { useEffect, useState } from 'react';
 import api from '../../../lib/api';
 import styles from '../filmes/novo/page.module.css';
 
+const DEFAULT_PLANS = [
+  { id: 'monthly',   name: 'Mensal',     price: 19.90, duration_days: 30,  active: true,  badge: null,          description: 'Acesso completo por 1 mês', highlight: false },
+  { id: 'quarterly', name: 'Trimestral', price: 49.90, duration_days: 90,  active: true,  badge: 'MAIS POPULAR', description: 'Economia de 16%',           highlight: true  },
+  { id: 'yearly',    name: 'Anual',      price: 149.90, duration_days: 365, active: true, badge: 'MELHOR CUSTO', description: 'Economia de 37%',           highlight: false },
+];
+
 export default function Configuracoes() {
   const [settings, setSettings] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState('');
   const [msg, setMsg] = useState('');
 
+  const [plans, setPlans] = useState([]);
+  const [plansLoading, setPlansLoading] = useState(true);
+  const [plansSaving, setPlansSaving] = useState(false);
+  const [plansMsg, setPlansMsg] = useState('');
+
   useEffect(() => {
     api.get('/settings').then(r => setSettings(r.data)).finally(() => setLoading(false));
+    api.get('/payments/plans/all')
+      .then(r => setPlans(r.data?.length ? r.data : DEFAULT_PLANS))
+      .catch(() => setPlans(DEFAULT_PLANS))
+      .finally(() => setPlansLoading(false));
   }, []);
 
   async function toggle(key, currentValue) {
@@ -31,13 +46,29 @@ export default function Configuracoes() {
   async function sendNotification(title, body) {
     setSaving('notify');
     try {
-      // Usa o endpoint de novo filme com is_active: false para só disparar o push manualmente
       await api.post('/admin/notify', { title, body });
       setMsg('Notificação enviada!');
     } catch {
       setMsg('Erro ao enviar notificação');
     } finally {
       setSaving('');
+    }
+  }
+
+  function updatePlan(idx, field, value) {
+    setPlans(prev => prev.map((p, i) => i === idx ? { ...p, [field]: value } : p));
+  }
+
+  async function savePlans() {
+    setPlansSaving(true);
+    setPlansMsg('');
+    try {
+      await api.put('/payments/plans', { plans });
+      setPlansMsg('Planos salvos!');
+    } catch (e) {
+      setPlansMsg('Erro: ' + (e.response?.data?.error || e.message));
+    } finally {
+      setPlansSaving(false);
     }
   }
 
@@ -49,13 +80,17 @@ export default function Configuracoes() {
     <div>
       <h1 className={styles.heading}>Configurações</h1>
 
+      {/* ── ASSINATURA GLOBAL ── */}
       <section style={{ marginBottom: 40 }}>
         <h3 style={{ color: '#fff', marginBottom: 16 }}>Assinatura</h3>
         <div style={{ background: '#1a1a1a', borderRadius: 12, padding: 24, border: '1px solid #2a2a2a' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
             <div>
               <p style={{ color: '#fff', fontWeight: 600, margin: 0 }}>
-                Sistema de assinatura: <span style={{ color: subEnabled ? '#4caf50' : '#ff6b6b' }}>{subEnabled ? 'ATIVADO' : 'DESATIVADO'}</span>
+                Sistema de assinatura:{' '}
+                <span style={{ color: subEnabled ? '#4caf50' : '#ff6b6b' }}>
+                  {subEnabled ? 'ATIVADO' : 'DESATIVADO'}
+                </span>
               </p>
               <p style={{ color: '#888', fontSize: 13, margin: '4px 0 0' }}>
                 {subEnabled
@@ -78,6 +113,111 @@ export default function Configuracoes() {
         </div>
       </section>
 
+      {/* ── GERENCIAR PLANOS ── */}
+      <section style={{ marginBottom: 40 }}>
+        <h3 style={{ color: '#fff', marginBottom: 16 }}>Planos de Assinatura</h3>
+        {plansLoading ? (
+          <p style={{ color: '#888' }}>Carregando planos...</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {plans.map((plan, idx) => (
+              <div key={plan.id} style={{
+                background: '#1a1a1a', borderRadius: 12, padding: 24,
+                border: `1px solid ${plan.active ? '#2a2a2a' : '#1a1a1a'}`,
+                opacity: plan.active ? 1 : 0.55,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                  <span style={{ color: '#fff', fontWeight: 700, fontSize: 16 }}>{plan.name}</span>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                    <span style={{ color: plan.active ? '#4caf50' : '#ff6b6b', fontSize: 13, fontWeight: 600 }}>
+                      {plan.active ? 'Ativo' : 'Inativo'}
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={plan.active}
+                      onChange={e => updatePlan(idx, 'active', e.target.checked)}
+                      style={{ width: 18, height: 18, cursor: 'pointer' }}
+                    />
+                  </label>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                  <label style={{ color: '#888', fontSize: 13 }}>
+                    Preço (R$)
+                    <input
+                      type="number" step="0.01" min="0"
+                      value={plan.price}
+                      onChange={e => updatePlan(idx, 'price', parseFloat(e.target.value) || 0)}
+                      style={inputStyle}
+                    />
+                  </label>
+                  <label style={{ color: '#888', fontSize: 13 }}>
+                    Preço promocional (R$) — deixe vazio para desativar
+                    <input
+                      type="number" step="0.01" min="0"
+                      value={plan.promo_price ?? ''}
+                      onChange={e => {
+                        const v = e.target.value;
+                        updatePlan(idx, 'promo_price', v === '' ? null : parseFloat(v) || 0);
+                      }}
+                      placeholder="Sem promoção"
+                      style={inputStyle}
+                    />
+                  </label>
+                  <label style={{ color: '#888', fontSize: 13 }}>
+                    Badge (ex: MAIS POPULAR)
+                    <input
+                      type="text"
+                      value={plan.badge ?? ''}
+                      onChange={e => updatePlan(idx, 'badge', e.target.value || null)}
+                      placeholder="Nenhum"
+                      style={inputStyle}
+                    />
+                  </label>
+                  <label style={{ color: '#888', fontSize: 13 }}>
+                    Descrição
+                    <input
+                      type="text"
+                      value={plan.description ?? ''}
+                      onChange={e => updatePlan(idx, 'description', e.target.value)}
+                      style={inputStyle}
+                    />
+                  </label>
+                </div>
+
+                <label style={{ color: '#888', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input
+                    type="checkbox"
+                    checked={plan.highlight}
+                    onChange={e => updatePlan(idx, 'highlight', e.target.checked)}
+                  />
+                  Destaque (borda vermelha no app)
+                </label>
+              </div>
+            ))}
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+              <button
+                onClick={savePlans}
+                disabled={plansSaving}
+                style={{
+                  padding: '12px 32px', borderRadius: 8, background: '#E50914', color: '#fff',
+                  border: 'none', fontWeight: 700, fontSize: 15, cursor: 'pointer',
+                  opacity: plansSaving ? 0.6 : 1,
+                }}>
+                {plansSaving ? 'Salvando...' : 'Salvar planos'}
+              </button>
+              {plansMsg && (
+                <span style={{ color: plansMsg.startsWith('Erro') ? '#ff6b6b' : '#4caf50', fontSize: 13 }}>
+                  {plansMsg}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* ── NOTIFICAÇÕES ── */}
       <section>
         <h3 style={{ color: '#fff', marginBottom: 16 }}>Notificações Push</h3>
         <div style={{ background: '#1a1a1a', borderRadius: 12, padding: 24, border: '1px solid #2a2a2a' }}>
@@ -97,3 +237,9 @@ export default function Configuracoes() {
     </div>
   );
 }
+
+const inputStyle = {
+  display: 'block', marginTop: 6, width: '100%', padding: '8px 12px',
+  background: '#111', border: '1px solid #333', borderRadius: 6,
+  color: '#fff', fontSize: 14,
+};
