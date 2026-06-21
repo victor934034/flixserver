@@ -8,21 +8,20 @@ const MP_API = 'https://api.mercadopago.com';
 const mpHeader = () => ({ Authorization: `Bearer ${process.env.MP_ACCESS_TOKEN}` });
 
 async function getPlansConfig() {
-  const { data, error } = await supabase
-    .from('system_settings')
-    .select('value')
-    .eq('key', 'plans_config')
-    .single();
-  if (error && error.code !== 'PGRST116') {
-    // PGRST116 = no rows found (normal when plans_config not yet inserted)
-    console.error('[payments] getPlansConfig error:', error.message);
-    throw new Error(error.message);
-  }
-  if (!data) return [];
   try {
+    const { data, error } = await supabase
+      .from('system_settings')
+      .select('value')
+      .eq('key', 'plans_config')
+      .single();
+    if (error) {
+      console.error('[payments] getPlansConfig Supabase error:', error.code, error.message);
+      return [];
+    }
+    if (!data) return [];
     return JSON.parse(data.value);
   } catch (e) {
-    console.error('[payments] plans_config JSON inválido:', e.message);
+    console.error('[payments] getPlansConfig exception:', e.message);
     return [];
   }
 }
