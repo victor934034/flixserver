@@ -452,4 +452,17 @@ function convertSrtToVtt(srt) {
     .trim();
 }
 
+// Upload de avatar de perfil — imagem JPG/PNG, armazenada em avatars/
+router.post('/avatar', upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado' });
+  try {
+    const ext = req.file.mimetype === 'image/png' ? '.png' : '.jpg';
+    const filename = `avatars/${Date.now()}_${Math.random().toString(36).slice(2)}${ext}`;
+    const result = await uploadFile(req.file.buffer, filename, req.file.mimetype);
+    res.json({ cdnUrl: result.cdnUrl });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

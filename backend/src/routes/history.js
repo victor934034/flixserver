@@ -6,12 +6,18 @@ router.use(authMiddleware);
 
 router.get('/', async (req, res) => {
   try {
-    const { data: items, error } = await supabase
+    const profileId = req.query.profile_id || req.headers['x-profile-id'] || null;
+
+    let query = supabase
       .from('watch_history')
       .select('*')
       .eq('user_id', req.user.id)
       .order('last_watched', { ascending: false })
       .limit(50);
+
+    if (profileId) query = query.eq('profile_id', profileId);
+
+    const { data: items, error } = await query;
 
     if (error) throw error;
     if (!items || items.length === 0) return res.json([]);
@@ -69,7 +75,7 @@ router.get('/', async (req, res) => {
 });
 
 router.post('/', async (req, res) => {
-  const { content_type, content_id, episode_id, series_id, progress, duration } = req.body;
+  const { content_type, content_id, episode_id, series_id, progress, duration, profile_id } = req.body;
   if (!content_type || !content_id) {
     return res.status(400).json({ error: 'content_type e content_id são obrigatórios' });
   }
@@ -77,13 +83,15 @@ router.post('/', async (req, res) => {
   try {
     const completed = duration > 0 ? progress / duration >= 0.9 : false;
 
-    const { data: existing } = await supabase
+    let findQ = supabase
       .from('watch_history')
       .select('id')
       .eq('user_id', req.user.id)
       .eq('content_id', content_id)
-      .eq('episode_id', episode_id || null)
-      .single();
+      .eq('episode_id', episode_id || null);
+    if (profile_id) findQ = findQ.eq('profile_id', profile_id);
+
+    const { data: existing } = await findQ.single();
 
     let result;
     if (existing) {
@@ -98,7 +106,7 @@ router.post('/', async (req, res) => {
     } else {
       const { data, error } = await supabase
         .from('watch_history')
-        .insert({ user_id: req.user.id, content_type, content_id, episode_id, series_id, progress, duration, completed })
+        .insert({ user_id: req.user.id, content_type, content_id, episode_id, series_id, progress, duration, completed, profile_id: profile_id || null })
         .select()
         .single();
       if (error) throw error;

@@ -1,14 +1,25 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList,
-  Modal, TextInput, ScrollView, Alert, ActivityIndicator,
+  Modal, TextInput, ScrollView, Alert, ActivityIndicator, Image,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../contexts/AuthContext';
 import { useProfile, AVATARS, getAvatar } from '../contexts/ProfileContext';
 import api from '../lib/api';
 
+const isUrl = (s) => typeof s === 'string' && s.startsWith('http');
+
 function AvatarCircle({ avatarId, size = 72 }) {
+  if (isUrl(avatarId)) {
+    return (
+      <Image
+        source={{ uri: avatarId }}
+        style={[styles.avatarCircle, { width: size, height: size, borderRadius: size / 2 }]}
+      />
+    );
+  }
   const av = getAvatar(avatarId);
   return (
     <View style={[styles.avatarCircle, { width: size, height: size, borderRadius: size / 2, backgroundColor: av.color }]}>
@@ -35,11 +46,12 @@ export default function ProfileSelectScreen() {
   const [profiles, setProfiles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
-  const [editing, setEditing] = useState(null); // null = create, profile = edit
+  const [editing, setEditing] = useState(null);
   const [name, setName] = useState('');
   const [selectedAvatar, setSelectedAvatar] = useState('avatar_1');
   const [isKids, setIsKids] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   const fetchProfiles = useCallback(async () => {
     try {
@@ -74,6 +86,40 @@ export default function ProfileSelectScreen() {
     setSelectedAvatar(profile.avatar);
     setIsKids(profile.is_kids);
     setModalVisible(true);
+  }
+
+  async function pickPhoto() {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('Permissão necessária', 'Permita o acesso à galeria para adicionar uma foto.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+    if (result.canceled || !result.assets?.[0]) return;
+
+    const asset = result.assets[0];
+    setUploadingPhoto(true);
+    try {
+      const form = new FormData();
+      const filename = asset.uri.split('/').pop();
+      const ext = filename.split('.').pop().toLowerCase();
+      const mime = ext === 'png' ? 'image/png' : 'image/jpeg';
+      form.append('file', { uri: asset.uri, name: filename, type: mime });
+
+      const { data } = await api.post('/upload/avatar', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setSelectedAvatar(data.cdnUrl);
+    } catch (e) {
+      Alert.alert('Erro', 'Não foi possível enviar a foto. Tente novamente.');
+    } finally {
+      setUploadingPhoto(false);
+    }
   }
 
   async function handleSave() {
@@ -155,18 +201,33 @@ export default function ProfileSelectScreen() {
           <View style={styles.modalBox}>
             <Text style={styles.modalTitle}>{editing ? 'Editar perfil' : 'Novo perfil'}</Text>
 
-            <AvatarCircle avatarId={selectedAvatar} size={80} />
+            {/* Preview do avatar selecionado */}
+            <View style={styles.avatarPreviewWrap}>
+              <AvatarCircle avatarId={selectedAvatar} size={80} />
+              {uploadingPhoto && (
+                <View style={styles.avatarUploading}>
+                  <ActivityIndicator color="#fff" size="small" />
+                </View>
+              )}
+            </View>
 
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.avatarScroll}>
-              {AVATARS.map(av => (
-                <TouchableOpacity key={av.id} onPress={() => setSelectedAvatar(av.id)}
-                  style={[styles.avatarOption, selectedAvatar === av.id && styles.avatarOptionSelected]}>
-                  <View style={[styles.avatarCircle, { width: 48, height: 48, borderRadius: 24, backgroundColor: av.color }]}>
-                    <Text style={{ fontSize: 22 }}>{av.emoji}</Text>
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+            {/* Botão de foto + scroll de avatares */}
+            <View style={styles.avatarRowWrap}>
+              <TouchableOpacity style={styles.photoBtn} onPress={pickPhoto} disabled={uploadingPhoto}>
+                <Text style={styles.photoBtnText}>{uploadingPhoto ? '...' : '📷'}</Text>
+                <Text style={styles.photoBtnLabel}>Foto</Text>
+              </TouchableOpacity>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.avatarScroll}>
+                {AVATARS.map(av => (
+                  <TouchableOpacity key={av.id} onPress={() => setSelectedAvatar(av.id)}
+                    style={[styles.avatarOption, selectedAvatar === av.id && styles.avatarOptionSelected]}>
+                    <View style={[styles.avatarCircle, { width: 48, height: 48, borderRadius: 24, backgroundColor: av.color }]}>
+                      <Text style={{ fontSize: 22 }}>{av.emoji}</Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
 
             <TextInput
               style={styles.modalInput} placeholder="Nome do perfil" placeholderTextColor="#666"
@@ -215,7 +276,13 @@ const styles = StyleSheet.create({
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'flex-end' },
   modalBox: { backgroundColor: '#141414', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, alignItems: 'center' },
   modalTitle: { fontSize: 18, fontWeight: '700', color: '#fff', marginBottom: 16 },
-  avatarScroll: { marginVertical: 16 },
+  avatarPreviewWrap: { position: 'relative', marginBottom: 12 },
+  avatarUploading: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 40, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
+  avatarRowWrap: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
+  photoBtn: { alignItems: 'center', marginRight: 8, padding: 6, backgroundColor: '#2a2a2a', borderRadius: 10, borderWidth: 1, borderColor: '#444', minWidth: 52 },
+  photoBtnText: { fontSize: 22 },
+  photoBtnLabel: { fontSize: 10, color: '#aaa', marginTop: 2 },
+  avatarScroll: { marginVertical: 8 },
   avatarOption: { padding: 4, marginHorizontal: 4, borderRadius: 28, borderWidth: 2, borderColor: 'transparent' },
   avatarOptionSelected: { borderColor: '#E50914' },
   modalInput: { width: '100%', backgroundColor: '#1f1f1f', color: '#fff', padding: 14, borderRadius: 8, fontSize: 16, borderWidth: 1, borderColor: '#333', marginBottom: 12 },

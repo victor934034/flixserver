@@ -12,6 +12,7 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import * as KeepAwake from 'expo-keep-awake';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import api from '../lib/api';
+import { useProfile } from '../contexts/ProfileContext';
 
 let Brightness = null;
 try { Brightness = require('expo-brightness'); } catch {}
@@ -122,7 +123,9 @@ export default function PlayerScreen() {
   const isBuffering = status === 'loading';
   const isEnded = !isPlaying && durSec > 0 && currentTime > 0 && remainSec < 1.5;
   const showSkipIntro = introEnd > 0 && currentTime < introEnd && currentTime > 2;
-  const showNextCard = nextEp && ((remainSec > 0 && remainSec < 30) || isEnded);
+  const showNextEpCard = nextEp && ((remainSec > 0 && remainSec < 30) || isEnded);
+  const showNextMovieCard = !nextEp && type !== 'episode' && nextMovie && ((remainSec > 0 && remainSec < 60) || isEnded);
+  const showNextCard = showNextEpCard;
 
   // ─── State ────────────────────────────────────────────────────────────────
   const [activeVer, setActiveVer] = useState(initVer);
@@ -140,6 +143,8 @@ export default function PlayerScreen() {
   const [timerRemaining, setTimerRemaining] = useState(null);
   const [nextCountdown, setNextCountdown] = useState(null);
   const [episodes, setEpisodes] = useState([]);
+  const [nextMovie, setNextMovie] = useState(null);
+  const { activeProfile } = useProfile();
   const brightnessRef = useRef(0.8);
   const ctrlOpacity = useRef(new Animated.Value(1)).current;
   const hideTimerRef = useRef(null);
@@ -208,6 +213,15 @@ export default function PlayerScreen() {
       setEpisodes(Array.isArray(r.data) ? r.data : []);
     }).catch(() => {});
   }, [seriesId]);
+
+  // Para filmes: busca uma recomendação ao entrar nos últimos 60s
+  useEffect(() => {
+    if (type === 'episode' || nextEp || !showNextMovieCard || nextMovie) return;
+    api.get('/movies?page=1&limit=10&is_active=true').then(r => {
+      const list = (r.data?.data || []).filter(m => String(m.id) !== String(id));
+      if (list.length) setNextMovie(list[Math.floor(Math.random() * Math.min(list.length, 5))]);
+    }).catch(() => {});
+  }, [showNextMovieCard]);
 
   // Next ep countdown
   useEffect(() => {
@@ -292,9 +306,10 @@ export default function PlayerScreen() {
         content_id: id,
         progress: Math.floor(currentTime),
         duration: Math.floor(durSec),
+        profile_id: activeProfile?.id || null,
       });
     } catch {}
-  }, [id, type, currentTime, durSec]);
+  }, [id, type, currentTime, durSec, activeProfile]);
 
   useEffect(() => {
     const t = setInterval(saveProgress, 15000);
@@ -593,6 +608,38 @@ export default function PlayerScreen() {
               </TouchableOpacity>
             )}
           </View>
+        </View>
+      )}
+
+      {/* ── PRÓXIMO FILME ── */}
+      {showNextMovieCard && !locked && !sheet && nextMovie && (
+        <View style={[styles.nextCard, { bottom: Math.max(insets.bottom, 14) + 78 }]}>
+          {nextMovie.poster_url && <Image source={{ uri: nextMovie.poster_url }} style={styles.nextThumb} />}
+          <View style={styles.nextInfo}>
+            <Text style={styles.nextLabel}>EM SEGUIDA</Text>
+            <Text style={styles.nextTitle} numberOfLines={1}>{nextMovie.title}</Text>
+            {nextMovie.year && <Text style={styles.nextCountdown}>{nextMovie.year}</Text>}
+          </View>
+          <TouchableOpacity style={styles.nextPlayBtn} onPress={() => {
+            saveProgress();
+            const versions = {};
+            if (nextMovie.file_dubbing) versions.dubbing = nextMovie.file_dubbing;
+            if (nextMovie.file_subtitled) versions.subtitled = nextMovie.file_subtitled;
+            if (nextMovie.file_cinema) versions.cinema = nextMovie.file_cinema;
+            if (nextMovie.file_4k) versions['4k'] = nextMovie.file_4k;
+            const firstUrl = nextMovie.file_dubbing || nextMovie.file_subtitled || nextMovie.file_cinema;
+            if (!firstUrl) return;
+            router.replace({
+              pathname: '/player',
+              params: {
+                url: firstUrl, title: nextMovie.title, id: nextMovie.id, type: 'movie',
+                versions: JSON.stringify(versions),
+                subtitles: JSON.stringify({ pt: nextMovie.subtitle_pt || null, en: nextMovie.subtitle_en || null }),
+              },
+            });
+          }}>
+            <Ionicons name="play" size={15} color="#000" />
+          </TouchableOpacity>
         </View>
       )}
 
