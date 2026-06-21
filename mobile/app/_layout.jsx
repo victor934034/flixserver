@@ -108,6 +108,7 @@ export default function RootLayout() {
                   <Stack.Screen name="serie/[id]" />
                   <Stack.Screen name="historico" />
                   <Stack.Screen name="parental-controls" />
+                  <Stack.Screen name="sugestao" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
                   <Stack.Screen name="player" options={{ animation: 'fade', gestureEnabled: false }} />
                 </Stack>
               </ParentalProvider>
