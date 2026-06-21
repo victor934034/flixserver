@@ -8,12 +8,23 @@ const MP_API = 'https://api.mercadopago.com';
 const mpHeader = () => ({ Authorization: `Bearer ${process.env.MP_ACCESS_TOKEN}` });
 
 async function getPlansConfig() {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('system_settings')
     .select('value')
     .eq('key', 'plans_config')
     .single();
-  return data ? JSON.parse(data.value) : [];
+  if (error && error.code !== 'PGRST116') {
+    // PGRST116 = no rows found (normal when plans_config not yet inserted)
+    console.error('[payments] getPlansConfig error:', error.message);
+    throw new Error(error.message);
+  }
+  if (!data) return [];
+  try {
+    return JSON.parse(data.value);
+  } catch (e) {
+    console.error('[payments] plans_config JSON inválido:', e.message);
+    return [];
+  }
 }
 
 // GET /api/payments/plans — planos ativos (público)
@@ -22,7 +33,8 @@ router.get('/plans', async (req, res) => {
     const plans = await getPlansConfig();
     res.json(plans.filter(p => p.active));
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error('[payments] GET /plans error:', e.message);
+    res.status(500).json({ error: 'Erro ao carregar planos: ' + e.message });
   }
 });
 
@@ -57,11 +69,10 @@ router.post('/subscribe', authMiddleware, async (req, res) => {
 
   try {
     const userId = req.user.id || req.user.userId;
+    // Email disponível no JWT — não precisa consultar a tabela users
+    const userEmail = req.user.email || '';
 
-    const [{ data: userRow }, plans] = await Promise.all([
-      supabase.from('users').select('email, name').eq('id', userId).single(),
-      getPlansConfig(),
-    ]);
+    const plans = await getPlansConfig();
 
     const plan = plans.find(p => p.id === plan_id && p.active);
     if (!plan) return res.status(400).json({ error: 'Plano não encontrado ou inativo' });
@@ -83,7 +94,7 @@ router.post('/subscribe', authMiddleware, async (req, res) => {
           unit_price: price,
           currency_id: 'BRL',
         }],
-        payer: { email: userRow?.email || '' },
+        payer: { email: userEmail },
         back_urls: {
           success: `${backBase}/subscription/sucesso`,
           failure: `${backBase}/subscription/falha`,

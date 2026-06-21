@@ -21,6 +21,7 @@ export default function SubscriptionScreen() {
   const router = useRouter();
   const [plans, setPlans]             = useState([]);
   const [loading, setLoading]         = useState(true);
+  const [loadError, setLoadError]     = useState('');
   const [tab, setTab]                 = useState('monthly');
   const [subscribing, setSubscribing] = useState('');
   const [checking, setChecking]       = useState(false);
@@ -59,8 +60,13 @@ export default function SubscriptionScreen() {
 
   useEffect(() => {
     api.get('/payments/plans')
-      .then(r => setPlans(r.data || []))
-      .catch(() => setPlans([]))
+      .then(r => { setPlans(r.data || []); setLoadError(''); })
+      .catch(e => {
+        setPlans([]);
+        const msg = e.response?.data?.error || e.message || 'Erro ao carregar planos';
+        setLoadError(msg);
+        console.warn('[subscription] plans error:', msg);
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -115,7 +121,22 @@ export default function SubscriptionScreen() {
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}
         >
-          {tabPlans.length === 0 ? (
+          {loadError ? (
+            <View style={styles.errorBox}>
+              <Ionicons name="alert-circle-outline" size={32} color="#E50914" />
+              <Text style={styles.errorTitle}>Erro ao carregar planos</Text>
+              <Text style={styles.errorMsg}>{loadError}</Text>
+              <TouchableOpacity style={styles.retryBtn} onPress={() => {
+                setLoading(true); setLoadError('');
+                api.get('/payments/plans')
+                  .then(r => { setPlans(r.data || []); setLoadError(''); })
+                  .catch(e => { setPlans([]); setLoadError(e.response?.data?.error || e.message || 'Erro'); })
+                  .finally(() => setLoading(false));
+              }}>
+                <Text style={styles.retryText}>Tentar novamente</Text>
+              </TouchableOpacity>
+            </View>
+          ) : tabPlans.length === 0 ? (
             <Text style={styles.noPlans}>Nenhum plano disponível para esta duração.</Text>
           ) : (
             tabPlans.map(plan => {
@@ -219,6 +240,11 @@ const styles = StyleSheet.create({
 
   logoutBtn: { padding: 16, alignItems: 'center', marginTop: 8 },
   logoutText: { color: '#444', fontSize: 13 },
+  errorBox: { alignItems: 'center', padding: 24, gap: 12 },
+  errorTitle: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  errorMsg: { color: '#888', fontSize: 13, textAlign: 'center', lineHeight: 18 },
+  retryBtn: { backgroundColor: '#E50914', paddingHorizontal: 24, paddingVertical: 10, borderRadius: 8, marginTop: 4 },
+  retryText: { color: '#fff', fontWeight: '700', fontSize: 14 },
   checkingBanner: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     backgroundColor: '#1a1a1a', paddingVertical: 10, marginHorizontal: 16, borderRadius: 8,
