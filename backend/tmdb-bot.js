@@ -277,7 +277,7 @@ async function processFiles(fileList) {
   for (const item of fileList) {
     const fileUrl = typeof item === 'string' ? item : item.url;
     const forcedVersion = typeof item === 'object' ? item.version : null;
-    const filename = fileUrl.split('/').pop();
+    const filename = decodeURIComponent(fileUrl.split('/').pop());
 
     console.log(`\nProcessando: ${filename}`);
 
