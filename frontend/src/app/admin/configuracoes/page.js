@@ -4,9 +4,15 @@ import api from '../../../lib/api';
 import styles from '../filmes/novo/page.module.css';
 
 const DEFAULT_PLANS = [
-  { id: 'monthly',   name: 'Mensal',     price: 19.90, duration_days: 30,  active: true,  badge: null,           description: 'Acesso completo por 1 mês · 2 telas', highlight: false, max_streams: 2 },
-  { id: 'quarterly', name: 'Trimestral', price: 49.90, duration_days: 90,  active: true,  badge: 'MAIS POPULAR', description: 'Economia de 16% · 3 telas',            highlight: true,  max_streams: 3 },
-  { id: 'yearly',    name: 'Anual',      price: 149.90, duration_days: 365, active: true, badge: 'MELHOR CUSTO', description: 'Economia de 37% · 5 telas',            highlight: false, max_streams: 5 },
+  { id: 'monthly_2',   name: 'Mensal · 2 Telas',     price: 19.90,  duration_days: 30,  active: true,  badge: null,           description: 'Acesso por 1 mês',       highlight: false, max_streams: 2 },
+  { id: 'monthly_3',   name: 'Mensal · 3 Telas',     price: 27.90,  duration_days: 30,  active: true,  badge: null,           description: 'Acesso por 1 mês',       highlight: false, max_streams: 3 },
+  { id: 'monthly_5',   name: 'Mensal · 5 Telas',     price: 39.90,  duration_days: 30,  active: true,  badge: null,           description: 'Acesso por 1 mês',       highlight: false, max_streams: 5 },
+  { id: 'quarterly_2', name: 'Trimestral · 2 Telas', price: 49.90,  duration_days: 90,  active: true,  badge: null,           description: 'Economia de 16%',        highlight: false, max_streams: 2 },
+  { id: 'quarterly_3', name: 'Trimestral · 3 Telas', price: 69.90,  duration_days: 90,  active: true,  badge: 'MAIS POPULAR', description: 'Economia de 16%',        highlight: true,  max_streams: 3 },
+  { id: 'quarterly_5', name: 'Trimestral · 5 Telas', price: 99.90,  duration_days: 90,  active: true,  badge: null,           description: 'Economia de 16%',        highlight: false, max_streams: 5 },
+  { id: 'yearly_2',    name: 'Anual · 2 Telas',      price: 149.90, duration_days: 365, active: true,  badge: null,           description: 'Economia de 37%',        highlight: false, max_streams: 2 },
+  { id: 'yearly_3',    name: 'Anual · 3 Telas',      price: 199.90, duration_days: 365, active: true,  badge: null,           description: 'Economia de 37%',        highlight: false, max_streams: 3 },
+  { id: 'yearly_5',    name: 'Anual · 5 Telas',      price: 279.90, duration_days: 365, active: true,  badge: 'MELHOR CUSTO', description: 'Economia de 37%',        highlight: false, max_streams: 5 },
 ];
 
 export default function Configuracoes() {

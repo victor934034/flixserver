@@ -60,8 +60,8 @@ function AppGate() {
 
     if (inAuth) { router.replace('/(tabs)'); return; }
 
-    // Verifica assinatura quando o usuário está nas tabs
-    if (segments[0] === '(tabs)' && !onSubscription) {
+    // Verifica assinatura em qualquer rota protegida
+    if (!onSubscription && !onProfileSelect) {
       api.get('/settings').then(({ data }) => {
         if (data.subscription_enabled === 'true') {
           const now = Date.now();
@@ -103,7 +103,7 @@ export default function RootLayout() {
                   <Stack.Screen name="(auth)/forgot-password" />
                   <Stack.Screen name="(tabs)" />
                   <Stack.Screen name="profile-select" />
-                  <Stack.Screen name="subscription" />
+                  <Stack.Screen name="subscription" options={{ gestureEnabled: false }} />
                   <Stack.Screen name="filme/[id]" />
                   <Stack.Screen name="serie/[id]" />
                   <Stack.Screen name="historico" />

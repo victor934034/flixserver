@@ -307,7 +307,7 @@ router.get('/users', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('users')
-      .select('id, email, name, plan, is_admin, created_at')
+      .select('id, email, name, plan, plan_expires_at, is_admin, created_at, push_token')
       .order('created_at', { ascending: false });
     if (error) throw error;
     res.json(data);
@@ -404,18 +404,34 @@ router.get('/users/subscriptions', async (req, res) => {
 });
 
 router.put('/users/:id/subscription', async (req, res) => {
-  const { plan, plan_expires_at } = req.body;
+  const { plan, plan_expires_at, add_days, clear } = req.body;
   try {
+    let update = {};
+
+    if (clear) {
+      update = { plan: null, plan_expires_at: null };
+    } else if (add_days) {
+      // Adiciona dias à assinatura atual (ou começa do hoje)
+      const { data: current } = await supabase.from('users').select('plan_expires_at, plan').eq('id', req.params.id).single();
+      const base = current?.plan_expires_at && new Date(current.plan_expires_at) > new Date()
+        ? new Date(current.plan_expires_at)
+        : new Date();
+      base.setDate(base.getDate() + Number(add_days));
+      update = { plan: plan || current?.plan || 'monthly_2', plan_expires_at: base.toISOString() };
+    } else {
+      if (plan !== undefined) update.plan = plan;
+      if (plan_expires_at !== undefined) update.plan_expires_at = plan_expires_at;
+    }
+
     const { data, error } = await supabase
       .from('users')
-      .update({ plan, plan_expires_at })
+      .update(update)
       .eq('id', req.params.id)
       .select('id, name, email, plan, plan_expires_at')
       .single();
     if (error) throw error;
 
-    // Notifica o usuário que ganhou acesso
-    if (plan && data) {
+    if (update.plan && data) {
       const { data: u } = await supabase.from('users').select('push_token').eq('id', req.params.id).single();
       if (u?.push_token) {
         const { sendPush } = require('../services/notifications');
