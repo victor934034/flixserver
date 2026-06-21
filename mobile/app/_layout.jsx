@@ -41,7 +41,6 @@ async function registerPushToken() {
 }
 
 async function checkSubscription(user, router) {
-  if (user?.is_admin) return;
   try {
     const { data } = await api.get('/settings');
     if (data.subscription_enabled !== 'true') return;
