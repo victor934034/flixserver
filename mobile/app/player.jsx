@@ -145,6 +145,10 @@ export default function PlayerScreen() {
   const [episodes, setEpisodes] = useState([]);
   const [nextMovie, setNextMovie] = useState(null);
   const { activeProfile } = useProfile();
+  const [streamBlocked, setStreamBlocked] = useState(false);
+  const [streamBlockInfo, setStreamBlockInfo] = useState(null);
+  const sessionId = useRef(`${Date.now()}_${Math.random().toString(36).substr(2, 9)}`).current;
+  const heartbeatRef = useRef(null);
   const brightnessRef = useRef(0.8);
   const ctrlOpacity = useRef(new Animated.Value(1)).current;
   const hideTimerRef = useRef(null);
@@ -169,6 +173,32 @@ export default function PlayerScreen() {
       clearTimeout(nextCountRef.current);
     };
   }, []);
+
+  // ─── Stream concorrente ───────────────────────────────────────────────────
+  useEffect(() => {
+    let alive = true;
+    api.post('/streams/start', { session_id: sessionId, content_title: title })
+      .then(() => {
+        if (!alive) { api.delete(`/streams/${sessionId}`).catch(() => {}); return; }
+        // heartbeat a cada 30s
+        heartbeatRef.current = setInterval(() => {
+          api.post(`/streams/heartbeat/${sessionId}`).catch(() => {});
+        }, 30000);
+      })
+      .catch(e => {
+        if (!alive) return;
+        if (e.response?.status === 429) {
+          player.pause();
+          setStreamBlocked(true);
+          setStreamBlockInfo(e.response.data);
+        }
+      });
+    return () => {
+      alive = false;
+      clearInterval(heartbeatRef.current);
+      api.delete(`/streams/${sessionId}`).catch(() => {});
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Restore saved position after source replace
   useEffect(() => {
@@ -396,6 +426,38 @@ export default function PlayerScreen() {
   );
 
   // ─── Render ───────────────────────────────────────────────────────────────
+  // Overlay de limite de streams simultâneos
+  if (streamBlocked) {
+    const max = streamBlockInfo?.max_streams ?? 1;
+    return (
+      <View style={{ flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center', padding: 32 }}>
+        <Ionicons name="people" size={60} color="#E50914" style={{ marginBottom: 20 }} />
+        <Text style={{ color: '#fff', fontSize: 22, fontWeight: '800', textAlign: 'center', marginBottom: 12 }}>
+          Limite de telas simultâneas atingido
+        </Text>
+        <Text style={{ color: '#aaa', fontSize: 15, textAlign: 'center', lineHeight: 22, marginBottom: 8 }}>
+          Seu plano permite até {max} {max === 1 ? 'tela' : 'telas'} simultânea{max !== 1 ? 's' : ''}.{'\n'}
+          Já há {streamBlockInfo?.active ?? max} {streamBlockInfo?.active === 1 ? 'dispositivo reproduzindo' : 'dispositivos reproduzindo'} nesta conta.
+        </Text>
+        <Text style={{ color: '#666', fontSize: 13, textAlign: 'center', marginBottom: 32 }}>
+          Encerre a reprodução em outro dispositivo ou faça upgrade do seu plano para assistir em mais telas.
+        </Text>
+        <TouchableOpacity
+          style={{ backgroundColor: '#E50914', paddingHorizontal: 32, paddingVertical: 14, borderRadius: 10, marginBottom: 14 }}
+          onPress={() => router.replace('/subscription')}
+        >
+          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 16 }}>Ver planos</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={{ paddingHorizontal: 32, paddingVertical: 14 }}
+          onPress={() => router.back()}
+        >
+          <Text style={{ color: '#888', fontSize: 15 }}>Voltar</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <View style={{ flex: 1, backgroundColor: '#000', width, height }}>
 

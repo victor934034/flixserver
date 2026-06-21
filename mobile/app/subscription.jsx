@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert, Linking } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../lib/api';
 
@@ -54,6 +55,14 @@ export default function SubscriptionScreen() {
               )}
             </Text>
             {plan.description ? <Text style={styles.planDesc}>{plan.description}</Text> : null}
+            {plan.max_streams != null && (
+              <View style={styles.streamsRow}>
+                <Ionicons name="people-outline" size={14} color="#666" />
+                <Text style={styles.streamsText}>
+                  {plan.max_streams} {plan.max_streams === 1 ? 'tela simultânea' : 'telas simultâneas'}
+                </Text>
+              </View>
+            )}
             <TouchableOpacity
               style={[styles.planBtn, plan.highlight && styles.planBtnHighlight, subscribing === plan.id && styles.planBtnDisabled]}
               onPress={() => handleSubscribe(plan)}
@@ -94,6 +103,8 @@ const styles = StyleSheet.create({
   planDesc: { color: '#888', fontSize: 13, marginBottom: 16 },
   planBtn: { backgroundColor: '#2a2a2a', padding: 14, borderRadius: 8, alignItems: 'center' },
   planBtnHighlight: { backgroundColor: '#E50914' },
+  streamsRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 12 },
+  streamsText: { color: '#666', fontSize: 12 },
   planBtnDisabled: { opacity: 0.6 },
   planBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
   logoutBtn: { padding: 14, alignItems: 'center', marginTop: 16 },

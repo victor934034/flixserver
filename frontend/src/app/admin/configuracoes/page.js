@@ -4,9 +4,9 @@ import api from '../../../lib/api';
 import styles from '../filmes/novo/page.module.css';
 
 const DEFAULT_PLANS = [
-  { id: 'monthly',   name: 'Mensal',     price: 19.90, duration_days: 30,  active: true,  badge: null,          description: 'Acesso completo por 1 mês', highlight: false },
-  { id: 'quarterly', name: 'Trimestral', price: 49.90, duration_days: 90,  active: true,  badge: 'MAIS POPULAR', description: 'Economia de 16%',           highlight: true  },
-  { id: 'yearly',    name: 'Anual',      price: 149.90, duration_days: 365, active: true, badge: 'MELHOR CUSTO', description: 'Economia de 37%',           highlight: false },
+  { id: 'monthly',   name: 'Mensal',     price: 19.90, duration_days: 30,  active: true,  badge: null,           description: 'Acesso completo por 1 mês · 2 telas', highlight: false, max_streams: 2 },
+  { id: 'quarterly', name: 'Trimestral', price: 49.90, duration_days: 90,  active: true,  badge: 'MAIS POPULAR', description: 'Economia de 16% · 3 telas',            highlight: true,  max_streams: 3 },
+  { id: 'yearly',    name: 'Anual',      price: 149.90, duration_days: 365, active: true, badge: 'MELHOR CUSTO', description: 'Economia de 37% · 5 telas',            highlight: false, max_streams: 5 },
 ];
 
 export default function Configuracoes() {
@@ -180,6 +180,18 @@ export default function Configuracoes() {
                       type="text"
                       value={plan.description ?? ''}
                       onChange={e => updatePlan(idx, 'description', e.target.value)}
+                      style={inputStyle}
+                    />
+                  </label>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                  <label style={{ color: '#888', fontSize: 13 }}>
+                    Telas simultâneas
+                    <input
+                      type="number" min="1" max="99"
+                      value={plan.max_streams ?? 1}
+                      onChange={e => updatePlan(idx, 'max_streams', parseInt(e.target.value) || 1)}
                       style={inputStyle}
                     />
                   </label>
