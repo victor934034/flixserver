@@ -35,14 +35,29 @@ export default function SubscriptionScreen() {
     }, [])
   );
 
-  // Detecta retorno do browser após pagamento e verifica se o plano foi ativado
+  // Ao montar: verifica se assinatura ainda está ativa (admin pode ter desativado)
+  useEffect(() => {
+    api.get('/settings').then(({ data }) => {
+      if (data.subscription_enabled !== 'true') {
+        router.replace('/profile-select');
+      }
+    }).catch(() => {});
+  }, []);
+
+  // Detecta retorno do browser após pagamento E mudança de setting pelo admin
   useEffect(() => {
     const sub = AppState.addEventListener('change', async (nextState) => {
       if (appState.current.match(/inactive|background/) && nextState === 'active') {
         setChecking(true);
         try {
+          // Verifica se assinatura foi desativada pelo admin
+          const { data: settings } = await api.get('/settings');
+          if (settings?.subscription_enabled !== 'true') {
+            router.replace('/profile-select');
+            return;
+          }
+          // Verifica se o plano foi ativado após pagamento
           await refreshUser();
-          // Busca dados frescos do usuário
           const { data: me } = await api.get('/auth/me');
           const now = Date.now();
           const hasValid = me?.plan && me?.plan_expires_at
@@ -56,6 +71,24 @@ export default function SubscriptionScreen() {
       appState.current = nextState;
     });
     return () => sub.remove();
+  }, []);
+
+  // Polling a cada 30s: detecta se admin desativou assinaturas ou usuário pagou externamente
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        const { data: settings } = await api.get('/settings');
+        if (settings?.subscription_enabled !== 'true') {
+          router.replace('/profile-select');
+          return;
+        }
+        const { data: me } = await api.get('/auth/me');
+        const hasValid = me?.plan && me?.plan_expires_at
+          && new Date(me.plan_expires_at).getTime() > Date.now();
+        if (hasValid) router.replace('/profile-select');
+      } catch {}
+    }, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {

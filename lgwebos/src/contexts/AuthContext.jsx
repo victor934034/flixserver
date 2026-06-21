@@ -31,10 +31,15 @@ export function AuthProvider({ children }) {
       setLoading(false);
     }
 
-    // Check if subscription system is enabled
-    api.get('/settings').then(r => {
-      setSubscriptionEnabled(r.data?.subscription_enabled === 'true');
-    }).catch(() => {});
+    // Check if subscription system is enabled (and poll every 30s to pick up admin changes)
+    const fetchSettings = () => {
+      api.get('/settings').then(r => {
+        setSubscriptionEnabled(r.data?.subscription_enabled === 'true');
+      }).catch(() => {});
+    };
+    fetchSettings();
+    const interval = setInterval(fetchSettings, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   const hasValidSubscription = () => {
