@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { AppState } from 'react-native';
 import { Stack, useRouter, useSegments, useRootNavigationState } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -11,16 +12,23 @@ import { ParentalProvider } from '../contexts/ParentalContext';
 import { ProfileProvider, useProfile } from '../contexts/ProfileContext';
 import api from '../lib/api';
 
+// Expo Go no SDK 53 não suporta push notifications — só registra em builds nativos
+const isExpoGo = Constants.appOwnership === 'expo';
+
 Notifications.setNotificationHandler({
   handleNotification: async () => ({ shouldShowAlert: true, shouldPlaySound: false, shouldSetBadge: false }),
 });
 
 async function requestNotificationPermission() {
-  const { status } = await Notifications.getPermissionsAsync();
-  if (status !== 'granted') await Notifications.requestPermissionsAsync();
+  if (isExpoGo) return;
+  try {
+    const { status } = await Notifications.getPermissionsAsync();
+    if (status !== 'granted') await Notifications.requestPermissionsAsync();
+  } catch {}
 }
 
 async function registerPushToken() {
+  if (isExpoGo) return;
   try {
     const { status } = await Notifications.getPermissionsAsync();
     if (status !== 'granted') return;
@@ -32,14 +40,33 @@ async function registerPushToken() {
   }
 }
 
+async function checkSubscription(user, router) {
+  if (user?.is_admin) return;
+  try {
+    const { data } = await api.get('/settings');
+    if (data.subscription_enabled !== 'true') return;
+    let freshUser = user;
+    try {
+      const meRes = await api.get('/auth/me');
+      if (meRes.data?.id) freshUser = meRes.data;
+    } catch {}
+    const now = Date.now();
+    const hasValid = freshUser?.plan && freshUser?.plan_expires_at
+      && new Date(freshUser.plan_expires_at).getTime() > now;
+    if (!hasValid) router.replace('/subscription');
+  } catch {}
+}
+
 function AppGate() {
   const { token, user, loading } = useAuth();
-  const { activeProfile, loadSavedProfile } = useProfile();
+  const { activeProfile } = useProfile();
   const segments = useSegments();
   const router = useRouter();
   const navState = useRootNavigationState();
   const checkedRef = useRef(false);
+  const appStateRef = useRef(AppState.currentState);
 
+  // Verifica assinatura ao navegar entre telas
   useEffect(() => {
     if (!navState?.key || loading) return;
 
@@ -52,7 +79,6 @@ function AppGate() {
       return;
     }
 
-    // Logado — registra push token uma vez
     if (!checkedRef.current) {
       checkedRef.current = true;
       registerPushToken();
@@ -60,26 +86,28 @@ function AppGate() {
 
     if (inAuth) { router.replace('/(tabs)'); return; }
 
-    // Verifica assinatura em qualquer rota protegida (admins sempre passam)
-    if (!onSubscription && !onProfileSelect && !user?.is_admin) {
-      api.get('/settings').then(async ({ data }) => {
-        if (data.subscription_enabled === 'true') {
-          // Usa dados frescos do backend para evitar cache desatualizado
-          let freshUser = user;
-          try {
-            const meRes = await api.get('/auth/me');
-            if (meRes.data?.id) freshUser = meRes.data;
-          } catch {}
-          const now = Date.now();
-          const hasValid = freshUser?.plan && freshUser?.plan_expires_at
-            && new Date(freshUser.plan_expires_at).getTime() > now;
-          if (!hasValid) router.replace('/subscription');
-        }
-      }).catch(() => {});
+    if (!onSubscription && !onProfileSelect) {
+      checkSubscription(user, router);
     }
   }, [token, loading, segments, navState?.key]);
 
-  // Gate de perfil: logado, não está em auth/subscription, sem perfil ativo → selecionar perfil
+  // Re-verifica assinatura ao voltar do background (app minimizado → foreground)
+  useEffect(() => {
+    if (!token || loading) return;
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (appStateRef.current.match(/inactive|background/) && nextState === 'active') {
+        const onSubscription = segments[0] === 'subscription';
+        const onProfileSelect = segments[0] === 'profile-select';
+        if (!onSubscription && !onProfileSelect) {
+          checkSubscription(user, router);
+        }
+      }
+      appStateRef.current = nextState;
+    });
+    return () => sub.remove();
+  }, [token, loading, user, segments]);
+
+  // Gate de perfil
   useEffect(() => {
     if (!navState?.key || loading || !token) return;
     const inAuth = segments[0] === '(auth)';
