@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { supabase } = require('../services/supabase');
 const { adminMiddleware } = require('../middleware/admin');
+const { sendPushToAll } = require('../services/notifications');
 
 router.use(adminMiddleware);
 
@@ -138,6 +139,10 @@ router.post('/movies', async (req, res) => {
   try {
     const { data, error } = await supabase.from('movies').insert(req.body).select().single();
     if (error) throw error;
+    // Notifica todos os usuários sobre o novo filme
+    if (data.is_active && data.title) {
+      sendPushToAll(supabase, '🎬 Novo filme disponível!', data.title, { type: 'movie', id: data.id }).catch(() => {});
+    }
     res.status(201).json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -195,6 +200,9 @@ router.post('/series', async (req, res) => {
   try {
     const { data, error } = await supabase.from('series').insert(req.body).select().single();
     if (error) throw error;
+    if (data.is_active && data.title) {
+      sendPushToAll(supabase, '📺 Nova série disponível!', data.title, { type: 'series', id: data.id }).catch(() => {});
+    }
     res.status(201).json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -256,6 +264,13 @@ router.post('/episodes', async (req, res) => {
   try {
     const { data, error } = await supabase.from('episodes').insert(req.body).select().single();
     if (error) throw error;
+    // Notifica sobre novo episódio
+    if (data.title && data.series_id) {
+      const { data: serie } = await supabase.from('series').select('title').eq('id', data.series_id).single();
+      const serieTitle = serie?.title || 'Série';
+      const epLabel = data.season_number ? `T${data.season_number}E${data.episode_number} — ${data.title}` : data.title;
+      sendPushToAll(supabase, `📺 Novo episódio: ${serieTitle}`, epLabel, { type: 'episode', seriesId: data.series_id }).catch(() => {});
+    }
     res.status(201).json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -361,6 +376,54 @@ router.delete('/categories/:id', async (req, res) => {
     const { error } = await supabase.from('categories').delete().eq('id', req.params.id);
     if (error) throw error;
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Notificação push manual para todos os usuários
+router.post('/notify', async (req, res) => {
+  const { title, body, data = {} } = req.body;
+  if (!title || !body) return res.status(400).json({ error: 'title e body são obrigatórios' });
+  sendPushToAll(supabase, title, body, data).catch(() => {});
+  res.json({ ok: true });
+});
+
+// Gerenciamento de assinaturas de usuários (para o painel admin)
+router.get('/users/subscriptions', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .select('id, name, email, plan, plan_expires_at, created_at')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/users/:id/subscription', async (req, res) => {
+  const { plan, plan_expires_at } = req.body;
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .update({ plan, plan_expires_at })
+      .eq('id', req.params.id)
+      .select('id, name, email, plan, plan_expires_at')
+      .single();
+    if (error) throw error;
+
+    // Notifica o usuário que ganhou acesso
+    if (plan && data) {
+      const { data: u } = await supabase.from('users').select('push_token').eq('id', req.params.id).single();
+      if (u?.push_token) {
+        const { sendPush } = require('../services/notifications');
+        sendPush([u.push_token], '🎉 Assinatura ativada!', 'Sua assinatura FlixHome está ativa. Bom filme!', { screen: 'home' }).catch(() => {});
+      }
+    }
+
+    res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

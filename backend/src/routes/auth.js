@@ -122,6 +122,16 @@ router.get('/me', authMiddleware, async (req, res) => {
   }
 });
 
+// ── Push token ───────────────────────────────────────────────────────────────
+
+router.post('/push-token', authMiddleware, async (req, res) => {
+  const { token } = req.body;
+  if (!token) return res.status(400).json({ error: 'token é obrigatório' });
+  const { supabase } = require('../services/supabase');
+  await supabase.from('users').update({ push_token: token }).eq('id', req.user.id);
+  res.json({ ok: true });
+});
+
 // ── Esqueci a senha (OTP por email) ──────────────────────────────────────────
 
 router.post('/forgot-password', async (req, res) => {

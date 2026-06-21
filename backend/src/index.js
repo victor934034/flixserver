@@ -15,6 +15,8 @@ const watchlistRouter = require('./routes/watchlist');
 const historyRouter = require('./routes/history');
 const webhookRouter = require('./routes/webhook');
 const castRouter = require('./routes/cast');
+const profilesRouter = require('./routes/profiles');
+const settingsRouter = require('./routes/settings');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -46,6 +48,8 @@ app.use('/api/watchlist', watchlistRouter);
 app.use('/api/history', historyRouter);
 app.use('/api/webhook', webhookRouter);
 app.use('/api/cast', castRouter);
+app.use('/api/profiles', profilesRouter);
+app.use('/api/settings', settingsRouter);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
