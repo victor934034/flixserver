@@ -60,12 +60,19 @@ function AppGate() {
 
     if (inAuth) { router.replace('/(tabs)'); return; }
 
-    // Verifica assinatura em qualquer rota protegida
-    if (!onSubscription && !onProfileSelect) {
-      api.get('/settings').then(({ data }) => {
+    // Verifica assinatura em qualquer rota protegida (admins sempre passam)
+    if (!onSubscription && !onProfileSelect && !user?.is_admin) {
+      api.get('/settings').then(async ({ data }) => {
         if (data.subscription_enabled === 'true') {
+          // Usa dados frescos do backend para evitar cache desatualizado
+          let freshUser = user;
+          try {
+            const meRes = await api.get('/auth/me');
+            if (meRes.data?.id) freshUser = meRes.data;
+          } catch {}
           const now = Date.now();
-          const hasValid = user?.plan && user?.plan_expires_at && new Date(user.plan_expires_at).getTime() > now;
+          const hasValid = freshUser?.plan && freshUser?.plan_expires_at
+            && new Date(freshUser.plan_expires_at).getTime() > now;
           if (!hasValid) router.replace('/subscription');
         }
       }).catch(() => {});

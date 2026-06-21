@@ -1,11 +1,11 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  ActivityIndicator, Alert, Linking, BackHandler,
+  ActivityIndicator, Alert, Linking, BackHandler, AppState,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../lib/api';
 
@@ -17,11 +17,14 @@ const DURATION_TABS = [
 
 export default function SubscriptionScreen() {
   const insets = useSafeAreaInsets();
-  const { logout } = useAuth();
-  const [plans, setPlans]         = useState([]);
-  const [loading, setLoading]     = useState(true);
-  const [tab, setTab]             = useState('monthly');
+  const { logout, refreshUser } = useAuth();
+  const router = useRouter();
+  const [plans, setPlans]             = useState([]);
+  const [loading, setLoading]         = useState(true);
+  const [tab, setTab]                 = useState('monthly');
   const [subscribing, setSubscribing] = useState('');
+  const [checking, setChecking]       = useState(false);
+  const appState = useRef(AppState.currentState);
 
   // Bloqueia botão físico de voltar no Android
   useFocusEffect(
@@ -30,6 +33,29 @@ export default function SubscriptionScreen() {
       return () => sub.remove();
     }, [])
   );
+
+  // Detecta retorno do browser após pagamento e verifica se o plano foi ativado
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', async (nextState) => {
+      if (appState.current.match(/inactive|background/) && nextState === 'active') {
+        setChecking(true);
+        try {
+          await refreshUser();
+          // Busca dados frescos do usuário
+          const { data: me } = await api.get('/auth/me');
+          const now = Date.now();
+          const hasValid = me?.plan && me?.plan_expires_at
+            && new Date(me.plan_expires_at).getTime() > now;
+          if (hasValid) {
+            router.replace('/profile-select');
+          }
+        } catch {}
+        setChecking(false);
+      }
+      appState.current = nextState;
+    });
+    return () => sub.remove();
+  }, []);
 
   useEffect(() => {
     api.get('/payments/plans')
@@ -73,6 +99,13 @@ export default function SubscriptionScreen() {
           </TouchableOpacity>
         ))}
       </View>
+
+      {checking && (
+        <View style={styles.checkingBanner}>
+          <ActivityIndicator color="#E50914" size="small" />
+          <Text style={styles.checkingText}>Verificando pagamento...</Text>
+        </View>
+      )}
 
       {loading ? (
         <ActivityIndicator color="#E50914" size="large" style={{ marginTop: 48 }} />
@@ -186,4 +219,10 @@ const styles = StyleSheet.create({
 
   logoutBtn: { padding: 16, alignItems: 'center', marginTop: 8 },
   logoutText: { color: '#444', fontSize: 13 },
+  checkingBanner: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: '#1a1a1a', paddingVertical: 10, marginHorizontal: 16, borderRadius: 8,
+    marginBottom: 4,
+  },
+  checkingText: { color: '#aaa', fontSize: 13 },
 });
