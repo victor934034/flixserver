@@ -2,7 +2,7 @@
   "expo": {
     "name": "Flixhome",
     "slug": "flixhome",
-    "version": "1.0.4",
+    "version": "1.0.5",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "icon": "./assets/icon.png",
@@ -11,7 +11,7 @@
     ],
     "android": {
       "package": "com.flixhome.app",
-      "versionCode": 5,
+      "versionCode": 6,
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#0a0a0a"

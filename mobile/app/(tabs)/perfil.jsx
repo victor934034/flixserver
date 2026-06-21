@@ -1,11 +1,23 @@
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Image } from 'react-native';
+import { useCallback } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Image, Linking } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
+import Constants from 'expo-constants';
 import { useAuth } from '../../contexts/AuthContext';
 import { useProfile, getAvatar } from '../../contexts/ProfileContext';
 import { useDownloads, fmtBytes } from '../../contexts/DownloadContext';
 import { useParental } from '../../contexts/ParentalContext';
+
+const APP_VERSION = Constants.expoConfig?.version ?? '1.0.5';
+
+function formatPlan(plan) {
+  if (!plan || plan === 'free') return 'FREE';
+  if (plan.startsWith('monthly')) return 'MENSAL';
+  if (plan.startsWith('quarterly')) return 'TRIMESTRAL';
+  if (plan.startsWith('yearly') || plan.startsWith('annual')) return 'ANUAL';
+  return plan.toUpperCase();
+}
 
 const isUrl = (s) => typeof s === 'string' && s.startsWith('http');
 
@@ -35,11 +47,13 @@ function ProfileAvatar({ profile, size = 88 }) {
 
 export default function PerfilScreen() {
   const insets = useSafeAreaInsets();
-  const { user, logout } = useAuth();
+  const { user, logout, refreshUser } = useAuth();
   const { activeProfile, clearProfile } = useProfile();
   const router = useRouter();
   const { downloads, active, totalBytes } = useDownloads();
   const { config: parentalConfig } = useParental();
+
+  useFocusEffect(useCallback(() => { refreshUser(); }, []));
 
   const activeCount = Object.keys(active).length;
   const dlCount = downloads.length + activeCount;
@@ -55,7 +69,7 @@ export default function PerfilScreen() {
     router.replace('/profile-select');
   };
 
-  const plan = (user?.plan || 'free').toUpperCase();
+  const plan = formatPlan(user?.plan);
 
   return (
     <ScrollView
@@ -132,7 +146,7 @@ export default function PerfilScreen() {
           <MenuItem
             icon="notifications-outline"
             label="Notificações"
-            onPress={() => Alert.alert('Notificações', 'Ative ou desative notificações nas configurações do sistema.')}
+            onPress={() => Linking.openSettings()}
           />
           <View style={styles.divider} />
           <MenuItem
@@ -157,13 +171,13 @@ export default function PerfilScreen() {
           <MenuItem
             icon="help-circle-outline"
             label="Ajuda"
-            onPress={() => Alert.alert('Flixhome', 'Versão 1.0.4\n\nPara suporte entre em contato pelo painel admin.')}
+            onPress={() => Linking.openURL('mailto:victorlima0978@gmail.com?subject=Suporte%20FlixHome')}
           />
           <View style={styles.divider} />
           <MenuItem
             icon="information-circle-outline"
             label="Sobre o App"
-            onPress={() => Alert.alert('Sobre', 'Flixhome v1.0.4\nSua plataforma de streaming.')}
+            onPress={() => Alert.alert('Sobre', `Flixhome v${APP_VERSION}\nSua plataforma de streaming.`)}
           />
         </View>
       </View>
@@ -173,7 +187,7 @@ export default function PerfilScreen() {
         <Text style={styles.logoutText}>Sair da conta</Text>
       </TouchableOpacity>
 
-      <Text style={styles.version}>v1.0.4</Text>
+      <Text style={styles.version}>v{APP_VERSION}</Text>
     </ScrollView>
   );
 }
