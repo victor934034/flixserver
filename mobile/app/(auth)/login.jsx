@@ -61,6 +61,14 @@ export default function LoginScreen() {
             : <Text style={styles.buttonText}>Entrar</Text>}
         </TouchableOpacity>
 
+        <Link href="/(auth)/forgot-password" asChild>
+          <TouchableOpacity style={styles.linkBtn}>
+            <Text style={styles.linkText}>
+              <Text style={styles.linkHighlight}>Esqueci minha senha</Text>
+            </Text>
+          </TouchableOpacity>
+        </Link>
+
         <Link href="/(auth)/register" asChild>
           <TouchableOpacity style={styles.linkBtn}>
             <Text style={styles.linkText}>

@@ -49,4 +49,53 @@ async function sendUploadComplete(toEmail, filename, cdnUrl) {
   });
 }
 
-module.exports = { sendUploadComplete };
+async function sendWelcome(toEmail, name) {
+  const resend = getResend();
+  if (!resend) return;
+  await resend.emails.send({
+    from: FROM,
+    to: toEmail,
+    subject: 'Bem-vindo ao FlixHome!',
+    html: `
+      <div style="font-family:sans-serif;max-width:480px;margin:0 auto;background:#141414;color:#e5e5e5;border-radius:12px;padding:32px;">
+        <div style="text-align:center;margin-bottom:24px;">
+          <span style="font-size:28px;font-weight:900;letter-spacing:4px;color:#E50914;">FLIXHOME</span>
+        </div>
+        <h2 style="margin:0 0 8px;font-size:20px;">Olá, ${name}! 🎬</h2>
+        <p style="color:#aaa;margin:0 0 20px;font-size:15px;line-height:1.6;">
+          Sua conta foi criada com sucesso. Agora você tem acesso a filmes e séries no FlixHome.
+        </p>
+        <p style="color:#555;font-size:11px;margin-top:24px;margin-bottom:0;">
+          FlixHome · Você está recebendo este email porque criou uma conta.
+        </p>
+      </div>
+    `,
+  });
+}
+
+async function sendPasswordReset(toEmail, code) {
+  const resend = getResend();
+  if (!resend) return;
+  await resend.emails.send({
+    from: FROM,
+    to: toEmail,
+    subject: 'Código para redefinir sua senha — FlixHome',
+    html: `
+      <div style="font-family:sans-serif;max-width:480px;margin:0 auto;background:#141414;color:#e5e5e5;border-radius:12px;padding:32px;">
+        <div style="text-align:center;margin-bottom:24px;">
+          <span style="font-size:28px;font-weight:900;letter-spacing:4px;color:#E50914;">FLIXHOME</span>
+        </div>
+        <h2 style="margin:0 0 8px;font-size:20px;">Redefinir senha</h2>
+        <p style="color:#aaa;margin:0 0 24px;font-size:15px;">
+          Use o código abaixo no app para criar uma nova senha. Ele expira em <strong>15 minutos</strong>.
+        </p>
+        <div style="background:#1f1f1f;border:2px solid #E50914;border-radius:12px;padding:24px;text-align:center;margin-bottom:24px;">
+          <span style="font-size:42px;font-weight:900;letter-spacing:12px;color:#fff;">${code}</span>
+        </div>
+        <p style="color:#666;font-size:12px;">Se você não solicitou isso, ignore este email.</p>
+      </div>
+    `,
+  });
+}
+
+module.exports = { sendUploadComplete, sendWelcome, sendPasswordReset };

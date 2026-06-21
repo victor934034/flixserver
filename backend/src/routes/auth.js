@@ -2,6 +2,10 @@ const router = require('express').Router();
 const jwt = require('jsonwebtoken');
 const { supabase, supabaseAnon } = require('../services/supabase');
 const { authMiddleware } = require('../middleware/auth');
+const { sendWelcome, sendPasswordReset } = require('../services/email');
+
+// email → { code, expiresAt }
+const resetCodes = new Map();
 
 // In-memory TV device code store (code → { status, token, user, expiresAt })
 const tvCodes = new Map();
@@ -62,6 +66,9 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: msg });
     }
 
+    // Envia email de boas-vindas via Resend (não bloqueia a resposta)
+    sendWelcome(email, name).catch(() => {});
+
     res.status(201).json({ user: userData, token: signToken(userData) });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -110,6 +117,63 @@ router.get('/me', authMiddleware, async (req, res) => {
 
     if (error || !data) return res.status(404).json({ error: 'Usuário não encontrado' });
     res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Esqueci a senha (OTP por email) ──────────────────────────────────────────
+
+router.post('/forgot-password', async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: 'Email é obrigatório' });
+
+  try {
+    // Verifica se o email existe
+    const { data: user } = await supabase.from('users').select('id, name').eq('email', email.trim().toLowerCase()).single();
+    // Responde sempre com sucesso para não revelar se o email existe
+    if (!user) return res.json({ ok: true });
+
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    resetCodes.set(email.trim().toLowerCase(), { code, expiresAt: Date.now() + 15 * 60 * 1000 });
+    // Limpa o código após 15 min
+    setTimeout(() => resetCodes.delete(email.trim().toLowerCase()), 15 * 60 * 1000);
+
+    await sendPasswordReset(email.trim(), code);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/reset-password', async (req, res) => {
+  const { email, code, newPassword } = req.body;
+  if (!email || !code || !newPassword) {
+    return res.status(400).json({ error: 'Email, código e nova senha são obrigatórios' });
+  }
+  if (newPassword.length < 6) {
+    return res.status(400).json({ error: 'Senha deve ter pelo menos 6 caracteres' });
+  }
+
+  const key = email.trim().toLowerCase();
+  const entry = resetCodes.get(key);
+
+  if (!entry || Date.now() > entry.expiresAt) {
+    return res.status(400).json({ error: 'Código inválido ou expirado' });
+  }
+  if (entry.code !== String(code).trim()) {
+    return res.status(400).json({ error: 'Código incorreto' });
+  }
+
+  try {
+    const { data: user } = await supabase.from('users').select('id').eq('email', key).single();
+    if (!user) return res.status(404).json({ error: 'Usuário não encontrado' });
+
+    const { error } = await supabase.auth.admin.updateUserById(user.id, { password: newPassword });
+    if (error) return res.status(400).json({ error: error.message });
+
+    resetCodes.delete(key);
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

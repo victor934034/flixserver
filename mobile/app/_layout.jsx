@@ -48,6 +48,7 @@ export default function RootLayout() {
               <StatusBar style="light" />
               <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#0a0a0a' } }}>
                 <Stack.Screen name="(auth)" />
+                <Stack.Screen name="(auth)/forgot-password" options={{ headerShown: false }} />
                 <Stack.Screen name="(tabs)" />
                 <Stack.Screen name="filme/[id]" />
                 <Stack.Screen name="serie/[id]" />
