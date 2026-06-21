@@ -51,7 +51,7 @@ async function uploadFile(buffer, filename, contentType = 'video/mp4') {
   return {
     fileId: data.fileId,
     fileName: data.fileName,
-    cdnUrl: `${process.env.CDN_BASE_URL}/${filename}`,
+    cdnUrl: `${process.env.CDN_BASE_URL}/${encodeURIComponent(filename)}`,
   };
 }
 
@@ -231,7 +231,7 @@ async function uploadFileFromPath(filePath, filename, contentType = 'video/mp4')
   return {
     fileId,
     fileName: filename,
-    cdnUrl: `${process.env.CDN_BASE_URL}/${filename}`,
+    cdnUrl: `${process.env.CDN_BASE_URL}/${encodeURIComponent(filename)}`,
   };
 }
 

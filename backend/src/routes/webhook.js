@@ -16,10 +16,17 @@ router.post('/b2', async (req, res) => {
   const videoExt = /\.(mp4|mkv|avi|mov|m4v|webm|ts)$/i;
   const filesToProcess = events
     .filter(e => e?.eventType?.startsWith('b2:ObjectCreated') && videoExt.test(e.objectName || ''))
-    .map(e => ({
-      url: `${process.env.CDN_BASE_URL}/${e.objectName}`,
-      version: detectVersion(e.objectName),
-    }));
+    .map(e => {
+      // Normaliza o nome: decodifica primeiro (caso já venha encoded) e re-encoda consistentemente
+      const rawName = e.objectName || '';
+      let safeName;
+      try { safeName = decodeURIComponent(rawName); } catch { safeName = rawName; }
+      const encodedName = safeName.split('/').map(encodeURIComponent).join('/');
+      return {
+        url: `${process.env.CDN_BASE_URL}/${encodedName}`,
+        version: detectVersion(rawName),
+      };
+    });
 
   if (filesToProcess.length === 0) {
     return res.json({ processed: 0, message: 'Nenhum arquivo de vídeo no evento' });
