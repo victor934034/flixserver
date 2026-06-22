@@ -2,10 +2,6 @@ const router = require('express').Router();
 const jwt = require('jsonwebtoken');
 const { supabase, supabaseAnon } = require('../services/supabase');
 const { authMiddleware } = require('../middleware/auth');
-const { sendOTP } = require('../services/email');
-
-// OTP store: email → { code, sentAt, expiresAt, attempts }
-const otpStore = new Map();
 
 // TV device code store: code → { status, token, user, expiresAt }
 const tvCodes = new Map();
@@ -73,7 +69,7 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// POST /auth/send-otp — envia código de 6 dígitos por email (Resend)
+// POST /auth/send-otp — Supabase Auth dispara o email via Resend SMTP
 router.post('/send-otp', async (req, res) => {
   const { email } = req.body;
   if (!email || !email.includes('@')) {
@@ -81,29 +77,20 @@ router.post('/send-otp', async (req, res) => {
   }
 
   const key = email.trim().toLowerCase();
+  const { error } = await supabaseAnon.auth.signInWithOtp({
+    email: key,
+    options: { shouldCreateUser: true },
+  });
 
-  // Rate limit: 1 OTP por email a cada 60s
-  const existing = otpStore.get(key);
-  if (existing && Date.now() - existing.sentAt < 60_000) {
-    const wait = Math.ceil((60_000 - (Date.now() - existing.sentAt)) / 1000);
-    return res.status(429).json({ error: `Aguarde ${wait}s antes de solicitar um novo código` });
+  if (error) {
+    console.error('[auth] send-otp error:', error.message);
+    return res.status(500).json({ error: 'Erro ao enviar código. Tente novamente.' });
   }
 
-  const code = String(Math.floor(100000 + Math.random() * 900000));
-  otpStore.set(key, { code, sentAt: Date.now(), expiresAt: Date.now() + 10 * 60_000, attempts: 0 });
-  setTimeout(() => otpStore.delete(key), 10 * 60_000);
-
-  try {
-    await sendOTP(key, code);
-    res.json({ ok: true });
-  } catch (e) {
-    console.error('[auth] send-otp error:', e.response?.data || e.message);
-    otpStore.delete(key);
-    res.status(500).json({ error: 'Erro ao enviar email. Tente novamente.' });
-  }
+  res.json({ ok: true });
 });
 
-// POST /auth/verify-otp — valida código e retorna JWT + usuário
+// POST /auth/verify-otp — valida código via Supabase Auth e retorna JWT próprio
 router.post('/verify-otp', async (req, res) => {
   const { email, code } = req.body;
   if (!email || !code) {
@@ -111,46 +98,35 @@ router.post('/verify-otp', async (req, res) => {
   }
 
   const key = email.trim().toLowerCase();
-  const entry = otpStore.get(key);
 
-  if (!entry || Date.now() > entry.expiresAt) {
-    return res.status(400).json({ error: 'Código expirado. Solicite um novo.' });
+  const { data: authData, error: authError } = await supabaseAnon.auth.verifyOtp({
+    email: key,
+    token: String(code).trim(),
+    type: 'email',
+  });
+
+  if (authError || !authData?.user) {
+    return res.status(400).json({ error: 'Código inválido ou expirado' });
   }
-
-  entry.attempts = (entry.attempts || 0) + 1;
-  if (entry.attempts > 5) {
-    otpStore.delete(key);
-    return res.status(429).json({ error: 'Muitas tentativas. Solicite um novo código.' });
-  }
-
-  if (entry.code !== String(code).trim()) {
-    return res.status(400).json({ error: 'Código incorreto' });
-  }
-
-  otpStore.delete(key);
 
   try {
-    // Busca usuário existente
     const { data: user, error: findError } = await supabase
       .from('users')
       .select('*')
       .eq('email', key)
       .single();
 
-    if (findError && findError.code !== 'PGRST116') {
-      throw findError;
-    }
+    if (findError && findError.code !== 'PGRST116') throw findError;
 
     if (user) {
       return res.json({ user, token: signToken(user) });
     }
 
-    // Cria usuário novo automaticamente
+    // Cria usuário novo usando o ID do Supabase Auth
     const name = key.split('@')[0].replace(/[._-]+/g, ' ').trim();
-    const id = crypto.randomUUID();
     const { data: newUser, error: createError } = await supabase
       .from('users')
-      .insert({ id, email: key, name })
+      .insert({ id: authData.user.id, email: key, name })
       .select()
       .single();
 
