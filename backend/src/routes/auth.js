@@ -1,13 +1,13 @@
 const router = require('express').Router();
 const jwt = require('jsonwebtoken');
-const { supabase, supabaseAnon } = require('../services/supabase');
+const { supabase } = require('../services/supabase');
 const { authMiddleware } = require('../middleware/auth');
-const { sendWelcome, sendPasswordReset } = require('../services/email');
+const { sendOTP, sendUploadComplete } = require('../services/email');
 
-// email → { code, expiresAt }
-const resetCodes = new Map();
+// OTP store: email → { code, sentAt, expiresAt, attempts }
+const otpStore = new Map();
 
-// In-memory TV device code store (code → { status, token, user, expiresAt })
+// TV device code store: code → { status, token, user, expiresAt }
 const tvCodes = new Map();
 
 function generateTvCode() {
@@ -25,88 +25,100 @@ function signToken(user) {
   );
 }
 
-router.post('/register', async (req, res) => {
-  const { email, password, name } = req.body;
-  if (!email || !password || !name) {
-    return res.status(400).json({ error: 'Email, senha e nome são obrigatórios' });
+// POST /auth/send-otp — envia código de 6 dígitos por email (Plunk)
+router.post('/send-otp', async (req, res) => {
+  const { email } = req.body;
+  if (!email || !email.includes('@')) {
+    return res.status(400).json({ error: 'Email inválido' });
   }
 
+  const key = email.trim().toLowerCase();
+
+  // Rate limit: 1 OTP por email a cada 60s
+  const existing = otpStore.get(key);
+  if (existing && Date.now() - existing.sentAt < 60_000) {
+    const wait = Math.ceil((60_000 - (Date.now() - existing.sentAt)) / 1000);
+    return res.status(429).json({ error: `Aguarde ${wait}s antes de solicitar um novo código` });
+  }
+
+  const code = String(Math.floor(100000 + Math.random() * 900000));
+  otpStore.set(key, { code, sentAt: Date.now(), expiresAt: Date.now() + 10 * 60_000, attempts: 0 });
+  setTimeout(() => otpStore.delete(key), 10 * 60_000);
+
   try {
-    const { data: authData, error: authError } = await supabaseAnon.auth.signUp({
-      email,
-      password,
-      options: { data: { name } },
-    });
+    await sendOTP(key, code);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[auth] send-otp error:', e.response?.data || e.message);
+    otpStore.delete(key);
+    res.status(500).json({ error: 'Erro ao enviar email. Tente novamente.' });
+  }
+});
 
-    if (authError) {
-      console.error('[register] Supabase authError:', JSON.stringify(authError));
-      const isRetryable = authError.name === 'AuthRetryableFetchError' || authError.status >= 500;
-      if (isRetryable) {
-        return res.status(503).json({ error: 'Serviço de autenticação temporariamente indisponível. Verifique se o projeto Supabase está ativo e as variáveis de ambiente estão corretas.' });
-      }
-      const msg = authError.message || authError.msg || authError.error_description
-        || authError.error || (typeof authError === 'string' ? authError : null)
-        || 'Erro ao criar conta';
-      return res.status(400).json({ error: msg });
-    }
+// POST /auth/verify-otp — valida código e retorna JWT + usuário
+router.post('/verify-otp', async (req, res) => {
+  const { email, code } = req.body;
+  if (!email || !code) {
+    return res.status(400).json({ error: 'Email e código são obrigatórios' });
+  }
 
-    if (!authData?.user) {
-      return res.status(400).json({ error: 'Não foi possível criar a conta. Verifique se o email já está cadastrado.' });
-    }
+  const key = email.trim().toLowerCase();
+  const entry = otpStore.get(key);
 
-    const { data: userData, error: userError } = await supabase
+  if (!entry || Date.now() > entry.expiresAt) {
+    return res.status(400).json({ error: 'Código expirado. Solicite um novo.' });
+  }
+
+  entry.attempts = (entry.attempts || 0) + 1;
+  if (entry.attempts > 5) {
+    otpStore.delete(key);
+    return res.status(429).json({ error: 'Muitas tentativas. Solicite um novo código.' });
+  }
+
+  if (entry.code !== String(code).trim()) {
+    return res.status(400).json({ error: 'Código incorreto' });
+  }
+
+  otpStore.delete(key);
+
+  try {
+    // Busca usuário existente
+    const { data: user, error: findError } = await supabase
       .from('users')
-      .insert({ id: authData.user.id, email, name })
+      .select('*')
+      .eq('email', key)
+      .single();
+
+    if (findError && findError.code !== 'PGRST116') {
+      throw findError;
+    }
+
+    if (user) {
+      return res.json({ user, token: signToken(user) });
+    }
+
+    // Cria usuário novo automaticamente
+    const name = key.split('@')[0].replace(/[._-]+/g, ' ').trim();
+    const id = crypto.randomUUID();
+    const { data: newUser, error: createError } = await supabase
+      .from('users')
+      .insert({ id, email: key, name })
       .select()
       .single();
 
-    if (userError) {
-      console.error('[register] Supabase userError:', JSON.stringify(userError));
-      const msg = userError.message || userError.code || 'Erro ao salvar usuário';
-      return res.status(400).json({ error: msg });
+    if (createError) {
+      console.error('[auth] verify-otp criar usuário:', createError);
+      return res.status(500).json({ error: 'Erro ao criar conta. Contate o suporte.' });
     }
 
-    // Envia email de boas-vindas via Resend (não bloqueia a resposta)
-    sendWelcome(email, name).catch(() => {});
-
-    res.status(201).json({ user: userData, token: signToken(userData) });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.json({ user: newUser, token: signToken(newUser) });
+  } catch (e) {
+    console.error('[auth] verify-otp error:', e.message);
+    res.status(500).json({ error: e.message });
   }
 });
 
-router.post('/login', async (req, res) => {
-  const { email, password } = req.body;
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Email e senha são obrigatórios' });
-  }
-
-  try {
-    const { data: authData, error: authError } = await supabaseAnon.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    if (authError) {
-      const isRetryable = authError.name === 'AuthRetryableFetchError' || authError.status >= 500;
-      if (isRetryable) return res.status(503).json({ error: 'Serviço de autenticação temporariamente indisponível.' });
-      return res.status(401).json({ error: authError.message || 'Credenciais inválidas' });
-    }
-
-    const { data: user, error: userError } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', authData.user.id)
-      .single();
-
-    if (userError || !user) return res.status(404).json({ error: 'Usuário não encontrado' });
-
-    res.json({ user, token: signToken(user) });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
+// GET /auth/me
 router.get('/me', authMiddleware, async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -122,84 +134,23 @@ router.get('/me', authMiddleware, async (req, res) => {
   }
 });
 
-// ── Push token ───────────────────────────────────────────────────────────────
-
+// POST /auth/push-token
 router.post('/push-token', authMiddleware, async (req, res) => {
   const { token } = req.body;
   if (!token) return res.status(400).json({ error: 'token é obrigatório' });
-  const { supabase } = require('../services/supabase');
   await supabase.from('users').update({ push_token: token }).eq('id', req.user.id);
   res.json({ ok: true });
 });
 
-// ── Esqueci a senha (OTP por email) ──────────────────────────────────────────
-
-router.post('/forgot-password', async (req, res) => {
-  const { email } = req.body;
-  if (!email) return res.status(400).json({ error: 'Email é obrigatório' });
-
-  try {
-    // Verifica se o email existe
-    const { data: user } = await supabase.from('users').select('id, name').eq('email', email.trim().toLowerCase()).single();
-    // Responde sempre com sucesso para não revelar se o email existe
-    if (!user) return res.json({ ok: true });
-
-    const code = String(Math.floor(100000 + Math.random() * 900000));
-    resetCodes.set(email.trim().toLowerCase(), { code, expiresAt: Date.now() + 15 * 60 * 1000 });
-    // Limpa o código após 15 min
-    setTimeout(() => resetCodes.delete(email.trim().toLowerCase()), 15 * 60 * 1000);
-
-    await sendPasswordReset(email.trim(), code);
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.post('/reset-password', async (req, res) => {
-  const { email, code, newPassword } = req.body;
-  if (!email || !code || !newPassword) {
-    return res.status(400).json({ error: 'Email, código e nova senha são obrigatórios' });
-  }
-  if (newPassword.length < 6) {
-    return res.status(400).json({ error: 'Senha deve ter pelo menos 6 caracteres' });
-  }
-
-  const key = email.trim().toLowerCase();
-  const entry = resetCodes.get(key);
-
-  if (!entry || Date.now() > entry.expiresAt) {
-    return res.status(400).json({ error: 'Código inválido ou expirado' });
-  }
-  if (entry.code !== String(code).trim()) {
-    return res.status(400).json({ error: 'Código incorreto' });
-  }
-
-  try {
-    const { data: user } = await supabase.from('users').select('id').eq('email', key).single();
-    if (!user) return res.status(404).json({ error: 'Usuário não encontrado' });
-
-    const { error } = await supabase.auth.admin.updateUserById(user.id, { password: newPassword });
-    if (error) return res.status(400).json({ error: error.message });
-
-    resetCodes.delete(key);
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // ── TV Device Code Login ──────────────────────────────────────────────────────
 
-// TV requests a new code
 router.post('/tv/code', (req, res) => {
   const code = generateTvCode();
-  tvCodes.set(code, { status: 'pending', token: null, user: null, expiresAt: Date.now() + 600000 });
-  setTimeout(() => tvCodes.delete(code), 600000);
+  tvCodes.set(code, { status: 'pending', token: null, user: null, expiresAt: Date.now() + 600_000 });
+  setTimeout(() => tvCodes.delete(code), 600_000);
   res.json({ code });
 });
 
-// TV polls for authorization status
 router.get('/tv/code/:code', (req, res) => {
   const entry = tvCodes.get(req.params.code.toUpperCase());
   if (!entry || Date.now() > entry.expiresAt) {
@@ -211,8 +162,7 @@ router.get('/tv/code/:code', (req, res) => {
   res.json({ status: 'pending' });
 });
 
-// Mobile or web confirms the code
-// Accepts: Bearer token (logged-in user) OR email+password in body
+// Mobile confirma o código da TV via Bearer token (usuário já logado)
 router.post('/tv/code/:code/confirm', async (req, res) => {
   const code = req.params.code.toUpperCase();
   const entry = tvCodes.get(code);
@@ -220,26 +170,18 @@ router.post('/tv/code/:code/confirm', async (req, res) => {
     return res.status(404).json({ error: 'Código inválido ou expirado' });
   }
 
-  let user = null;
-
   const authHeader = req.headers.authorization;
-  if (authHeader?.startsWith('Bearer ')) {
-    // Logged-in user via token
-    try {
-      const decoded = jwt.verify(authHeader.split(' ')[1], process.env.JWT_SECRET);
-      const { data } = await supabase.from('users').select('*').eq('id', decoded.id).single();
-      user = data;
-    } catch {
-      return res.status(401).json({ error: 'Token inválido' });
-    }
-  } else {
-    // Email + password (web form)
-    const { email, password } = req.body;
-    if (!email || !password) return res.status(400).json({ error: 'Email e senha obrigatórios' });
-    const { data: authData, error } = await supabaseAnon.auth.signInWithPassword({ email, password });
-    if (error) return res.status(401).json({ error: 'Credenciais inválidas' });
-    const { data } = await supabase.from('users').select('*').eq('id', authData.user.id).single();
+  if (!authHeader?.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Autenticação necessária' });
+  }
+
+  let user = null;
+  try {
+    const decoded = jwt.verify(authHeader.split(' ')[1], process.env.JWT_SECRET);
+    const { data } = await supabase.from('users').select('*').eq('id', decoded.id).single();
     user = data;
+  } catch {
+    return res.status(401).json({ error: 'Token inválido' });
   }
 
   if (!user) return res.status(404).json({ error: 'Usuário não encontrado' });

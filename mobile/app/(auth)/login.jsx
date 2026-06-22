@@ -3,24 +3,26 @@ import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   KeyboardAvoidingView, Platform, ActivityIndicator, Alert,
 } from 'react-native';
-import { Link, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { useAuth } from '../../contexts/AuthContext';
 
 export default function LoginScreen() {
-  const { login } = useAuth();
+  const { sendOTP } = useAuth();
   const router = useRouter();
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = async () => {
-    if (!email || !password) return Alert.alert('Preencha todos os campos');
+  const handleSend = async () => {
+    const trimmed = email.trim().toLowerCase();
+    if (!trimmed || !trimmed.includes('@')) {
+      return Alert.alert('Email inválido', 'Digite um email válido para continuar.');
+    }
     setLoading(true);
     try {
-      await login(email.trim(), password);
-      router.replace('/(tabs)');
+      await sendOTP(trimmed);
+      router.push({ pathname: '/(auth)/otp', params: { email: trimmed } });
     } catch (e) {
-      Alert.alert('Erro', e.response?.data?.error || 'Email ou senha incorretos');
+      Alert.alert('Erro', e.response?.data?.error || 'Não foi possível enviar o código. Tente novamente.');
     } finally {
       setLoading(false);
     }
@@ -33,49 +35,31 @@ export default function LoginScreen() {
     >
       <View style={styles.content}>
         <Text style={styles.logo}>FLIXHOME</Text>
-        <Text style={styles.subtitle}>Entre na sua conta</Text>
+        <Text style={styles.subtitle}>Digite seu email para entrar</Text>
 
         <TextInput
           style={styles.input}
-          placeholder="Email"
+          placeholder="seu@email.com"
           placeholderTextColor="#666"
           value={email}
           onChangeText={setEmail}
           autoCapitalize="none"
           keyboardType="email-address"
           autoComplete="email"
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="Senha"
-          placeholderTextColor="#666"
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-          autoComplete="password"
+          returnKeyType="send"
+          onSubmitEditing={handleSend}
         />
 
-        <TouchableOpacity style={styles.button} onPress={handleLogin} disabled={loading}>
+        <TouchableOpacity style={styles.button} onPress={handleSend} disabled={loading}>
           {loading
             ? <ActivityIndicator color="#fff" />
-            : <Text style={styles.buttonText}>Entrar</Text>}
+            : <Text style={styles.buttonText}>Enviar código</Text>}
         </TouchableOpacity>
 
-        <Link href="/(auth)/forgot-password" asChild>
-          <TouchableOpacity style={styles.linkBtn}>
-            <Text style={styles.linkText}>
-              <Text style={styles.linkHighlight}>Esqueci minha senha</Text>
-            </Text>
-          </TouchableOpacity>
-        </Link>
-
-        <Link href="/(auth)/register" asChild>
-          <TouchableOpacity style={styles.linkBtn}>
-            <Text style={styles.linkText}>
-              Não tem conta? <Text style={styles.linkHighlight}>Cadastre-se</Text>
-            </Text>
-          </TouchableOpacity>
-        </Link>
+        <Text style={styles.hint}>
+          Enviaremos um código de 6 dígitos para o seu email.{'\n'}
+          Não é necessário senha.
+        </Text>
       </View>
     </KeyboardAvoidingView>
   );
@@ -96,10 +80,8 @@ const styles = StyleSheet.create({
   },
   button: {
     backgroundColor: '#E50914', padding: 16,
-    borderRadius: 8, alignItems: 'center', marginBottom: 16,
+    borderRadius: 8, alignItems: 'center', marginBottom: 24,
   },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  linkBtn: { alignItems: 'center', padding: 8 },
-  linkText: { color: '#b3b3b3', fontSize: 14 },
-  linkHighlight: { color: '#E50914', fontWeight: '600' },
+  hint: { color: '#444', fontSize: 13, textAlign: 'center', lineHeight: 20 },
 });

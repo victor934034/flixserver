@@ -1,3 +1,4 @@
+const axios = require('axios');
 const { Resend } = require('resend');
 
 let _resend = null;
@@ -98,4 +99,39 @@ async function sendPasswordReset(toEmail, code) {
   });
 }
 
-module.exports = { sendUploadComplete, sendWelcome, sendPasswordReset };
+async function sendOTP(toEmail, code) {
+  if (!process.env.PLUNK_API_KEY) {
+    console.warn('[email] PLUNK_API_KEY não configurado — OTP não enviado');
+    return;
+  }
+  await axios.post(
+    'https://api.useplunk.com/v1/send',
+    {
+      to: toEmail,
+      subject: 'Seu código de acesso — FlixHome',
+      body: `
+        <div style="font-family:sans-serif;max-width:480px;margin:0 auto;background:#141414;color:#e5e5e5;border-radius:12px;padding:32px;">
+          <div style="text-align:center;margin-bottom:24px;">
+            <span style="font-size:28px;font-weight:900;letter-spacing:4px;color:#E50914;">FLIXHOME</span>
+          </div>
+          <h2 style="margin:0 0 8px;font-size:20px;">Seu código de acesso</h2>
+          <p style="color:#aaa;margin:0 0 24px;font-size:15px;">
+            Use o código abaixo para entrar no FlixHome. Ele expira em <strong>10 minutos</strong>.
+          </p>
+          <div style="background:#1f1f1f;border:2px solid #E50914;border-radius:12px;padding:24px;text-align:center;margin-bottom:24px;">
+            <span style="font-size:42px;font-weight:900;letter-spacing:12px;color:#fff;">${code}</span>
+          </div>
+          <p style="color:#666;font-size:12px;">Se você não solicitou isso, ignore este email.</p>
+        </div>
+      `,
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.PLUNK_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+    }
+  );
+}
+
+module.exports = { sendUploadComplete, sendWelcome, sendPasswordReset, sendOTP };
