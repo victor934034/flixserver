@@ -142,6 +142,59 @@ router.post('/verify-otp', async (req, res) => {
   }
 });
 
+// POST /auth/register-with-otp — verifica OTP e cria conta com senha
+router.post('/register-with-otp', async (req, res) => {
+  const { email, code, password, name } = req.body;
+  if (!email || !code || !password || !name) {
+    return res.status(400).json({ error: 'Todos os campos são obrigatórios' });
+  }
+  if (password.length < 6) {
+    return res.status(400).json({ error: 'Senha muito curta' });
+  }
+
+  const key = email.trim().toLowerCase();
+
+  // Verifica o OTP via Supabase Auth
+  const { data: authData, error: authError } = await supabaseAnon.auth.verifyOtp({
+    email: key,
+    token: String(code).trim(),
+    type: 'email',
+  });
+
+  if (authError || !authData?.user) {
+    return res.status(400).json({ error: 'Código inválido ou expirado' });
+  }
+
+  try {
+    // Define a senha no Supabase Auth
+    await supabase.auth.admin.updateUserById(authData.user.id, { password });
+
+    // Busca ou cria o usuário na nossa tabela
+    const { data: existing } = await supabase
+      .from('users').select('*').eq('email', key).single();
+
+    if (existing) {
+      return res.json({ user: existing, token: signToken(existing) });
+    }
+
+    const { data: newUser, error: createError } = await supabase
+      .from('users')
+      .insert({ id: authData.user.id, email: key, name: name.trim() })
+      .select()
+      .single();
+
+    if (createError) {
+      console.error('[auth] register-with-otp criar usuário:', createError);
+      return res.status(500).json({ error: 'Erro ao criar conta. Contate o suporte.' });
+    }
+
+    res.status(201).json({ user: newUser, token: signToken(newUser) });
+  } catch (e) {
+    console.error('[auth] register-with-otp error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /auth/me
 router.get('/me', authMiddleware, async (req, res) => {
   try {

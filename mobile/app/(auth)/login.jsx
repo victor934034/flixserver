@@ -9,32 +9,14 @@ import { useAuth } from '../../contexts/AuthContext';
 export default function LoginScreen() {
   const { login, sendOTP } = useAuth();
   const router = useRouter();
-  const [tab, setTab] = useState('otp'); // 'otp' | 'password'
+  const [tab, setTab] = useState('password');
 
-  // OTP fields
-  const [otpEmail, setOtpEmail] = useState('');
-  const [otpLoading, setOtpLoading] = useState(false);
-
-  // Password fields
   const [pwEmail, setPwEmail] = useState('');
   const [pwPassword, setPwPassword] = useState('');
   const [pwLoading, setPwLoading] = useState(false);
 
-  const handleSendOTP = async () => {
-    const trimmed = otpEmail.trim().toLowerCase();
-    if (!trimmed || !trimmed.includes('@')) {
-      return Alert.alert('Email inválido', 'Digite um email válido para continuar.');
-    }
-    setOtpLoading(true);
-    try {
-      await sendOTP(trimmed);
-      router.push({ pathname: '/(auth)/otp', params: { email: trimmed } });
-    } catch (e) {
-      Alert.alert('Erro', e.response?.data?.error || 'Não foi possível enviar o código. Tente novamente.');
-    } finally {
-      setOtpLoading(false);
-    }
-  };
+  const [otpEmail, setOtpEmail] = useState('');
+  const [otpLoading, setOtpLoading] = useState(false);
 
   const handlePasswordLogin = async () => {
     if (!pwEmail || !pwPassword) return Alert.alert('Preencha todos os campos');
@@ -49,6 +31,22 @@ export default function LoginScreen() {
     }
   };
 
+  const handleSendOTP = async () => {
+    const trimmed = otpEmail.trim().toLowerCase();
+    if (!trimmed || !trimmed.includes('@')) {
+      return Alert.alert('Email inválido', 'Digite um email válido.');
+    }
+    setOtpLoading(true);
+    try {
+      await sendOTP(trimmed);
+      router.push({ pathname: '/(auth)/otp', params: { email: trimmed } });
+    } catch (e) {
+      Alert.alert('Erro', e.response?.data?.error || 'Não foi possível enviar o código.');
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -57,44 +55,22 @@ export default function LoginScreen() {
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Text style={styles.logo}>FLIXHOME</Text>
 
-        {/* Tabs */}
         <View style={styles.tabRow}>
-          <TouchableOpacity
-            style={[styles.tab, tab === 'otp' && styles.tabActive]}
-            onPress={() => setTab('otp')}
-          >
-            <Text style={[styles.tabText, tab === 'otp' && styles.tabTextActive]}>Código por email</Text>
-          </TouchableOpacity>
           <TouchableOpacity
             style={[styles.tab, tab === 'password' && styles.tabActive]}
             onPress={() => setTab('password')}
           >
             <Text style={[styles.tabText, tab === 'password' && styles.tabTextActive]}>Email e senha</Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tab, tab === 'otp' && styles.tabActive]}
+            onPress={() => setTab('otp')}
+          >
+            <Text style={[styles.tabText, tab === 'otp' && styles.tabTextActive]}>Código por email</Text>
+          </TouchableOpacity>
         </View>
 
-        {tab === 'otp' ? (
-          <View>
-            <Text style={styles.hint}>Enviamos um código de 6 dígitos. Não precisa de senha.</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="seu@email.com"
-              placeholderTextColor="#666"
-              value={otpEmail}
-              onChangeText={setOtpEmail}
-              autoCapitalize="none"
-              keyboardType="email-address"
-              autoComplete="email"
-              returnKeyType="send"
-              onSubmitEditing={handleSendOTP}
-            />
-            <TouchableOpacity style={styles.button} onPress={handleSendOTP} disabled={otpLoading}>
-              {otpLoading
-                ? <ActivityIndicator color="#fff" />
-                : <Text style={styles.buttonText}>Enviar código</Text>}
-            </TouchableOpacity>
-          </View>
-        ) : (
+        {tab === 'password' ? (
           <View>
             <TextInput
               style={styles.input}
@@ -130,6 +106,27 @@ export default function LoginScreen() {
                 </Text>
               </TouchableOpacity>
             </Link>
+          </View>
+        ) : (
+          <View>
+            <Text style={styles.hint}>Enviamos um código de 6 dígitos para o seu email.</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="seu@email.com"
+              placeholderTextColor="#666"
+              value={otpEmail}
+              onChangeText={setOtpEmail}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              autoComplete="email"
+              returnKeyType="send"
+              onSubmitEditing={handleSendOTP}
+            />
+            <TouchableOpacity style={styles.button} onPress={handleSendOTP} disabled={otpLoading}>
+              {otpLoading
+                ? <ActivityIndicator color="#fff" />
+                : <Text style={styles.buttonText}>Enviar código</Text>}
+            </TouchableOpacity>
           </View>
         )}
       </ScrollView>

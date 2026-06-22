@@ -61,6 +61,20 @@ export function AuthProvider({ children }) {
     setUser(u);
   };
 
+  const registerWithOTP = async (email, code, password, name) => {
+    const res = await api.post('/auth/register-with-otp', {
+      email: email.trim().toLowerCase(),
+      code: String(code).trim(),
+      password,
+      name,
+    });
+    const { token: t, user: u } = res.data;
+    await AsyncStorage.setItem('token', t);
+    await AsyncStorage.setItem('user', JSON.stringify(u));
+    setToken(t);
+    setUser(u);
+  };
+
   const refreshUser = async () => {
     try {
       const { data } = await api.get('/auth/me');
@@ -78,7 +92,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, register, sendOTP, verifyOTP, logout, refreshUser }}>
+    <AuthContext.Provider value={{ user, token, loading, login, register, sendOTP, verifyOTP, registerWithOTP, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

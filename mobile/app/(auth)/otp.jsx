@@ -7,8 +7,8 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../contexts/AuthContext';
 
 export default function OTPScreen() {
-  const { email } = useLocalSearchParams();
-  const { verifyOTP, sendOTP } = useAuth();
+  const { email, password, name, mode } = useLocalSearchParams();
+  const { verifyOTP, registerWithOTP, sendOTP } = useAuth();
   const router = useRouter();
 
   const [digits, setDigits] = useState(['', '', '', '', '', '']);
@@ -68,7 +68,11 @@ export default function OTPScreen() {
     if (code.length < 6) return Alert.alert('Código incompleto', 'Digite todos os 6 dígitos.');
     setLoading(true);
     try {
-      await verifyOTP(email, code);
+      if (mode === 'register') {
+        await registerWithOTP(email, code, password, name);
+      } else {
+        await verifyOTP(email, code);
+      }
       router.replace('/(tabs)');
     } catch (e) {
       Alert.alert('Erro', e.response?.data?.error || 'Código inválido. Tente novamente.');
@@ -77,7 +81,7 @@ export default function OTPScreen() {
     } finally {
       setLoading(false);
     }
-  }, [digits, email]);
+  }, [digits, email, mode, password, name]);
 
   const handleResend = async () => {
     if (cooldown > 0) return;
