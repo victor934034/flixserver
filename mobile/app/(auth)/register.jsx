@@ -1,28 +1,28 @@
 import { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  KeyboardAvoidingView, Platform, ActivityIndicator, Alert, ScrollView,
+  KeyboardAvoidingView, Platform, ActivityIndicator, Alert,
 } from 'react-native';
-import { Link, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { useAuth } from '../../contexts/AuthContext';
 
 export default function RegisterScreen() {
-  const { register } = useAuth();
+  const { sendOTP } = useAuth();
   const router = useRouter();
-  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleRegister = async () => {
-    if (!name || !email || !password) return Alert.alert('Preencha todos os campos');
-    if (password.length < 6) return Alert.alert('Senha deve ter pelo menos 6 caracteres');
+  const handleSend = async () => {
+    const trimmed = email.trim().toLowerCase();
+    if (!trimmed || !trimmed.includes('@')) {
+      return Alert.alert('Email inválido', 'Digite um email válido para continuar.');
+    }
     setLoading(true);
     try {
-      await register(email.trim(), password, name);
-      router.replace('/(tabs)');
+      await sendOTP(trimmed);
+      router.push({ pathname: '/(auth)/otp', params: { email: trimmed } });
     } catch (e) {
-      Alert.alert('Erro', e.response?.data?.error || 'Erro ao criar conta');
+      Alert.alert('Erro', e.response?.data?.error || 'Não foi possível enviar o código. Tente novamente.');
     } finally {
       setLoading(false);
     }
@@ -33,51 +33,50 @@ export default function RegisterScreen() {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <View style={styles.content}>
         <Text style={styles.logo}>FLIXHOME</Text>
-        <Text style={styles.subtitle}>Crie sua conta grátis</Text>
+        <Text style={styles.title}>Criar conta</Text>
+        <Text style={styles.subtitle}>
+          Digite seu email — enviaremos um código para confirmar.{'\n'}
+          Não é necessário senha.
+        </Text>
 
         <TextInput
-          style={styles.input} placeholder="Nome" placeholderTextColor="#666"
-          value={name} onChangeText={setName} autoComplete="name"
-        />
-        <TextInput
-          style={styles.input} placeholder="Email" placeholderTextColor="#666"
-          value={email} onChangeText={setEmail}
-          autoCapitalize="none" keyboardType="email-address" autoComplete="email"
-        />
-        <TextInput
-          style={styles.input} placeholder="Senha (mín. 6 caracteres)"
-          placeholderTextColor="#666" value={password} onChangeText={setPassword}
-          secureTextEntry autoComplete="new-password"
+          style={styles.input}
+          placeholder="seu@email.com"
+          placeholderTextColor="#666"
+          value={email}
+          onChangeText={setEmail}
+          autoCapitalize="none"
+          keyboardType="email-address"
+          autoComplete="email"
+          returnKeyType="send"
+          onSubmitEditing={handleSend}
         />
 
-        <TouchableOpacity style={styles.button} onPress={handleRegister} disabled={loading}>
+        <TouchableOpacity style={styles.button} onPress={handleSend} disabled={loading}>
           {loading
             ? <ActivityIndicator color="#fff" />
-            : <Text style={styles.buttonText}>Criar conta</Text>}
+            : <Text style={styles.buttonText}>Enviar código</Text>}
         </TouchableOpacity>
 
-        <Link href="/(auth)/login" asChild>
-          <TouchableOpacity style={styles.linkBtn}>
-            <Text style={styles.linkText}>
-              Já tem conta? <Text style={styles.linkHighlight}>Entrar</Text>
-            </Text>
-          </TouchableOpacity>
-        </Link>
-      </ScrollView>
+        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+          <Text style={styles.backText}>Já tem conta? Entrar</Text>
+        </TouchableOpacity>
+      </View>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0a0a0a' },
-  content: { flexGrow: 1, justifyContent: 'center', padding: 24 },
+  content: { flex: 1, justifyContent: 'center', padding: 24 },
   logo: {
     fontSize: 36, fontWeight: '900', color: '#E50914',
     textAlign: 'center', letterSpacing: 6, marginBottom: 8,
   },
-  subtitle: { fontSize: 16, color: '#b3b3b3', textAlign: 'center', marginBottom: 40 },
+  title: { fontSize: 20, fontWeight: '700', color: '#fff', textAlign: 'center', marginBottom: 8 },
+  subtitle: { fontSize: 13, color: '#555', textAlign: 'center', lineHeight: 20, marginBottom: 36 },
   input: {
     backgroundColor: '#1f1f1f', color: '#fff', padding: 16,
     borderRadius: 8, marginBottom: 16, fontSize: 16,
@@ -88,7 +87,6 @@ const styles = StyleSheet.create({
     borderRadius: 8, alignItems: 'center', marginBottom: 16,
   },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  linkBtn: { alignItems: 'center', padding: 8 },
-  linkText: { color: '#b3b3b3', fontSize: 14 },
-  linkHighlight: { color: '#E50914', fontWeight: '600' },
+  backBtn: { alignItems: 'center', padding: 10 },
+  backText: { color: '#555', fontSize: 13 },
 });
