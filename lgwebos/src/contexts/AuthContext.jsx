@@ -48,6 +48,16 @@ export function AuthProvider({ children }) {
     return new Date(user.plan_expires_at).getTime() > Date.now();
   };
 
+  const login = async (email, password) => {
+    const res = await authAPI.login(email, password);
+    const { token, user: u } = res.data;
+    localStorage.setItem('token', token);
+    localStorage.setItem('user', JSON.stringify(u));
+    setUser(u);
+    setActiveProfileState(null);
+    localStorage.removeItem('profile');
+  };
+
   const loginWithToken = (token, u) => {
     localStorage.setItem('token', token);
     localStorage.setItem('user', JSON.stringify(u));
@@ -76,7 +86,7 @@ export function AuthProvider({ children }) {
   return (
     <AuthContext.Provider value={{
       user, loading,
-      loginWithToken, logout,
+      login, loginWithToken, logout,
       activeProfile, setActiveProfile,
       subscriptionEnabled, hasValidSubscription,
     }}>

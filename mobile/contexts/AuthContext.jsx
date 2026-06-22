@@ -27,6 +27,24 @@ export function AuthProvider({ children }) {
     })();
   }, []);
 
+  const login = async (email, password) => {
+    const res = await api.post('/auth/login', { email: email.trim().toLowerCase(), password });
+    const { token: t, user: u } = res.data;
+    await AsyncStorage.setItem('token', t);
+    await AsyncStorage.setItem('user', JSON.stringify(u));
+    setToken(t);
+    setUser(u);
+  };
+
+  const register = async (email, password, name) => {
+    const res = await api.post('/auth/register', { email: email.trim().toLowerCase(), password, name });
+    const { token: t, user: u } = res.data;
+    await AsyncStorage.setItem('token', t);
+    await AsyncStorage.setItem('user', JSON.stringify(u));
+    setToken(t);
+    setUser(u);
+  };
+
   const sendOTP = async (email) => {
     await api.post('/auth/send-otp', { email: email.trim().toLowerCase() });
   };
@@ -60,7 +78,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, sendOTP, verifyOTP, logout, refreshUser }}>
+    <AuthContext.Provider value={{ user, token, loading, login, register, sendOTP, verifyOTP, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

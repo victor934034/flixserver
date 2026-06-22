@@ -20,11 +20,10 @@
     "ios": {
       "bundleIdentifier": "com.flixhome.app",
       "infoPlist": {
-        "UIBackgroundModes": ["audio"]
+        "UIBackgroundModes": [
+          "audio"
+        ]
       }
-    },
-    "updates": {
-      "url": "https://u.expo.dev/003e6f97-72d9-49d4-a9aa-2360f01b3fcf"
     },
     "runtimeVersion": {
       "policy": "appVersion"
@@ -50,8 +49,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "003e6f97-72d9-49d4-a9aa-2360f01b3fcf"
+        "projectId": "77d031ac-6342-4017-8641-8376b1476a3b"
       }
-    }
+    },
+    "owner": "victor57898"
   }
 }

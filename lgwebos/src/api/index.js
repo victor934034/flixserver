@@ -18,6 +18,7 @@ api.interceptors.request.use((config) => {
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 export const authAPI = {
+  login: (email, password) => api.post('/auth/login', { email, password }),
   me: () => api.get('/auth/me'),
   tvCode: () => api.post('/auth/tv/code'),
   tvCodeStatus: (code) => api.get(`/auth/tv/code/${code}`),
