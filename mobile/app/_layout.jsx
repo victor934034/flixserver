@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react';
-import { AppState } from 'react-native';
+﻿import { useEffect, useRef } from 'react';
+import { AppState, Platform } from 'react-native';
 import { Stack, useRouter, useSegments, useRootNavigationState } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -12,12 +12,21 @@ import { ParentalProvider } from '../contexts/ParentalContext';
 import { ProfileProvider, useProfile } from '../contexts/ProfileContext';
 import api from '../lib/api';
 
-// Expo Go no SDK 53 não suporta push notifications — só registra em builds nativos
-const isExpoGo = Constants.appOwnership === 'expo';
+const isExpoGo = Constants.executionEnvironment === 'storeClient';
 
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({ shouldShowAlert: true, shouldPlaySound: false, shouldSetBadge: false }),
+  handleNotification: async () => ({ shouldShowAlert: true, shouldPlaySound: true, shouldSetBadge: false }),
 });
+
+async function setupAndroidChannel() {
+  if (Platform.OS !== 'android') return;
+  await Notifications.setNotificationChannelAsync('default', {
+    name: 'Geral',
+    importance: Notifications.AndroidImportance.MAX,
+    vibrationPattern: [0, 250, 250, 250],
+    lightColor: '#E50914',
+  });
+}
 
 async function requestNotificationPermission() {
   if (isExpoGo) return;
@@ -32,7 +41,7 @@ async function registerPushToken() {
   try {
     const { status } = await Notifications.getPermissionsAsync();
     if (status !== 'granted') return;
-    const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? '003e6f97-72d9-49d4-a9aa-2360f01b3fcf';
+    const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? '77d031ac-6342-4017-8641-8376b1476a3b';
     const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
     if (token) await api.post('/auth/push-token', { token });
   } catch (e) {
@@ -65,7 +74,6 @@ function AppGate() {
   const checkedRef = useRef(false);
   const appStateRef = useRef(AppState.currentState);
 
-  // Verifica assinatura ao navegar entre telas
   useEffect(() => {
     if (!navState?.key || loading) return;
 
@@ -90,7 +98,6 @@ function AppGate() {
     }
   }, [token, loading, segments, navState?.key]);
 
-  // Re-verifica assinatura ao voltar do background (app minimizado → foreground)
   useEffect(() => {
     if (!token || loading) return;
     const sub = AppState.addEventListener('change', (nextState) => {
@@ -106,7 +113,6 @@ function AppGate() {
     return () => sub.remove();
   }, [token, loading, user, segments]);
 
-  // Gate de perfil
   useEffect(() => {
     if (!navState?.key || loading || !token) return;
     const inAuth = segments[0] === '(auth)';
@@ -121,7 +127,10 @@ function AppGate() {
 }
 
 export default function RootLayout() {
-  useEffect(() => { requestNotificationPermission(); }, []);
+  useEffect(() => {
+    setupAndroidChannel();
+    requestNotificationPermission();
+  }, []);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
