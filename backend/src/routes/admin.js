@@ -381,6 +381,67 @@ router.delete('/categories/:id', async (req, res) => {
   }
 });
 
+// ---- LIKES STATS ----
+router.get('/likes/stats', async (req, res) => {
+  try {
+    const { data: likes, error } = await supabase.from('likes').select('content_type, content_id, is_like');
+    if (error) throw error;
+
+    // Agrupa por conteúdo
+    const map = {};
+    for (const l of likes || []) {
+      const key = `${l.content_type}:${l.content_id}`;
+      if (!map[key]) map[key] = { content_type: l.content_type, content_id: l.content_id, likes: 0, dislikes: 0 };
+      if (l.is_like) map[key].likes++; else map[key].dislikes++;
+    }
+
+    const movieIds = Object.values(map).filter(x => x.content_type === 'movie').map(x => x.content_id);
+    const seriesIds = Object.values(map).filter(x => x.content_type === 'series').map(x => x.content_id);
+
+    const [moviesRes, seriesRes] = await Promise.all([
+      movieIds.length > 0 ? supabase.from('movies').select('id, title, poster_url, genres').in('id', movieIds) : { data: [] },
+      seriesIds.length > 0 ? supabase.from('series').select('id, title, poster_url, genres').in('id', seriesIds) : { data: [] },
+    ]);
+
+    const contentMap = {};
+    for (const m of moviesRes.data || []) contentMap[`movie:${m.id}`] = { ...m, type: 'movie' };
+    for (const s of seriesRes.data || []) contentMap[`series:${s.id}`] = { ...s, type: 'series' };
+
+    const items = Object.values(map).map(item => {
+      const info = contentMap[`${item.content_type}:${item.content_id}`] || {};
+      const total = item.likes + item.dislikes;
+      return {
+        ...item,
+        title: info.title || 'Desconhecido',
+        poster_url: info.poster_url || null,
+        genres: info.genres || [],
+        type: info.type || item.content_type,
+        total,
+        ratio: total > 0 ? Math.round((item.likes / total) * 100) : 0,
+      };
+    }).sort((a, b) => b.ratio - a.ratio || b.total - a.total);
+
+    // Estatísticas por gênero
+    const genreMap = {};
+    for (const item of items) {
+      for (const genre of (item.genres || [])) {
+        if (!genreMap[genre]) genreMap[genre] = { genre, likes: 0, dislikes: 0 };
+        genreMap[genre].likes += item.likes;
+        genreMap[genre].dislikes += item.dislikes;
+      }
+    }
+    const byGenre = Object.values(genreMap)
+      .map(g => ({ ...g, total: g.likes + g.dislikes, ratio: Math.round((g.likes / (g.likes + g.dislikes)) * 100) }))
+      .sort((a, b) => b.total - a.total);
+
+    const totals = { likes: items.reduce((s, i) => s + i.likes, 0), dislikes: items.reduce((s, i) => s + i.dislikes, 0) };
+
+    res.json({ items, byGenre, totals });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ---- PRESET AVATARS ----
 router.get('/preset-avatars', async (req, res) => {
   const { data, error } = await supabase.from('preset_avatars').select('*').order('order_index').order('created_at');

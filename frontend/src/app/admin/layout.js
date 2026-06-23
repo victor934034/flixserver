@@ -14,6 +14,7 @@ const NAV = [
   { href: '/admin/usuarios', label: 'Usuários' },
   { href: '/admin/categorias', label: 'Categorias' },
   { href: '/admin/sugestoes', label: 'Sugestões' },
+  { href: '/admin/likes', label: 'Likes' },
   { href: '/admin/avatares', label: 'Avatares' },
   { href: '/admin/configuracoes', label: 'Configurações' },
 ];
