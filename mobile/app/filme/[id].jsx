@@ -27,16 +27,32 @@ export default function FilmeDetail() {
   const [loading, setLoading] = useState(true);
   const [listItem, setListItem] = useState(null);
   const [listLoading, setListLoading] = useState(false);
+  const [likeData, setLikeData] = useState({ likes: 0, dislikes: 0, userVote: null });
+  const [likeLoading, setLikeLoading] = useState(false);
   const { getStatus, startDownload, cancelDownload, deleteDownload } = useDownloads();
   const { checkAccess } = useParental();
 
   useEffect(() => {
     api.get(`/movies/${id}`)
       .then(r => { setMovie(r.data); return checkInList(id); })
-      .then(item => setListItem(item))
+      .then(async item => {
+        setListItem(item);
+        try { const lr = await api.get(`/likes/movie/${id}`); setLikeData(lr.data); } catch {}
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [id]);
+
+  const handleVote = async (vote) => {
+    if (likeLoading) return;
+    setLikeLoading(true);
+    try {
+      await api.post(`/likes/movie/${id}`, { vote });
+      const lr = await api.get(`/likes/movie/${id}`);
+      setLikeData(lr.data);
+    } catch {}
+    setLikeLoading(false);
+  };
 
   const toggleList = async () => {
     setListLoading(true);
@@ -199,6 +215,28 @@ export default function FilmeDetail() {
           </TouchableOpacity>
         </View>
 
+        <View style={styles.likeRow}>
+          <TouchableOpacity
+            style={[styles.likeBtn, likeData.userVote === 'like' && styles.likeBtnActive]}
+            onPress={() => handleVote('like')} disabled={likeLoading}
+          >
+            <Ionicons name={likeData.userVote === 'like' ? 'thumbs-up' : 'thumbs-up-outline'} size={20} color={likeData.userVote === 'like' ? '#46d369' : '#888'} />
+            <Text style={[styles.likeCount, likeData.userVote === 'like' && { color: '#46d369' }]}>
+              {likeData.likes > 0 ? likeData.likes : 'Gostei'}
+            </Text>
+          </TouchableOpacity>
+          <View style={styles.likeSep} />
+          <TouchableOpacity
+            style={[styles.likeBtn, likeData.userVote === 'dislike' && styles.dislikeBtnActive]}
+            onPress={() => handleVote('dislike')} disabled={likeLoading}
+          >
+            <Ionicons name={likeData.userVote === 'dislike' ? 'thumbs-down' : 'thumbs-down-outline'} size={20} color={likeData.userVote === 'dislike' ? '#E50914' : '#888'} />
+            <Text style={[styles.likeCount, likeData.userVote === 'dislike' && { color: '#E50914' }]}>
+              {likeData.dislikes > 0 ? likeData.dislikes : 'Não gostei'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         {movie.genres?.length > 0 && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.genresRow}>
             {movie.genres.map(g => (
@@ -286,6 +324,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#1a1a1a', justifyContent: 'center', alignItems: 'center',
     borderWidth: 1, borderColor: '#2a2a2a',
   },
+  likeRow: {
+    flexDirection: 'row', backgroundColor: '#111', borderRadius: 10,
+    marginBottom: 16, overflow: 'hidden',
+  },
+  likeBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    paddingVertical: 13, gap: 8,
+  },
+  likeBtnActive: { backgroundColor: '#0d2a0d' },
+  dislikeBtnActive: { backgroundColor: '#2a0d0d' },
+  likeSep: { width: 1, backgroundColor: '#1e1e1e', marginVertical: 8 },
+  likeCount: { color: '#888', fontSize: 14, fontWeight: '600' },
   genresRow: { marginBottom: 14 },
   genre: {
     backgroundColor: '#1f1f1f', paddingHorizontal: 14, paddingVertical: 5,

@@ -22,6 +22,8 @@ export default function SerieDetail() {
   const [loading, setLoading] = useState(true);
   const [listItem, setListItem] = useState(null);
   const [listLoading, setListLoading] = useState(false);
+  const [likeData, setLikeData] = useState({ likes: 0, dislikes: 0, userVote: null });
+  const [likeLoading, setLikeLoading] = useState(false);
   const { getStatus, startDownload, cancelDownload, deleteDownload } = useDownloads();
   const { checkAccess } = useParental();
 
@@ -37,8 +39,20 @@ export default function SerieDetail() {
       if (eps.length > 0) setSeason(eps[0].season_number);
       const wl = Array.isArray(wRes.data) ? wRes.data : [];
       setListItem(wl.find(i => i.content_id === id) || null);
+      try { const lr = await api.get(`/likes/series/${id}`); setLikeData(lr.data); } catch {}
     }).catch(() => {}).finally(() => setLoading(false));
   }, [id]);
+
+  const handleVote = async (vote) => {
+    if (likeLoading) return;
+    setLikeLoading(true);
+    try {
+      await api.post(`/likes/series/${id}`, { vote });
+      const lr = await api.get(`/likes/series/${id}`);
+      setLikeData(lr.data);
+    } catch {}
+    setLikeLoading(false);
+  };
 
   const toggleList = async () => {
     setListLoading(true);
@@ -206,6 +220,28 @@ export default function SerieDetail() {
           </TouchableOpacity>
         </View>
 
+        <View style={styles.likeRow}>
+          <TouchableOpacity
+            style={[styles.likeBtn, likeData.userVote === 'like' && styles.likeBtnActive]}
+            onPress={() => handleVote('like')} disabled={likeLoading}
+          >
+            <Ionicons name={likeData.userVote === 'like' ? 'thumbs-up' : 'thumbs-up-outline'} size={20} color={likeData.userVote === 'like' ? '#46d369' : '#888'} />
+            <Text style={[styles.likeCount, likeData.userVote === 'like' && { color: '#46d369' }]}>
+              {likeData.likes > 0 ? likeData.likes : 'Gostei'}
+            </Text>
+          </TouchableOpacity>
+          <View style={styles.likeSep} />
+          <TouchableOpacity
+            style={[styles.likeBtn, likeData.userVote === 'dislike' && styles.dislikeBtnActive]}
+            onPress={() => handleVote('dislike')} disabled={likeLoading}
+          >
+            <Ionicons name={likeData.userVote === 'dislike' ? 'thumbs-down' : 'thumbs-down-outline'} size={20} color={likeData.userVote === 'dislike' ? '#E50914' : '#888'} />
+            <Text style={[styles.likeCount, likeData.userVote === 'dislike' && { color: '#E50914' }]}>
+              {likeData.dislikes > 0 ? likeData.dislikes : 'Não gostei'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         {serie.synopsis && (
           <Text style={styles.synopsis}>{serie.synopsis}</Text>
         )}
@@ -312,6 +348,18 @@ const styles = StyleSheet.create({
   body: { paddingHorizontal: 16, paddingBottom: 48 },
   title: { fontSize: 22, fontWeight: '800', color: '#fff', marginBottom: 8 },
   actionRow: { flexDirection: 'row', gap: 10, marginBottom: 16, alignItems: 'center' },
+  likeRow: {
+    flexDirection: 'row', backgroundColor: '#111', borderRadius: 10,
+    marginBottom: 16, overflow: 'hidden',
+  },
+  likeBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    paddingVertical: 13, gap: 8,
+  },
+  likeBtnActive: { backgroundColor: '#0d2a0d' },
+  dislikeBtnActive: { backgroundColor: '#2a0d0d' },
+  likeSep: { width: 1, backgroundColor: '#1e1e1e', marginVertical: 8 },
+  likeCount: { color: '#888', fontSize: 14, fontWeight: '600' },
   btnPlay: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     backgroundColor: '#fff', paddingVertical: 14, borderRadius: 8, gap: 8,
