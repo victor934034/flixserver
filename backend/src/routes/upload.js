@@ -270,12 +270,12 @@ router.post('/finish-large', async (req, res) => {
     await finishLargeFile(fileId, sha1Array);
     const cdnUrl = `${process.env.CDN_BASE_URL}/${filename}`;
 
-    // Notificação de email (fire-and-forget: falha não quebra o upload)
-    if (req.user?.email) {
-      const { sendUploadComplete } = require('../services/email');
-      sendUploadComplete(req.user.email, filename, cdnUrl)
-        .catch(e => console.warn('[email] upload-complete:', e.message));
-    }
+    // Push notification para todos os usuários (fire-and-forget)
+    const { sendPushToAll } = require('../services/notifications');
+    const { supabase } = require('../services/supabase');
+    const title = filename.replace(/\.[^.]+$/, '').replace(/[._]/g, ' ');
+    sendPushToAll(supabase, 'Novo conteúdo adicionado!', `"${title}" já está disponível no FlixHome.`, { screen: 'home' })
+      .catch(e => console.warn('[push] upload-complete:', e.message));
 
     res.json({ cdnUrl });
   } catch (err) {

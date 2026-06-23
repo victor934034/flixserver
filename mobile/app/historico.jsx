@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
+import { useFocusEffect } from 'expo-router';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
   Image, ActivityIndicator,
@@ -14,12 +15,15 @@ export default function HistoricoScreen() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const fetchHistory = useCallback(() => {
+    setLoading(true);
     api.get('/history?limit=50')
       .then(r => setItems(Array.isArray(r.data) ? r.data : []))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
+
+  useFocusEffect(fetchHistory);
 
   const navigate = (item) => {
     const route = item.content_type === 'movie'

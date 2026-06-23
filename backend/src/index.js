@@ -20,6 +20,7 @@ const settingsRouter = require('./routes/settings');
 const paymentsRouter = require('./routes/payments');
 const suggestionsRouter = require('./routes/suggestions');
 const streamsRouter = require('./routes/streams');
+const likesRouter = require('./routes/likes');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -35,10 +36,20 @@ app.use(express.json({ limit: '10mb' }));
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 200,
+  max: 500,
   message: { error: 'Muitas requisições, tente novamente em alguns minutos.' },
+  skip: (req) => req.path.startsWith('/auth/'),
 });
 app.use('/api/', limiter);
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 50,
+  message: { error: 'Muitas tentativas. Aguarde alguns minutos.' },
+});
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/send-otp', authLimiter);
+app.use('/api/auth/verify-otp', authLimiter);
 
 app.use('/api/movies', moviesRouter);
 app.use('/api/series', seriesRouter);
@@ -56,6 +67,7 @@ app.use('/api/settings', settingsRouter);
 app.use('/api/payments', paymentsRouter);
 app.use('/api/suggestions', suggestionsRouter);
 app.use('/api/streams', streamsRouter);
+app.use('/api/likes', likesRouter);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
