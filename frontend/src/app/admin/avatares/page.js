@@ -9,7 +9,9 @@ export default function AdminAvatares() {
   const [label, setLabel] = useState('');
   const [isKids, setIsKids] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [previewOk, setPreviewOk] = useState(false);
+  const fileInputRef = useRef(null);
 
   function load() {
     setLoading(true);
@@ -20,6 +22,24 @@ export default function AdminAvatares() {
   }
 
   useEffect(() => { load(); }, []);
+
+  async function handleFileUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await api.post('/upload/avatar', formData);
+      setUrl(res.data.cdnUrl);
+      setPreviewOk(false);
+    } catch (err) {
+      alert('Erro no upload: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }
 
   async function handleAdd(e) {
     e.preventDefault();
@@ -70,15 +90,32 @@ export default function AdminAvatares() {
       {/* ── Add form ── */}
       <form onSubmit={handleAdd} style={{ background: '#111', borderRadius: 16, padding: 24, marginBottom: 40, border: '1px solid #1e1e1e' }}>
         <h2 style={{ color: '#ccc', fontSize: 16, fontWeight: 600, marginBottom: 20 }}>Adicionar avatar</h2>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          style={{ display: 'none' }}
+          onChange={handleFileUpload}
+        />
         <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
           <div style={{ flex: 3, minWidth: 240 }}>
-            <label style={{ color: '#666', fontSize: 12, display: 'block', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>URL da imagem *</label>
-            <input
-              value={url}
-              onChange={e => { setUrl(e.target.value); setPreviewOk(false); }}
-              placeholder="https://exemplo.com/foto.jpg"
-              style={{ width: '100%', padding: '10px 14px', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, color: '#fff', fontSize: 14, boxSizing: 'border-box' }}
-            />
+            <label style={{ color: '#666', fontSize: 12, display: 'block', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>Imagem</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                value={url}
+                onChange={e => { setUrl(e.target.value); setPreviewOk(false); }}
+                placeholder="Cole a URL ou clique em Anexar"
+                style={{ flex: 1, padding: '10px 14px', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, color: '#fff', fontSize: 14, boxSizing: 'border-box' }}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                style={{ padding: '10px 16px', background: uploading ? '#1a1a1a' : '#1a2a3a', border: '1px solid #2a3a4a', borderRadius: 8, color: uploading ? '#444' : '#6ab0f5', fontSize: 13, fontWeight: 600, cursor: uploading ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}
+              >
+                {uploading ? 'Enviando...' : '📎 Anexar'}
+              </button>
+            </div>
           </div>
           <div style={{ flex: 2, minWidth: 160 }}>
             <label style={{ color: '#666', fontSize: 12, display: 'block', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>Nome / Label</label>
@@ -119,8 +156,8 @@ export default function AdminAvatares() {
 
           <button
             type="submit"
-            disabled={saving || !url.trim()}
-            style={{ marginLeft: 'auto', padding: '10px 28px', background: saving || !url.trim() ? '#2a2a2a' : '#E50914', color: saving || !url.trim() ? '#555' : '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: url.trim() ? 'pointer' : 'not-allowed' }}
+            disabled={saving || uploading || !url.trim()}
+            style={{ marginLeft: 'auto', padding: '10px 28px', background: saving || uploading || !url.trim() ? '#2a2a2a' : '#E50914', color: saving || uploading || !url.trim() ? '#555' : '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: url.trim() && !uploading ? 'pointer' : 'not-allowed' }}
           >
             {saving ? 'Adicionando...' : '+ Adicionar'}
           </button>
