@@ -139,9 +139,8 @@ router.post('/movies', async (req, res) => {
   try {
     const { data, error } = await supabase.from('movies').insert(req.body).select().single();
     if (error) throw error;
-    // Notifica todos os usuários sobre o novo filme
     if (data.is_active && data.title) {
-      sendPushToAll(supabase, '🎬 Novo filme disponível!', data.title, { type: 'movie', id: data.id }).catch(() => {});
+      sendPushToAll(supabase, `🎬 ${data.title}`, 'Novo filme adicionado!', { screen: 'filme', id: data.id }).catch(() => {});
     }
     res.status(201).json(data);
   } catch (err) {
@@ -201,7 +200,7 @@ router.post('/series', async (req, res) => {
     const { data, error } = await supabase.from('series').insert(req.body).select().single();
     if (error) throw error;
     if (data.is_active && data.title) {
-      sendPushToAll(supabase, '📺 Nova série disponível!', data.title, { type: 'series', id: data.id }).catch(() => {});
+      sendPushToAll(supabase, `📺 ${data.title}`, 'Nova série adicionada!', { screen: 'serie', id: data.id }).catch(() => {});
     }
     res.status(201).json(data);
   } catch (err) {
@@ -264,13 +263,52 @@ router.post('/episodes', async (req, res) => {
   try {
     const { data, error } = await supabase.from('episodes').insert(req.body).select().single();
     if (error) throw error;
-    // Notifica sobre novo episódio
-    if (data.title && data.series_id) {
+    if (data.is_active && data.series_id) {
       const { data: serie } = await supabase.from('series').select('title').eq('id', data.series_id).single();
       const serieTitle = serie?.title || 'Série';
-      const epLabel = data.season_number ? `T${data.season_number}E${data.episode_number} — ${data.title}` : data.title;
-      sendPushToAll(supabase, `📺 Novo episódio: ${serieTitle}`, epLabel, { type: 'episode', seriesId: data.series_id }).catch(() => {});
+      const epLabel = data.season_number
+        ? `T${data.season_number}E${String(data.episode_number).padStart(2, '0')}${data.title ? ` — ${data.title}` : ''} • Novo ep disponível`
+        : `${data.title || 'Novo episódio'} • Novo ep disponível`;
+      sendPushToAll(supabase, `📺 ${serieTitle}`, epLabel, { screen: 'serie', id: data.series_id }).catch(() => {});
     }
+    res.status(201).json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Batch de episódios — insere vários e envia UMA notificação por série
+router.post('/episodes/batch', async (req, res) => {
+  const { episodes } = req.body;
+  if (!Array.isArray(episodes) || episodes.length === 0) {
+    return res.status(400).json({ error: 'episodes deve ser array não-vazio' });
+  }
+  try {
+    const { data, error } = await supabase.from('episodes').insert(episodes).select();
+    if (error) throw error;
+
+    // Agrupa por série e envia uma push por série
+    const bySeries = {};
+    for (const ep of data || []) {
+      if (!ep.series_id) continue;
+      if (!bySeries[ep.series_id]) bySeries[ep.series_id] = [];
+      bySeries[ep.series_id].push(ep);
+    }
+    for (const [seriesId, eps] of Object.entries(bySeries)) {
+      const { data: serie } = await supabase.from('series').select('title').eq('id', seriesId).single();
+      const serieTitle = serie?.title || 'Série';
+      let body;
+      if (eps.length === 1) {
+        const ep = eps[0];
+        body = ep.season_number
+          ? `T${ep.season_number}E${String(ep.episode_number).padStart(2, '0')}${ep.title ? ` — ${ep.title}` : ''} • Novo ep disponível`
+          : `${ep.title || 'Novo episódio'} • Novo ep disponível`;
+      } else {
+        body = `${eps.length} episódios foram adicionados`;
+      }
+      sendPushToAll(supabase, `📺 ${serieTitle}`, body, { screen: 'serie', id: seriesId }).catch(() => {});
+    }
+
     res.status(201).json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });

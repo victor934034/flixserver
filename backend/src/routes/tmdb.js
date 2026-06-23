@@ -2,6 +2,7 @@ const router = require('express').Router();
 const { supabase } = require('../services/supabase');
 const { searchTMDB, getDetails, buildMovieData, buildSeriesData, extractAgeRating } = require('../services/tmdb');
 const { adminMiddleware } = require('../middleware/admin');
+const { sendPushToAll } = require('../services/notifications');
 
 router.use(adminMiddleware);
 
@@ -39,6 +40,9 @@ router.post('/import/:tmdbId', async (req, res) => {
         .single();
 
       if (error) throw error;
+      if (data.is_active && data.title) {
+        sendPushToAll(supabase, `🎬 ${data.title}`, 'Novo filme adicionado!', { screen: 'filme', id: data.id }).catch(() => {});
+      }
       return res.json({ type: 'movie', data });
     }
 
@@ -50,6 +54,9 @@ router.post('/import/:tmdbId', async (req, res) => {
       .single();
 
     if (error) throw error;
+    if (data.is_active && data.title) {
+      sendPushToAll(supabase, `📺 ${data.title}`, 'Nova série adicionada!', { screen: 'serie', id: data.id }).catch(() => {});
+    }
     res.json({ type: 'series', data });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -123,6 +130,41 @@ router.post('/batch', async (req, res) => {
   try {
     const { processFiles } = require('../../tmdb-bot');
     const report = await processFiles(files);
+
+    // Notifica sobre conteúdo adicionado
+    const added = (report || []).filter(r => r.status === 'ok' || r.status === 'created');
+    const movies = added.filter(r => r.type === 'movie');
+    const seriesList = added.filter(r => r.type === 'series');
+    const episodes = added.filter(r => r.type === 'episode');
+
+    if (movies.length === 1) {
+      sendPushToAll(supabase, `🎬 ${movies[0].title}`, 'Novo filme adicionado!', { screen: 'filme', id: movies[0].id }).catch(() => {});
+    } else if (movies.length > 1) {
+      sendPushToAll(supabase, '🎬 Novos filmes adicionados!', `${movies.length} filmes foram adicionados`).catch(() => {});
+    }
+
+    if (seriesList.length === 1) {
+      sendPushToAll(supabase, `📺 ${seriesList[0].title}`, 'Nova série adicionada!', { screen: 'serie', id: seriesList[0].id }).catch(() => {});
+    } else if (seriesList.length > 1) {
+      sendPushToAll(supabase, '📺 Novas séries adicionadas!', `${seriesList.length} séries foram adicionadas`).catch(() => {});
+    }
+
+    // Episódios: agrupa por série
+    if (episodes.length > 0) {
+      const bySeries = {};
+      for (const ep of episodes) {
+        const key = ep.seriesId || ep.series_id || 'unknown';
+        if (!bySeries[key]) bySeries[key] = { title: ep.seriesTitle || 'Série', eps: [] };
+        bySeries[key].eps.push(ep);
+      }
+      for (const { title, eps } of Object.values(bySeries)) {
+        const body = eps.length === 1
+          ? `${eps[0].episodeLabel || 'Novo episódio'} • Novo ep disponível`
+          : `${eps.length} episódios foram adicionados`;
+        sendPushToAll(supabase, `📺 ${title}`, body).catch(() => {});
+      }
+    }
+
     res.json(report);
   } catch (err) {
     res.status(500).json({ error: err.message });
