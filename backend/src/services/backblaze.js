@@ -1,5 +1,20 @@
 const axios = require('axios');
 
+// Remove acentos/cedilha e troca espacos por ponto
+function sanitizeFilename(name) {
+  const slash = name.lastIndexOf('/');
+  const dir = slash >= 0 ? name.slice(0, slash + 1) : '';
+  const base = slash >= 0 ? name.slice(slash + 1) : name;
+  const clean = base
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/\s+/g, '.')
+    .replace(/[^a-zA-Z0-9.\-_]/g, '_')
+    .replace(/\.{2,}/g, '.')
+    .replace(/^[._-]+|[._-]+$/g, '');
+  return dir + clean;
+}
+
 let authCache = null;
 let authExpiry = 0;
 let bucketNameCache = null;
@@ -32,6 +47,7 @@ async function getUploadUrl() {
 }
 
 async function uploadFile(buffer, filename, contentType = 'video/mp4') {
+  const clean = sanitizeFilename(filename);
   const uploadData = await getUploadUrl();
 
   const sha1 = require('crypto').createHash('sha1').update(buffer).digest('hex');
@@ -39,7 +55,7 @@ async function uploadFile(buffer, filename, contentType = 'video/mp4') {
   const { data } = await axios.post(uploadData.uploadUrl, buffer, {
     headers: {
       Authorization: uploadData.authorizationToken,
-      'X-Bz-File-Name': encodeURIComponent(filename),
+      'X-Bz-File-Name': encodeURIComponent(clean),
       'Content-Type': contentType,
       'Content-Length': buffer.length,
       'X-Bz-Content-Sha1': sha1,
@@ -50,8 +66,8 @@ async function uploadFile(buffer, filename, contentType = 'video/mp4') {
 
   return {
     fileId: data.fileId,
-    fileName: data.fileName,
-    cdnUrl: `${process.env.CDN_BASE_URL}/${encodeURIComponent(filename)}`,
+    fileName: clean,
+    cdnUrl: `${process.env.CDN_BASE_URL}/${encodeURIComponent(clean)}`,
   };
 }
 
@@ -90,13 +106,14 @@ async function listFiles(prefix = '', limit = 1000) {
 }
 
 async function startLargeFile(filename, contentType) {
+  const clean = sanitizeFilename(filename);
   const auth = await authorize();
   const { data } = await axios.post(
     `${auth.apiUrl}/b2api/v2/b2_start_large_file`,
-    { bucketId: process.env.BACKBLAZE_BUCKET_ID, fileName: encodeURIComponent(filename), contentType: contentType || 'video/mp4' },
+    { bucketId: process.env.BACKBLAZE_BUCKET_ID, fileName: encodeURIComponent(clean), contentType: contentType || 'video/mp4' },
     { headers: { Authorization: auth.authorizationToken } }
   );
-  return data;
+  return { ...data, sanitizedFileName: clean };
 }
 
 async function getUploadPartUrl(fileId) {
@@ -259,4 +276,4 @@ async function getDirectDownloadInfo(filename) {
 
 const fs = require('fs');
 
-module.exports = { authorize, getUploadUrl, uploadFile, uploadFileFromPath, deleteFile, listFiles, setupCors, startLargeFile, getUploadPartUrl, listParts, finishLargeFile, getDirectDownloadInfo };
+module.exports = { authorize, getUploadUrl, uploadFile, uploadFileFromPath, deleteFile, listFiles, setupCors, startLargeFile, getUploadPartUrl, listParts, finishLargeFile, getDirectDownloadInfo, sanitizeFilename };

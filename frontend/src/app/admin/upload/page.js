@@ -95,11 +95,12 @@ async function doLargeUploadXHR(item, onProgress, signal, resumeState) {
     }
     onProgress({ pct: Math.round(((totalParts - toUpload.length) / totalParts) * 88), fileId, partsDone: totalParts - toUpload.length, totalParts, speed: 0 });
   } else {
-    const { data: { fileId: newId } } = await api.post('/upload/start-large', {
+    const { data: { fileId: newId, filename: serverFilename } } = await api.post('/upload/start-large', {
       filename: file.name,
       contentType: file.type || 'video/mp4',
     });
     fileId = newId;
+    file = { ...file, _serverName: serverFilename };
     for (let i = 0; i < totalParts; i++) toUpload.push(i);
     onProgress({ pct: 0, fileId, partsDone: 0, totalParts, speed: 0 });
   }
@@ -199,7 +200,7 @@ async function doLargeUploadXHR(item, onProgress, signal, resumeState) {
   // partSha1Array vazio → backend usa list-parts para pegar SHA1s reais do B2
   const { data: { cdnUrl } } = await api.post('/upload/finish-large', {
     fileId,
-    filename: file.name,
+    filename: file._serverName || file.name,
     partSha1Array: [],
   });
   return cdnUrl;

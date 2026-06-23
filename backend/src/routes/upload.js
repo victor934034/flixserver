@@ -214,7 +214,7 @@ router.post('/start-large', async (req, res) => {
   try {
     const { startLargeFile } = require('../services/backblaze');
     const data = await startLargeFile(filename, contentType);
-    res.json({ fileId: data.fileId });
+    res.json({ fileId: data.fileId, filename: data.sanitizedFileName });
   } catch (err) {
     res.status(500).json({ error: err.response?.data?.message || err.message });
   }
