@@ -32,7 +32,7 @@ export default function SerieDetail() {
       api.get(`/series/${id}`),
       api.get(`/series/${id}/episodes`),
       api.get('/watchlist'),
-    ]).then(([sRes, eRes, wRes]) => {
+    ]).then(async ([sRes, eRes, wRes]) => {
       setSerie(sRes.data);
       const eps = Array.isArray(eRes.data) ? eRes.data : (eRes.data?.data ?? []);
       setEpisodes(eps);
