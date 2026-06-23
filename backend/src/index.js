@@ -69,6 +69,16 @@ app.use('/api/suggestions', suggestionsRouter);
 app.use('/api/streams', streamsRouter);
 app.use('/api/likes', likesRouter);
 
+app.get('/api/preset-avatars', async (req, res) => {
+  const { supabase } = require('./services/supabase');
+  const { kids } = req.query;
+  let query = supabase.from('preset_avatars').select('id, url, label, is_kids').eq('is_active', true).order('order_index').order('created_at');
+  if (kids === 'true') query = query.eq('is_kids', true);
+  const { data, error } = await query;
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data || []);
+});
+
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });

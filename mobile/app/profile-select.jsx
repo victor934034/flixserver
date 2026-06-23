@@ -4,7 +4,7 @@ import {
   Modal, TextInput, ScrollView, Alert, ActivityIndicator, Image,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import * as ImagePicker from 'expo-image-picker';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { useProfile, AVATARS, getAvatar } from '../contexts/ProfileContext';
 import api from '../lib/api';
@@ -16,14 +16,14 @@ function AvatarCircle({ avatarId, size = 72 }) {
     return (
       <Image
         source={{ uri: avatarId }}
-        style={[styles.avatarCircle, { width: size, height: size, borderRadius: size / 2 }]}
+        style={{ width: size, height: size, borderRadius: size / 2 }}
       />
     );
   }
   const av = getAvatar(avatarId);
   return (
-    <View style={[styles.avatarCircle, { width: size, height: size, borderRadius: size / 2, backgroundColor: av.color }]}>
-      <Text style={{ fontSize: size * 0.45 }}>{av.emoji}</Text>
+    <View style={[styles.emojiCircle, { width: size, height: size, borderRadius: size / 2, backgroundColor: av.color }]}>
+      <Text style={{ fontSize: size * 0.44 }}>{av.emoji}</Text>
     </View>
   );
 }
@@ -31,7 +31,14 @@ function AvatarCircle({ avatarId, size = 72 }) {
 function ProfileCard({ profile, onPress, onLongPress }) {
   return (
     <TouchableOpacity style={styles.profileCard} onPress={onPress} onLongPress={onLongPress} activeOpacity={0.75}>
-      <AvatarCircle avatarId={profile.avatar} size={80} />
+      <View style={styles.profileAvatarWrap}>
+        <AvatarCircle avatarId={profile.avatar} size={82} />
+        {profile.is_kids && (
+          <View style={styles.kidsOverlay}>
+            <Text style={{ fontSize: 12 }}>👶</Text>
+          </View>
+        )}
+      </View>
       <Text style={styles.profileName} numberOfLines={1}>{profile.name}</Text>
       {profile.is_kids && <Text style={styles.kidsTag}>Infantil</Text>}
     </TouchableOpacity>
@@ -51,7 +58,8 @@ export default function ProfileSelectScreen() {
   const [selectedAvatar, setSelectedAvatar] = useState('avatar_1');
   const [isKids, setIsKids] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [presetAvatars, setPresetAvatars] = useState([]);
+  const [avatarTab, setAvatarTab] = useState('fotos'); // 'fotos' | 'emoji'
 
   const fetchProfiles = useCallback(async () => {
     try {
@@ -77,7 +85,9 @@ export default function ProfileSelectScreen() {
     setName('');
     setSelectedAvatar('avatar_1');
     setIsKids(false);
+    setAvatarTab('fotos');
     setModalVisible(true);
+    fetchPresets(false);
   }
 
   function openEdit(profile) {
@@ -85,45 +95,30 @@ export default function ProfileSelectScreen() {
     setName(profile.name);
     setSelectedAvatar(profile.avatar);
     setIsKids(profile.is_kids);
+    setAvatarTab(isUrl(profile.avatar) ? 'fotos' : 'emoji');
     setModalVisible(true);
+    fetchPresets(profile.is_kids);
   }
 
-  async function pickPhoto() {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert('Permissão necessária', 'Permita o acesso à galeria para adicionar uma foto.');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.8,
-    });
-    if (result.canceled || !result.assets?.[0]) return;
-
-    const asset = result.assets[0];
-    setUploadingPhoto(true);
+  async function fetchPresets(kids) {
     try {
-      const form = new FormData();
-      const filename = asset.uri.split('/').pop();
-      const ext = filename.split('.').pop().toLowerCase();
-      const mime = ext === 'png' ? 'image/png' : 'image/jpeg';
-      form.append('file', { uri: asset.uri, name: filename, type: mime });
-
-      const { data } = await api.post('/upload/avatar', form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-      setSelectedAvatar(data.cdnUrl);
-    } catch (e) {
-      Alert.alert('Erro', 'Não foi possível enviar a foto. Tente novamente.');
-    } finally {
-      setUploadingPhoto(false);
+      const { data } = await api.get('/preset-avatars' + (kids ? '?kids=true' : ''));
+      setPresetAvatars(data || []);
+    } catch {
+      setPresetAvatars([]);
     }
+  }
+
+  // Ao trocar o toggle kids, recarrega os presets
+  function handleKidsToggle() {
+    const next = !isKids;
+    setIsKids(next);
+    fetchPresets(next);
+    if (next) setAvatarTab('fotos');
   }
 
   async function handleSave() {
-    if (!name.trim()) return Alert.alert('Preencha o nome do perfil');
+    if (!name.trim()) return Alert.alert('Nome obrigatório', 'Preencha o nome do perfil.');
     setSaving(true);
     try {
       if (editing) {
@@ -171,8 +166,11 @@ export default function ProfileSelectScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.logo}>FLIXHOME</Text>
-      <Text style={styles.title}>Quem está assistindo?</Text>
+      <View style={styles.header}>
+        <Text style={styles.logo}>FLIXHOME</Text>
+        <Text style={styles.title}>Quem está assistindo?</Text>
+        <Text style={styles.hint}>Segure um perfil para editar</Text>
+      </View>
 
       <FlatList
         data={profiles}
@@ -188,68 +186,138 @@ export default function ProfileSelectScreen() {
         )}
         ListFooterComponent={profiles.length < 5 ? (
           <TouchableOpacity style={styles.addCard} onPress={openCreate}>
-            <View style={styles.addIcon}><Text style={styles.addPlus}>+</Text></View>
+            <View style={styles.addIcon}>
+              <Ionicons name="add" size={32} color="#555" />
+            </View>
             <Text style={styles.profileName}>Adicionar</Text>
           </TouchableOpacity>
         ) : null}
       />
 
-      <Text style={styles.hint}>Segure um perfil para editar ou excluir</Text>
-
+      {/* ── Modal de criação/edição ── */}
       <Modal visible={modalVisible} transparent animationType="slide" onRequestClose={() => setModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
+            {/* Handle bar */}
+            <View style={styles.handle} />
+
             <Text style={styles.modalTitle}>{editing ? 'Editar perfil' : 'Novo perfil'}</Text>
 
-            {/* Preview do avatar selecionado */}
-            <View style={styles.avatarPreviewWrap}>
-              <AvatarCircle avatarId={selectedAvatar} size={80} />
-              {uploadingPhoto && (
-                <View style={styles.avatarUploading}>
-                  <ActivityIndicator color="#fff" size="small" />
-                </View>
+            {/* Preview grande do avatar */}
+            <View style={styles.previewWrap}>
+              <AvatarCircle avatarId={selectedAvatar} size={96} />
+              <View style={styles.previewEditBadge}>
+                <Ionicons name="camera" size={14} color="#fff" />
+              </View>
+            </View>
+
+            {/* Campo de nome */}
+            <TextInput
+              style={styles.nameInput}
+              placeholder="Nome do perfil"
+              placeholderTextColor="#444"
+              value={name}
+              onChangeText={setName}
+              maxLength={20}
+            />
+
+            {/* Toggle infantil */}
+            <TouchableOpacity style={styles.kidsToggle} onPress={handleKidsToggle} activeOpacity={0.7}>
+              <View style={[styles.toggleTrack, isKids && styles.toggleTrackOn]}>
+                <View style={[styles.toggleThumb, isKids && styles.toggleThumbOn]} />
+              </View>
+              <Text style={[styles.kidsLabel, isKids && { color: '#4caf50' }]}>
+                Perfil infantil {isKids ? '👶' : ''}
+              </Text>
+            </TouchableOpacity>
+
+            {/* Tabs fotos / emoji */}
+            <View style={styles.tabs}>
+              <TouchableOpacity
+                style={[styles.tab, avatarTab === 'fotos' && styles.tabActive]}
+                onPress={() => setAvatarTab('fotos')}
+              >
+                <Text style={[styles.tabText, avatarTab === 'fotos' && styles.tabTextActive]}>Fotos</Text>
+              </TouchableOpacity>
+              {!isKids && (
+                <TouchableOpacity
+                  style={[styles.tab, avatarTab === 'emoji' && styles.tabActive]}
+                  onPress={() => setAvatarTab('emoji')}
+                >
+                  <Text style={[styles.tabText, avatarTab === 'emoji' && styles.tabTextActive]}>Emojis</Text>
+                </TouchableOpacity>
               )}
             </View>
 
-            {/* Botão de foto + scroll de avatares */}
-            <View style={styles.avatarRowWrap}>
-              <TouchableOpacity style={styles.photoBtn} onPress={pickPhoto} disabled={uploadingPhoto}>
-                <Text style={styles.photoBtnText}>{uploadingPhoto ? '...' : '📷'}</Text>
-                <Text style={styles.photoBtnLabel}>Foto</Text>
-              </TouchableOpacity>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.avatarScroll}>
-                {AVATARS.map(av => (
-                  <TouchableOpacity key={av.id} onPress={() => setSelectedAvatar(av.id)}
-                    style={[styles.avatarOption, selectedAvatar === av.id && styles.avatarOptionSelected]}>
-                    <View style={[styles.avatarCircle, { width: 48, height: 48, borderRadius: 24, backgroundColor: av.color }]}>
-                      <Text style={{ fontSize: 22 }}>{av.emoji}</Text>
-                    </View>
-                  </TouchableOpacity>
-                ))}
+            {/* Conteúdo do tab */}
+            {avatarTab === 'fotos' ? (
+              presetAvatars.length === 0 ? (
+                <View style={styles.emptyAvatars}>
+                  <Ionicons name="images-outline" size={32} color="#333" />
+                  <Text style={styles.emptyAvatarsText}>
+                    {isKids ? 'Nenhuma foto infantil disponível' : 'Nenhuma foto disponível ainda'}
+                  </Text>
+                </View>
+              ) : (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.avatarRow} contentContainerStyle={{ paddingHorizontal: 4 }}>
+                  {presetAvatars.map(av => {
+                    const selected = selectedAvatar === av.url;
+                    return (
+                      <TouchableOpacity
+                        key={av.id}
+                        onPress={() => setSelectedAvatar(av.url)}
+                        style={[styles.avatarOpt, selected && styles.avatarOptSelected]}
+                        activeOpacity={0.75}
+                      >
+                        <Image source={{ uri: av.url }} style={styles.avatarOptImg} />
+                        {selected && (
+                          <View style={styles.selectedBadge}>
+                            <Ionicons name="checkmark" size={12} color="#fff" />
+                          </View>
+                        )}
+                        {av.label ? <Text style={styles.avatarOptLabel} numberOfLines={1}>{av.label}</Text> : null}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              )
+            ) : (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.avatarRow} contentContainerStyle={{ paddingHorizontal: 4 }}>
+                {AVATARS.map(av => {
+                  const selected = selectedAvatar === av.id;
+                  return (
+                    <TouchableOpacity
+                      key={av.id}
+                      onPress={() => setSelectedAvatar(av.id)}
+                      style={[styles.avatarOpt, selected && styles.avatarOptSelected]}
+                      activeOpacity={0.75}
+                    >
+                      <View style={[styles.emojiCircle, { width: 62, height: 62, borderRadius: 31, backgroundColor: av.color }]}>
+                        <Text style={{ fontSize: 28 }}>{av.emoji}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
               </ScrollView>
-            </View>
+            )}
 
-            <TextInput
-              style={styles.modalInput} placeholder="Nome do perfil" placeholderTextColor="#666"
-              value={name} onChangeText={setName} maxLength={20}
-            />
-
-            <TouchableOpacity style={styles.kidsToggle} onPress={() => setIsKids(v => !v)}>
-              <View style={[styles.kidsBox, isKids && styles.kidsBoxOn]} />
-              <Text style={styles.kidsLabel}>Perfil infantil</Text>
-            </TouchableOpacity>
-
-            <View style={styles.modalActions}>
+            {/* Botões */}
+            <View style={styles.actions}>
               {editing && (
-                <TouchableOpacity style={styles.btnDelete} onPress={() => { setModalVisible(false); handleDelete(editing); }}>
-                  <Text style={styles.btnDeleteText}>Excluir</Text>
+                <TouchableOpacity
+                  style={styles.btnDelete}
+                  onPress={() => { setModalVisible(false); handleDelete(editing); }}
+                >
+                  <Ionicons name="trash-outline" size={16} color="#ff6b6b" />
                 </TouchableOpacity>
               )}
               <TouchableOpacity style={styles.btnCancel} onPress={() => setModalVisible(false)}>
                 <Text style={styles.btnCancelText}>Cancelar</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.btnSave} onPress={handleSave} disabled={saving}>
-                {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.btnSaveText}>Salvar</Text>}
+                {saving
+                  ? <ActivityIndicator color="#fff" size="small" />
+                  : <Text style={styles.btnSaveText}>Salvar</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -260,41 +328,101 @@ export default function ProfileSelectScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0a0a0a', paddingTop: 60 },
-  logo: { fontSize: 28, fontWeight: '900', color: '#E50914', textAlign: 'center', letterSpacing: 4, marginBottom: 8 },
-  title: { fontSize: 22, fontWeight: '700', color: '#fff', textAlign: 'center', marginBottom: 32 },
-  grid: { paddingHorizontal: 16, alignItems: 'flex-start' },
-  profileCard: { width: 110, alignItems: 'center', marginBottom: 24, marginHorizontal: 4 },
-  addCard: { width: 110, alignItems: 'center', marginBottom: 24, marginHorizontal: 4 },
-  avatarCircle: { justifyContent: 'center', alignItems: 'center' },
-  addIcon: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#2a2a2a', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#444', borderStyle: 'dashed' },
-  addPlus: { fontSize: 36, color: '#888' },
-  profileName: { color: '#ccc', fontSize: 13, marginTop: 8, textAlign: 'center' },
-  kidsTag: { fontSize: 10, color: '#E50914', fontWeight: '700', marginTop: 2 },
-  hint: { color: '#444', fontSize: 12, textAlign: 'center', marginBottom: 24 },
+  container: { flex: 1, backgroundColor: '#0a0a0a' },
+  header: { paddingTop: 64, paddingBottom: 24, alignItems: 'center' },
+  logo: { fontSize: 26, fontWeight: '900', color: '#E50914', letterSpacing: 5, marginBottom: 10 },
+  title: { fontSize: 22, fontWeight: '700', color: '#fff', marginBottom: 6 },
+  hint: { color: '#333', fontSize: 12 },
+
+  grid: { paddingHorizontal: 12, paddingBottom: 32 },
+  profileCard: { width: 110, alignItems: 'center', marginBottom: 28, marginHorizontal: 4 },
+  profileAvatarWrap: { position: 'relative' },
+  kidsOverlay: {
+    position: 'absolute', bottom: 0, right: 0,
+    width: 24, height: 24, borderRadius: 12,
+    backgroundColor: '#1a1a1a', justifyContent: 'center', alignItems: 'center',
+    borderWidth: 1.5, borderColor: '#0a0a0a',
+  },
+  profileName: { color: '#ccc', fontSize: 13, marginTop: 10, textAlign: 'center', fontWeight: '500' },
+  kidsTag: { fontSize: 10, color: '#4caf50', fontWeight: '700', marginTop: 2 },
+
+  addCard: { width: 110, alignItems: 'center', marginBottom: 28, marginHorizontal: 4 },
+  addIcon: {
+    width: 82, height: 82, borderRadius: 41,
+    backgroundColor: '#111', borderWidth: 2, borderColor: '#2a2a2a',
+    borderStyle: 'dashed', justifyContent: 'center', alignItems: 'center',
+  },
+
   // Modal
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'flex-end' },
-  modalBox: { backgroundColor: '#141414', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, alignItems: 'center' },
-  modalTitle: { fontSize: 18, fontWeight: '700', color: '#fff', marginBottom: 16 },
-  avatarPreviewWrap: { position: 'relative', marginBottom: 12 },
-  avatarUploading: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 40, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
-  avatarRowWrap: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
-  photoBtn: { alignItems: 'center', marginRight: 8, padding: 6, backgroundColor: '#2a2a2a', borderRadius: 10, borderWidth: 1, borderColor: '#444', minWidth: 52 },
-  photoBtnText: { fontSize: 22 },
-  photoBtnLabel: { fontSize: 10, color: '#aaa', marginTop: 2 },
-  avatarScroll: { marginVertical: 8 },
-  avatarOption: { padding: 4, marginHorizontal: 4, borderRadius: 28, borderWidth: 2, borderColor: 'transparent' },
-  avatarOptionSelected: { borderColor: '#E50914' },
-  modalInput: { width: '100%', backgroundColor: '#1f1f1f', color: '#fff', padding: 14, borderRadius: 8, fontSize: 16, borderWidth: 1, borderColor: '#333', marginBottom: 12 },
-  kidsToggle: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', marginBottom: 20 },
-  kidsBox: { width: 22, height: 22, borderRadius: 4, borderWidth: 2, borderColor: '#555', marginRight: 10 },
-  kidsBoxOn: { backgroundColor: '#E50914', borderColor: '#E50914' },
-  kidsLabel: { color: '#ccc', fontSize: 14 },
-  modalActions: { flexDirection: 'row', gap: 10, width: '100%' },
-  btnDelete: { flex: 1, padding: 14, borderRadius: 8, borderWidth: 1, borderColor: '#ff6b6b', alignItems: 'center' },
-  btnDeleteText: { color: '#ff6b6b', fontWeight: '600' },
-  btnCancel: { flex: 1, padding: 14, borderRadius: 8, borderWidth: 1, borderColor: '#444', alignItems: 'center' },
-  btnCancelText: { color: '#888', fontWeight: '600' },
-  btnSave: { flex: 1, padding: 14, borderRadius: 8, backgroundColor: '#E50914', alignItems: 'center' },
-  btnSaveText: { color: '#fff', fontWeight: '700' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.88)', justifyContent: 'flex-end' },
+  modalBox: {
+    backgroundColor: '#141414', borderTopLeftRadius: 28, borderTopRightRadius: 28,
+    paddingTop: 12, paddingHorizontal: 24, paddingBottom: 40, alignItems: 'center',
+  },
+  handle: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#2a2a2a', marginBottom: 20 },
+  modalTitle: { fontSize: 18, fontWeight: '700', color: '#fff', marginBottom: 20 },
+
+  previewWrap: { position: 'relative', marginBottom: 20 },
+  previewEditBadge: {
+    position: 'absolute', bottom: 0, right: 0,
+    width: 28, height: 28, borderRadius: 14,
+    backgroundColor: '#E50914', justifyContent: 'center', alignItems: 'center',
+    borderWidth: 2, borderColor: '#141414',
+  },
+
+  nameInput: {
+    width: '100%', backgroundColor: '#1e1e1e', color: '#fff',
+    padding: 14, borderRadius: 12, fontSize: 16,
+    borderWidth: 1, borderColor: '#2a2a2a', marginBottom: 14,
+    textAlign: 'center', fontWeight: '600',
+  },
+
+  kidsToggle: { flexDirection: 'row', alignItems: 'center', gap: 12, alignSelf: 'flex-start', marginBottom: 20 },
+  toggleTrack: { width: 46, height: 26, borderRadius: 13, backgroundColor: '#2a2a2a', justifyContent: 'center', paddingHorizontal: 3 },
+  toggleTrackOn: { backgroundColor: '#4caf50' },
+  toggleThumb: { width: 20, height: 20, borderRadius: 10, backgroundColor: '#fff', alignSelf: 'flex-start' },
+  toggleThumbOn: { alignSelf: 'flex-end' },
+  kidsLabel: { color: '#666', fontSize: 14 },
+
+  tabs: { flexDirection: 'row', backgroundColor: '#1a1a1a', borderRadius: 10, padding: 3, marginBottom: 16, alignSelf: 'stretch' },
+  tab: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 8 },
+  tabActive: { backgroundColor: '#2a2a2a' },
+  tabText: { color: '#555', fontSize: 13, fontWeight: '600' },
+  tabTextActive: { color: '#fff' },
+
+  avatarRow: { alignSelf: 'stretch', marginBottom: 20, maxHeight: 110 },
+  avatarOpt: {
+    alignItems: 'center', marginHorizontal: 6, padding: 4,
+    borderRadius: 14, borderWidth: 2, borderColor: 'transparent',
+  },
+  avatarOptSelected: { borderColor: '#E50914' },
+  avatarOptImg: { width: 62, height: 62, borderRadius: 31 },
+  selectedBadge: {
+    position: 'absolute', top: 2, right: 2,
+    width: 18, height: 18, borderRadius: 9,
+    backgroundColor: '#E50914', justifyContent: 'center', alignItems: 'center',
+  },
+  avatarOptLabel: { color: '#666', fontSize: 10, marginTop: 4, maxWidth: 62, textAlign: 'center' },
+
+  emptyAvatars: { alignItems: 'center', gap: 8, paddingVertical: 20, marginBottom: 20 },
+  emptyAvatarsText: { color: '#333', fontSize: 13 },
+
+  emojiCircle: { justifyContent: 'center', alignItems: 'center' },
+
+  actions: { flexDirection: 'row', gap: 10, alignSelf: 'stretch' },
+  btnDelete: {
+    width: 48, height: 48, borderRadius: 12,
+    borderWidth: 1, borderColor: '#ff6b6b22',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  btnCancel: {
+    flex: 1, paddingVertical: 14, borderRadius: 12,
+    borderWidth: 1, borderColor: '#2a2a2a', alignItems: 'center',
+  },
+  btnCancelText: { color: '#666', fontWeight: '600', fontSize: 15 },
+  btnSave: {
+    flex: 2, paddingVertical: 14, borderRadius: 12,
+    backgroundColor: '#E50914', alignItems: 'center',
+  },
+  btnSaveText: { color: '#fff', fontWeight: '700', fontSize: 15 },
 });

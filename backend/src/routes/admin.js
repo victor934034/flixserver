@@ -317,7 +317,7 @@ router.get('/users', async (req, res) => {
 });
 
 router.put('/users/:id', async (req, res) => {
-  const allowed = ['plan', 'plan_expires_at', 'is_admin', 'name'];
+  const allowed = ['plan', 'plan_expires_at', 'is_admin', 'name', 'avatar_url'];
   const update = Object.fromEntries(
     Object.entries(req.body).filter(([k]) => allowed.includes(k))
   );
@@ -379,6 +379,35 @@ router.delete('/categories/:id', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// ---- PRESET AVATARS ----
+router.get('/preset-avatars', async (req, res) => {
+  const { data, error } = await supabase.from('preset_avatars').select('*').order('order_index').order('created_at');
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data || []);
+});
+
+router.post('/preset-avatars', async (req, res) => {
+  const { url, label, order_index = 0, is_kids = false } = req.body;
+  if (!url) return res.status(400).json({ error: 'url é obrigatório' });
+  const { data, error } = await supabase.from('preset_avatars').insert({ url, label: label || null, order_index, is_kids }).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json(data);
+});
+
+router.put('/preset-avatars/:id', async (req, res) => {
+  const allowed = ['url', 'label', 'is_active', 'order_index', 'is_kids'];
+  const update = Object.fromEntries(Object.entries(req.body).filter(([k]) => allowed.includes(k)));
+  const { data, error } = await supabase.from('preset_avatars').update(update).eq('id', req.params.id).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+router.delete('/preset-avatars/:id', async (req, res) => {
+  const { error } = await supabase.from('preset_avatars').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ success: true });
 });
 
 // Notificação push manual para todos os usuários
