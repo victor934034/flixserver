@@ -573,6 +573,23 @@ router.put('/users/:id/subscription', async (req, res) => {
   }
 });
 
+// ---- IPTV TEST NOTIFY ----
+router.post('/iptv/test-notify', async (req, res) => {
+  try {
+    const { notifyAdminIptvOrder } = require('../services/whatsapp');
+    await notifyAdminIptvOrder({
+      userName:  'João Teste',
+      userEmail: 'joao@teste.com',
+      planName:  '1 Mês s/ Adulto',
+      amount:    29.90,
+      paymentId: 'TEST-123456',
+    });
+    res.json({ ok: true, message: 'Notificação enviada! Verifique seu Telegram.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ---- IPTV PLANS ----
 router.get('/iptv/plans', async (req, res) => {
   try {
