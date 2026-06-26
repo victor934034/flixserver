@@ -40,3 +40,7 @@ a { color: inherit; text-decoration: none; }
 .badge-14   { background: #ff6b35; color: #fff; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: 700; }
 .badge-16   { background: #E50914; color: #fff; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: 700; }
 .badge-18   { background: #1a1a1a; color: #fff; padding: 2px 6px; border-radius: 3px; font-size: 11px; font-weight: 700; border: 1px solid #E50914; }
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
