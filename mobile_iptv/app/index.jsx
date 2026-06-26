@@ -1,141 +1,164 @@
-import { useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView,
+  View, Text, FlatList, TouchableOpacity, StyleSheet,
+  ActivityIndicator, TextInput, RefreshControl,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { parseM3U, groupChannels } from '../utils/parseM3U';
-
-// Listas públicas gratuitas para teste rápido
-const QUICK_LISTS = [
-  { label: 'IPTV-org Brasil', url: 'https://iptv-org.github.io/iptv/countries/br.m3u' },
-  { label: 'IPTV-org Português', url: 'https://iptv-org.github.io/iptv/languages/por.m3u' },
-  { label: 'IPTV-org Todos (mundial)', url: 'https://iptv-org.github.io/iptv/index.m3u' },
-];
+import { useAuth } from '../contexts/AuthContext';
+import api from '../lib/api';
+import { xcGetCategories } from '../utils/xcApi';
 
 export default function HomeScreen() {
-  const router   = useRouter();
-  const [url,    setUrl]    = useState('');
-  const [loading, setLoading] = useState(false);
+  const { user, logout } = useAuth();
+  const router = useRouter();
 
-  async function loadList(m3uUrl) {
-    const target = (m3uUrl || url).trim();
-    if (!target) { Alert.alert('Informe uma URL da lista M3U'); return; }
+  const [creds, setCreds] = useState(null);
+  const [noSub, setNoSub] = useState(false);
+  const [noSubMsg, setNoSubMsg] = useState('');
+  const [categories, setCategories] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
 
+  const load = useCallback(async () => {
     setLoading(true);
+    setNoSub(false);
     try {
-      const res  = await fetch(target, { headers: { 'User-Agent': 'IPTV-Test/1.0' } });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const text     = await res.text();
-      const channels = parseM3U(text);
-      if (!channels.length) throw new Error('Nenhum canal encontrado na lista');
-      const groups  = groupChannels(channels);
-      router.push({ pathname: '/channels', params: { data: JSON.stringify({ groups, total: channels.length, source: target }) } });
+      const { data } = await api.get('/iptv/me');
+      setCreds(data);
+      const cats = await xcGetCategories(data.server_url, data.xc_username, data.xc_password);
+      setCategories(Array.isArray(cats) ? cats : []);
     } catch (e) {
-      Alert.alert('Erro ao carregar lista', e.message);
+      setNoSub(true);
+      setNoSubMsg(e.response?.data?.error || e.message || 'Sem assinatura IPTV');
+      setCreds(null);
+      setCategories([]);
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const filtered = search.trim()
+    ? categories.filter(c => c.category_name?.toLowerCase().includes(search.toLowerCase()))
+    : categories;
+
+  if (loading) return (
+    <View style={styles.center}>
+      <ActivityIndicator size="large" color="#c91c2c" />
+      <Text style={styles.loadingText}>Conectando ao servidor IPTV…</Text>
+    </View>
+  );
+
+  if (noSub) return (
+    <View style={styles.center}>
+      <Text style={styles.noSubIcon}>📺</Text>
+      <Text style={styles.noSubTitle}>Sem acesso IPTV</Text>
+      <Text style={styles.noSubText}>{noSubMsg}</Text>
+      <Text style={styles.noSubHint}>Entre em contato para assinar o plano IPTV.</Text>
+      <TouchableOpacity style={styles.logoutBtn} onPress={logout}>
+        <Text style={styles.logoutText}>Sair da conta</Text>
+      </TouchableOpacity>
+    </View>
+  );
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-        {/* Logo */}
-        <View style={styles.logo}>
-          <Text style={styles.logoText}>📺</Text>
-          <Text style={styles.title}>IPTV Test</Text>
-          <Text style={styles.sub}>Cole a URL da sua lista M3U abaixo</Text>
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.title}>📺 IPTV</Text>
+          <Text style={styles.greeting}>Olá, {user?.name?.split(' ')[0] ?? 'usuário'}</Text>
         </View>
-
-        {/* Input */}
-        <View style={styles.inputWrap}>
-          <TextInput
-            style={styles.input}
-            value={url}
-            onChangeText={setUrl}
-            placeholder="http://provedor.com/lista.m3u"
-            placeholderTextColor="#444"
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="url"
-          />
-        </View>
-
-        <TouchableOpacity
-          style={[styles.btn, loading && styles.btnDisabled]}
-          onPress={() => loadList(url)}
-          disabled={loading}
-        >
-          {loading
-            ? <ActivityIndicator color="#fff" />
-            : <Text style={styles.btnText}>Carregar Lista</Text>
-          }
+        <TouchableOpacity style={styles.logoutBtn} onPress={logout}>
+          <Text style={styles.logoutText}>Sair</Text>
         </TouchableOpacity>
+      </View>
 
-        {/* Divider */}
-        <View style={styles.dividerRow}>
-          <View style={styles.dividerLine} />
-          <Text style={styles.dividerText}>ou teste com</Text>
-          <View style={styles.dividerLine} />
-        </View>
+      <TextInput
+        style={styles.search}
+        placeholder="Buscar categoria..."
+        placeholderTextColor="#444"
+        value={search}
+        onChangeText={setSearch}
+      />
 
-        {/* Quick lists */}
-        {QUICK_LISTS.map(item => (
+      <FlatList
+        data={filtered}
+        keyExtractor={item => String(item.category_id)}
+        refreshControl={
+          <RefreshControl refreshing={false} onRefresh={load} tintColor="#c91c2c" colors={['#c91c2c']} />
+        }
+        renderItem={({ item }) => (
           <TouchableOpacity
-            key={item.url}
-            style={styles.quickBtn}
-            onPress={() => loadList(item.url)}
-            disabled={loading}
+            style={styles.catRow}
+            activeOpacity={0.7}
+            onPress={() => router.push({
+              pathname: '/channels',
+              params: {
+                category_id: item.category_id,
+                category_name: item.category_name,
+                server_url: creds.server_url,
+                xc_username: creds.xc_username,
+                xc_password: creds.xc_password,
+              },
+            })}
           >
-            <Text style={styles.quickLabel}>{item.label}</Text>
-            <Text style={styles.quickUrl} numberOfLines={1}>{item.url}</Text>
+            <Text style={styles.catName}>{item.category_name}</Text>
+            <Text style={styles.catArrow}>›</Text>
           </TouchableOpacity>
-        ))}
-
-        <Text style={styles.hint}>
-          Você também pode colar o conteúdo de um arquivo .m3u em vez da URL.
-        </Text>
-      </ScrollView>
-    </KeyboardAvoidingView>
+        )}
+        ListEmptyComponent={
+          <Text style={styles.empty}>Nenhuma categoria encontrada</Text>
+        }
+        contentContainerStyle={filtered.length === 0 && styles.emptyContainer}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 24, paddingTop: 40 },
+  container: { flex: 1, backgroundColor: '#0a0a0a' },
 
-  logo: { alignItems: 'center', marginBottom: 40 },
-  logoText: { fontSize: 56, marginBottom: 12 },
-  title: { fontSize: 28, fontWeight: '800', color: '#fff', letterSpacing: 0.5 },
-  sub: { fontSize: 14, color: '#555', marginTop: 6 },
-
-  inputWrap: {
-    backgroundColor: '#141414', borderRadius: 12,
-    borderWidth: 1, borderColor: '#2a2a2a', marginBottom: 12,
+  center: {
+    flex: 1, backgroundColor: '#0a0a0a',
+    alignItems: 'center', justifyContent: 'center',
+    gap: 12, padding: 32,
   },
-  input: {
-    color: '#fff', fontSize: 14, padding: 16,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  loadingText: { color: '#555', marginTop: 8, fontSize: 14 },
+
+  header: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    padding: 16, paddingTop: 20,
+    borderBottomWidth: 1, borderBottomColor: '#141414',
+  },
+  title: { color: '#fff', fontSize: 22, fontWeight: '800' },
+  greeting: { color: '#555', fontSize: 13, marginTop: 2 },
+
+  logoutBtn: {
+    backgroundColor: '#1a1a1a', paddingHorizontal: 14, paddingVertical: 8,
+    borderRadius: 8, borderWidth: 1, borderColor: '#2a2a2a',
+  },
+  logoutText: { color: '#888', fontSize: 13 },
+
+  search: {
+    backgroundColor: '#141414', color: '#fff', padding: 12,
+    margin: 12, borderRadius: 10, borderWidth: 1, borderColor: '#222',
+    fontSize: 14,
   },
 
-  btn: {
-    backgroundColor: '#c91c2c', borderRadius: 12,
-    padding: 16, alignItems: 'center', marginBottom: 32,
+  catRow: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 18,
+    borderBottomWidth: 1, borderBottomColor: '#111',
   },
-  btnDisabled: { backgroundColor: '#3a0a0a' },
-  btnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  catName: { flex: 1, color: '#fff', fontSize: 15 },
+  catArrow: { color: '#333', fontSize: 22 },
 
-  dividerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
-  dividerLine: { flex: 1, height: 1, backgroundColor: '#1e1e1e' },
-  dividerText: { color: '#444', fontSize: 12, marginHorizontal: 12 },
+  emptyContainer: { flex: 1, justifyContent: 'center' },
+  empty: { color: '#333', textAlign: 'center', fontSize: 14 },
 
-  quickBtn: {
-    backgroundColor: '#111', borderRadius: 10,
-    padding: 14, marginBottom: 10,
-    borderWidth: 1, borderColor: '#1e1e1e',
-  },
-  quickLabel: { color: '#fff', fontWeight: '600', fontSize: 14, marginBottom: 4 },
-  quickUrl: { color: '#444', fontSize: 11 },
-
-  hint: { color: '#333', fontSize: 12, textAlign: 'center', marginTop: 24, lineHeight: 18 },
+  noSubIcon: { fontSize: 60, marginBottom: 4 },
+  noSubTitle: { color: '#fff', fontSize: 22, fontWeight: '700' },
+  noSubText: { color: '#c91c2c', fontSize: 14, textAlign: 'center' },
+  noSubHint: { color: '#444', fontSize: 13, textAlign: 'center', marginTop: 4 },
 });

@@ -573,4 +573,74 @@ router.put('/users/:id/subscription', async (req, res) => {
   }
 });
 
+// ---- IPTV CREDENTIALS ----
+router.get('/iptv', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('iptv_credentials')
+      .select('*, user:user_id(id, name, email)')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/iptv', async (req, res) => {
+  const { user_id, server_url, xc_username, xc_password, notes } = req.body;
+  if (!user_id || !server_url || !xc_username || !xc_password) {
+    return res.status(400).json({ error: 'user_id, server_url, xc_username e xc_password são obrigatórios' });
+  }
+  try {
+    const { data, error } = await supabase
+      .from('iptv_credentials')
+      .upsert(
+        { user_id, server_url, xc_username, xc_password, notes: notes || null, updated_at: new Date().toISOString() },
+        { onConflict: 'user_id' }
+      )
+      .select()
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.patch('/iptv/:userId/toggle', async (req, res) => {
+  try {
+    const { data: current, error: fetchErr } = await supabase
+      .from('iptv_credentials')
+      .select('active')
+      .eq('user_id', req.params.userId)
+      .single();
+    if (fetchErr || !current) return res.status(404).json({ error: 'Credencial não encontrada' });
+
+    const { data, error } = await supabase
+      .from('iptv_credentials')
+      .update({ active: !current.active, updated_at: new Date().toISOString() })
+      .eq('user_id', req.params.userId)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/iptv/:userId', async (req, res) => {
+  try {
+    const { error } = await supabase
+      .from('iptv_credentials')
+      .delete()
+      .eq('user_id', req.params.userId);
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

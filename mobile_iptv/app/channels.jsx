@@ -1,116 +1,96 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
-  Image, TextInput, SectionList,
+  Image, ActivityIndicator, TextInput,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
+import { xcGetStreams, xcStreamUrl } from '../utils/xcApi';
 
 export default function ChannelsScreen() {
-  const router  = useRouter();
-  const { data } = useLocalSearchParams();
-  const { groups, total, source } = useMemo(() => JSON.parse(data || '{}'), [data]);
+  const { category_id, category_name, server_url, xc_username, xc_password } = useLocalSearchParams();
+  const router = useRouter();
+  const navigation = useNavigation();
 
-  const [search,      setSearch]      = useState('');
-  const [activeGroup, setActiveGroup] = useState(null);
+  const [channels, setChannels] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [search, setSearch] = useState('');
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    let result = groups || [];
-    if (activeGroup) result = result.filter(g => g.group === activeGroup);
-    if (q) {
-      result = result.map(g => ({
-        ...g,
-        items: g.items.filter(ch => ch.name.toLowerCase().includes(q)),
-      })).filter(g => g.items.length > 0);
-    }
-    return result;
-  }, [groups, search, activeGroup]);
+  useEffect(() => {
+    navigation.setOptions({ title: category_name || 'Canais' });
+  }, [category_name]);
 
-  const sections = filtered.map(g => ({ title: g.group, data: g.items }));
-  const groupNames = (groups || []).map(g => g.group);
+  useEffect(() => {
+    (async () => {
+      try {
+        const data = await xcGetStreams(server_url, xc_username, xc_password, category_id);
+        setChannels(Array.isArray(data) ? data : []);
+      } catch (e) {
+        setError(e.message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
 
-  function openPlayer(channel) {
-    router.push({
-      pathname: '/player',
-      params: { url: channel.url, name: channel.name, logo: channel.logo || '' },
-    });
-  }
+  const filtered = search.trim()
+    ? channels.filter(c => c.name?.toLowerCase().includes(search.toLowerCase()))
+    : channels;
+
+  if (loading) return (
+    <View style={styles.center}>
+      <ActivityIndicator size="large" color="#c91c2c" />
+      <Text style={styles.loadingText}>Carregando canais…</Text>
+    </View>
+  );
+
+  if (error) return (
+    <View style={styles.center}>
+      <Text style={styles.errorIcon}>⚠️</Text>
+      <Text style={styles.errorText}>{error}</Text>
+    </View>
+  );
 
   return (
     <View style={styles.container}>
-      {/* Stats bar */}
-      <View style={styles.statsBar}>
-        <Text style={styles.statsText}>{total} canais · {(groups||[]).length} grupos</Text>
-        <Text style={styles.statsSource} numberOfLines={1}>{source}</Text>
-      </View>
-
-      {/* Search */}
-      <View style={styles.searchWrap}>
-        <Text style={styles.searchIcon}>🔍</Text>
-        <TextInput
-          style={styles.searchInput}
-          value={search}
-          onChangeText={setSearch}
-          placeholder="Buscar canal…"
-          placeholderTextColor="#444"
-        />
-        {!!search && (
-          <TouchableOpacity onPress={() => setSearch('')}>
-            <Text style={{ color: '#555', fontSize: 18, paddingHorizontal: 10 }}>✕</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {/* Group filter chips */}
-      <FlatList
-        horizontal
-        data={[null, ...groupNames]}
-        keyExtractor={item => item ?? '__all__'}
-        showsHorizontalScrollIndicator={false}
-        style={styles.chipRow}
-        contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={[styles.chip, activeGroup === item && styles.chipActive]}
-            onPress={() => setActiveGroup(item)}
-          >
-            <Text style={[styles.chipText, activeGroup === item && styles.chipTextActive]}>
-              {item ?? 'Todos'}
-            </Text>
-          </TouchableOpacity>
-        )}
+      <TextInput
+        style={styles.search}
+        placeholder={`Buscar em ${category_name || 'canais'}...`}
+        placeholderTextColor="#444"
+        value={search}
+        onChangeText={setSearch}
       />
 
-      {/* Channel list */}
-      <SectionList
-        sections={sections}
-        keyExtractor={(item, i) => item.url + i}
-        stickySectionHeadersEnabled
-        renderSectionHeader={({ section }) => (
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>{section.title}</Text>
-            <Text style={styles.sectionCount}>{section.data.length}</Text>
-          </View>
-        )}
+      <FlatList
+        data={filtered}
+        keyExtractor={item => String(item.stream_id)}
         renderItem={({ item }) => (
-          <TouchableOpacity style={styles.channelItem} onPress={() => openPlayer(item)} activeOpacity={0.7}>
-            {item.logo ? (
-              <Image source={{ uri: item.logo }} style={styles.logo} resizeMode="contain" />
+          <TouchableOpacity
+            style={styles.row}
+            activeOpacity={0.7}
+            onPress={() => router.push({
+              pathname: '/player',
+              params: {
+                url: xcStreamUrl(server_url, xc_username, xc_password, item.stream_id),
+                name: item.name,
+                logo: item.stream_icon || '',
+              },
+            })}
+          >
+            {item.stream_icon ? (
+              <Image source={{ uri: item.stream_icon }} style={styles.logo} resizeMode="contain" />
             ) : (
-              <View style={[styles.logo, styles.logoPlaceholder]}>
-                <Text style={{ fontSize: 20 }}>📺</Text>
+              <View style={[styles.logo, styles.logoFallback]}>
+                <Text style={styles.logoFallbackText}>📺</Text>
               </View>
             )}
-            <View style={styles.channelInfo}>
-              <Text style={styles.channelName} numberOfLines={1}>{item.name}</Text>
-              <Text style={styles.channelUrl} numberOfLines={1}>{item.url}</Text>
-            </View>
-            <Text style={styles.playIcon}>▶</Text>
+            <Text style={styles.name} numberOfLines={2}>{item.name}</Text>
+            <Text style={styles.arrow}>▶</Text>
           </TouchableOpacity>
         )}
         ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={styles.emptyText}>Nenhum canal encontrado</Text>
+          <View style={styles.center}>
+            <Text style={styles.empty}>Nenhum canal encontrado</Text>
           </View>
         }
       />
@@ -120,46 +100,27 @@ export default function ChannelsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0a0a0a' },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 60 },
+  loadingText: { color: '#555', fontSize: 14 },
+  errorIcon: { fontSize: 40 },
+  errorText: { color: '#f44336', fontSize: 14, textAlign: 'center', paddingHorizontal: 24 },
 
-  statsBar: { paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#111', borderBottomWidth: 1, borderBottomColor: '#1a1a1a' },
-  statsText: { color: '#fff', fontWeight: '700', fontSize: 13 },
-  statsSource: { color: '#444', fontSize: 11, marginTop: 2 },
+  search: {
+    backgroundColor: '#141414', color: '#fff', padding: 12,
+    margin: 12, borderRadius: 10, borderWidth: 1, borderColor: '#222',
+    fontSize: 14,
+  },
 
-  searchWrap: {
+  row: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#141414', margin: 12,
-    borderRadius: 10, borderWidth: 1, borderColor: '#2a2a2a',
-    paddingHorizontal: 12,
+    paddingHorizontal: 14, paddingVertical: 12,
+    borderBottomWidth: 1, borderBottomColor: '#111',
+    gap: 12,
   },
-  searchIcon: { fontSize: 16, marginRight: 8 },
-  searchInput: { flex: 1, color: '#fff', fontSize: 14, paddingVertical: 12 },
-
-  chipRow: { maxHeight: 44, marginBottom: 4 },
-  chip: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, backgroundColor: '#141414', borderWidth: 1, borderColor: '#2a2a2a' },
-  chipActive: { backgroundColor: '#c91c2c', borderColor: '#c91c2c' },
-  chipText: { color: '#666', fontSize: 12, fontWeight: '600' },
-  chipTextActive: { color: '#fff' },
-
-  sectionHeader: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: '#0d0d0d', paddingHorizontal: 16, paddingVertical: 8,
-    borderBottomWidth: 1, borderBottomColor: '#1a1a1a',
-  },
-  sectionTitle: { color: '#c91c2c', fontWeight: '700', fontSize: 13, textTransform: 'uppercase', letterSpacing: 0.5 },
-  sectionCount: { color: '#333', fontSize: 12 },
-
-  channelItem: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: '#0f0f0f',
-  },
-  logo: { width: 48, height: 36, borderRadius: 6, backgroundColor: '#141414', marginRight: 14 },
-  logoPlaceholder: { alignItems: 'center', justifyContent: 'center' },
-  channelInfo: { flex: 1 },
-  channelName: { color: '#fff', fontWeight: '600', fontSize: 14 },
-  channelUrl: { color: '#333', fontSize: 11, marginTop: 2 },
-  playIcon: { color: '#c91c2c', fontSize: 18, marginLeft: 8 },
-
-  empty: { padding: 40, alignItems: 'center' },
-  emptyText: { color: '#444', fontSize: 15 },
+  logo: { width: 52, height: 38, borderRadius: 4, backgroundColor: '#141414' },
+  logoFallback: { alignItems: 'center', justifyContent: 'center' },
+  logoFallbackText: { fontSize: 22 },
+  name: { flex: 1, color: '#fff', fontSize: 14 },
+  arrow: { color: '#c91c2c', fontSize: 16 },
+  empty: { color: '#333', fontSize: 14 },
 });
