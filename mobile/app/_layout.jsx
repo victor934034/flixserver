@@ -4,7 +4,6 @@ import { Stack, useRouter, useSegments, useRootNavigationState } from 'expo-rout
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { DownloadProvider } from '../contexts/DownloadContext';
@@ -14,35 +13,39 @@ import api from '../lib/api';
 
 const isExpoGo = Constants.executionEnvironment === 'storeClient';
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({ shouldShowAlert: true, shouldPlaySound: true, shouldSetBadge: false }),
-});
-
-async function setupAndroidChannel() {
-  if (Platform.OS !== 'android') return;
-  await Notifications.setNotificationChannelAsync('default', {
-    name: 'Geral',
-    importance: Notifications.AndroidImportance.MAX,
-    vibrationPattern: [0, 250, 250, 250],
-    lightColor: '#E50914',
-  });
+// Lazy: only load expo-notifications in production (never in Expo Go to avoid warning)
+function getNotifications() {
+  return require('expo-notifications');
 }
 
-async function requestNotificationPermission() {
+async function setupNotifications() {
   if (isExpoGo) return;
+  const N = getNotifications();
+  N.setNotificationHandler({
+    handleNotification: async () => ({ shouldShowAlert: true, shouldPlaySound: true, shouldSetBadge: false }),
+  });
+  if (Platform.OS === 'android') {
+    await N.setNotificationChannelAsync('default', {
+      name: 'Geral',
+      importance: N.AndroidImportance.MAX,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#E50914',
+    });
+  }
   try {
-    const { status } = await Notifications.getPermissionsAsync();
-    if (status !== 'granted') await Notifications.requestPermissionsAsync();
+    const { status } = await N.getPermissionsAsync();
+    if (status !== 'granted') await N.requestPermissionsAsync();
   } catch {}
 }
 
 async function registerPushToken() {
   if (isExpoGo) return;
   try {
-    const { status } = await Notifications.getPermissionsAsync();
+    const N = getNotifications();
+    const { status } = await N.getPermissionsAsync();
     if (status !== 'granted') return;
     const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? '77d031ac-6342-4017-8641-8376b1476a3b';
-    const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
+    const { data: token } = await N.getExpoPushTokenAsync({ projectId });
     if (token) await api.post('/auth/push-token', { token });
   } catch (e) {
     console.warn('[push] registerPushToken:', e.message);
@@ -128,8 +131,7 @@ function AppGate() {
 
 export default function RootLayout() {
   useEffect(() => {
-    setupAndroidChannel();
-    requestNotificationPermission();
+    setupNotifications();
   }, []);
 
   return (

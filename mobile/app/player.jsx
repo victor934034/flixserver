@@ -207,7 +207,7 @@ export default function PlayerScreen() {
   // Restore saved position after source replace
   useEffect(() => {
     if (status === 'readyToPlay' && savedPosSec !== null) {
-      player.seek(savedPosSec);
+      player.currentTime = savedPosSec;
       setSavedPosSec(null);
     }
   }, [status, savedPosSec]);
@@ -304,7 +304,7 @@ export default function PlayerScreen() {
       if (progressBarW.current > 0) {
         const ratio = Math.max(0, Math.min(1, (pStartX + g.dx) / progressBarW.current));
         const dur = player.duration;
-        if (dur > 0) player.seek(ratio * dur);
+        if (dur > 0) player.currentTime = ratio * dur;
       }
       setDragProgress(null);
       schedHideRef.current?.();
@@ -340,7 +340,7 @@ export default function PlayerScreen() {
   const seekBy = (sec) => { player.seekBy(sec); schedHide(); };
 
   const seekToRatio = (ratio) => {
-    if (durSec > 0) player.seek(Math.max(0, Math.min(1, ratio)) * durSec);
+    if (durSec > 0) player.currentTime = Math.max(0, Math.min(1, ratio)) * durSec;
   };
 
   const openSheet = (name) => {
@@ -576,7 +576,7 @@ export default function PlayerScreen() {
           {showSkipIntro && (
             <TouchableOpacity
               style={styles.skipIntroBtn}
-              onPress={() => player.seek(introEnd)}
+              onPress={() => player.currentTime = introEnd}
               activeOpacity={0.85}
             >
               <Text style={styles.skipIntroText}>Pular Abertura</Text>
