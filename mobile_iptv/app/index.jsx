@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
   ActivityIndicator, TextInput, RefreshControl,
@@ -10,64 +10,81 @@ import api from '../lib/api';
 
 const CACHE_KEY = 'iptv_categories_cache';
 
+// Cache em memória — síncrono, zero flash entre navegações
+let _memCache = null;
+
 export default function HomeScreen() {
   const { user, logout } = useAuth();
   const router = useRouter();
 
-  const [status,      setStatus]      = useState('loading');
+  // Se já tem cache em memória, começa direto em 'active' sem loading
+  const [status,      setStatus]      = useState(_memCache ? 'active' : 'loading');
   const [pendingInfo, setPendingInfo] = useState(null);
-  const [categories,  setCategories]  = useState([]);
+  const [categories,  setCategories]  = useState(_memCache || []);
   const [search,      setSearch]      = useState('');
   const [refreshing,  setRefreshing]  = useState(false);
-  const loaded = useRef(false);
 
   const fetchCategories = useCallback(async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true);
     try {
       const { data } = await api.get('/iptv/categories');
       const cats = Array.isArray(data) ? data : [];
+      _memCache = cats;
       setCategories(cats);
       await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(cats));
     } catch {}
     if (showRefresh) setRefreshing(false);
   }, []);
 
-  const load = useCallback(async () => {
-    // Só mostra loading na primeira vez
-    if (!loaded.current) setStatus('loading');
-
-    try {
-      const { data } = await api.get('/iptv/status');
-
-      if (data.status === 'active') {
-        // Carrega cache imediatamente
-        if (!loaded.current) {
-          const cached = await AsyncStorage.getItem(CACHE_KEY);
-          if (cached) {
-            setCategories(JSON.parse(cached));
+  useEffect(() => {
+    (async () => {
+      // Se já tem memória, verifica status em background sem mostrar loading
+      if (_memCache) {
+        try {
+          const { data } = await api.get('/iptv/status');
+          if (data.status !== 'active') {
+            _memCache = null;
+            setStatus(data.status === 'pending' ? 'pending' : 'none');
+            if (data.status === 'pending') setPendingInfo(data);
+          } else {
+            fetchCategories(false);
           }
-        }
-        setStatus('active');
-        loaded.current = true;
-        // Busca dados frescos em background (sem bloquear a UI)
-        fetchCategories(false);
-      } else if (data.status === 'pending') {
-        setPendingInfo(data);
-        setStatus('pending');
-      } else {
-        setStatus('none');
+        } catch {}
+        return;
       }
-    } catch {
-      setStatus('none');
-    }
-  }, [fetchCategories]);
 
-  useEffect(() => { load(); }, [load]);
+      // Primeira abertura: tenta AsyncStorage antes de mostrar loading
+      const cached = await AsyncStorage.getItem(CACHE_KEY);
+      if (cached) {
+        _memCache = JSON.parse(cached);
+        setCategories(_memCache);
+        setStatus('active');
+      }
+
+      // Verifica status na API
+      try {
+        const { data } = await api.get('/iptv/status');
+        if (data.status === 'active') {
+          setStatus('active');
+          fetchCategories(false);
+        } else if (data.status === 'pending') {
+          _memCache = null;
+          setPendingInfo(data);
+          setStatus('pending');
+        } else {
+          _memCache = null;
+          await AsyncStorage.removeItem(CACHE_KEY);
+          setStatus('none');
+        }
+      } catch {
+        if (!cached) setStatus('none');
+      }
+    })();
+  }, []);
 
   if (status === 'loading') return (
     <View style={styles.center}>
       <ActivityIndicator size="large" color="#c91c2c" />
-      <Text style={styles.loadingText}>Verificando assinatura…</Text>
     </View>
   );
 
@@ -94,7 +111,10 @@ export default function HomeScreen() {
         Sua assinatura está sendo ativada pelo administrador.{'\n'}
         Prazo: até 24 horas após o pagamento.
       </Text>
-      <TouchableOpacity style={styles.primaryBtn} onPress={load}>
+      <TouchableOpacity style={styles.primaryBtn} onPress={() => {
+        setStatus('loading');
+        _memCache = null;
+      }}>
         <Text style={styles.primaryBtnText}>Verificar novamente</Text>
       </TouchableOpacity>
       <TouchableOpacity style={styles.logoutBtn} onPress={logout}>
@@ -172,7 +192,6 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
     gap: 14, padding: 32,
   },
-  loadingText: { color: '#555', fontSize: 14 },
   icon: { fontSize: 52, marginBottom: 4 },
 
   noSubTitle: { color: '#fff', fontSize: 20, fontWeight: '800' },
