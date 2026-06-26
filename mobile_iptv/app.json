@@ -1,29 +1,41 @@
 {
   "expo": {
-    "name": "IPTV Test",
-    "slug": "mobile_iptv",
+    "name": "Flixhome IPTV",
+    "slug": "flixhome-iptv",
     "version": "1.0.0",
-    "orientation": "landscape",
-    "scheme": "iptv",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
-    "ios": {
-      "supportsTablet": true
-    },
+    "assetBundlePatterns": ["**/*"],
     "android": {
+      "package": "com.flixhome.iptv",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#0a0a0a"
       }
     },
-    "web": {
-      "favicon": "./assets/favicon.png"
+    "ios": {
+      "bundleIdentifier": "com.flixhome.iptv",
+      "infoPlist": {
+        "UIBackgroundModes": ["audio"]
+      }
     },
+    "scheme": "flixhome-iptv",
     "plugins": [
       "expo-router",
-      "expo-status-bar"
-    ]
+      "expo-font",
+      "expo-screen-orientation",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#0a0a0a",
+          "sounds": []
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
   }
 }

@@ -210,7 +210,7 @@ function CredsTab() {
   const [creds, setCreds]   = useState([]);
   const [users, setUsers]   = useState([]);
   const [loading, setLoading] = useState(true);
-  const [form, setForm]     = useState({ user_id: '', server_url: '', xc_username: '', xc_password: '', notes: '' });
+  const [form, setForm]     = useState({ user_id: '', xc_username: '', xc_password: '', notes: '' });
   const [saving, setSaving] = useState('');
   const [msg, setMsg]       = useState('');
   const [editing, setEditing] = useState(null);
@@ -228,13 +228,13 @@ function CredsTab() {
 
   function openEdit(cred) {
     setEditing(cred.user_id);
-    setForm({ user_id: cred.user_id, server_url: cred.server_url, xc_username: cred.xc_username, xc_password: cred.xc_password, notes: cred.notes || '' });
+    setForm({ user_id: cred.user_id, xc_username: cred.xc_username, xc_password: cred.xc_password, notes: cred.notes || '' });
     setMsg('');
   }
-  function resetForm() { setEditing(null); setForm({ user_id: '', server_url: '', xc_username: '', xc_password: '', notes: '' }); setMsg(''); }
+  function resetForm() { setEditing(null); setForm({ user_id: '', xc_username: '', xc_password: '', notes: '' }); setMsg(''); }
 
   async function save() {
-    if (!form.user_id || !form.server_url || !form.xc_username || !form.xc_password) return setMsg('Preencha todos os campos obrigatórios.');
+    if (!form.user_id || !form.xc_username || !form.xc_password) return setMsg('Preencha todos os campos obrigatórios.');
     setSaving('save');
     try {
       await api.post('/admin/iptv', form);
@@ -268,8 +268,6 @@ function CredsTab() {
           <option value="">— Selecione —</option>
           {availUsers.map(u => <option key={u.id} value={u.id}>{u.name} ({u.email})</option>)}
         </select>
-        <label style={s.label}>URL do servidor XC *</label>
-        <input style={s.input} placeholder="http://servidor:porta" value={form.server_url} onChange={e => setForm(p => ({ ...p, server_url: e.target.value }))} />
         <div style={s.row}>
           <div style={{ flex: 1 }}>
             <label style={s.label}>Usuário XC *</label>
@@ -301,7 +299,7 @@ function CredsTab() {
                     <span style={{ color: '#555', fontSize: 13 }}>{u.email}</span>
                     <span style={cred.active ? s.badgeGreen : s.badgeRed}>{cred.active ? 'ATIVO' : 'INATIVO'}</span>
                   </div>
-                  <span style={{ color: '#444', fontSize: 12 }}>🖥 {cred.server_url} · 👤 {cred.xc_username}</span>
+                  <span style={{ color: '#444', fontSize: 12 }}>👤 {cred.xc_username}</span>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button style={{ ...s.btnSmall, backgroundColor: cred.active ? '#2a1515' : '#1b3a1b', color: cred.active ? '#f44336' : '#4caf50' }} onClick={() => toggle(cred.user_id)}>{cred.active ? 'Desativar' : 'Ativar'}</button>

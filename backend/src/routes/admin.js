@@ -694,15 +694,15 @@ router.get('/iptv', async (req, res) => {
 });
 
 router.post('/iptv', async (req, res) => {
-  const { user_id, server_url, xc_username, xc_password, notes } = req.body;
-  if (!user_id || !server_url || !xc_username || !xc_password) {
-    return res.status(400).json({ error: 'user_id, server_url, xc_username e xc_password são obrigatórios' });
+  const { user_id, xc_username, xc_password, notes } = req.body;
+  if (!user_id || !xc_username || !xc_password) {
+    return res.status(400).json({ error: 'user_id, xc_username e xc_password são obrigatórios' });
   }
   try {
     const { data, error } = await supabase
       .from('iptv_credentials')
       .upsert(
-        { user_id, server_url, xc_username, xc_password, notes: notes || null, updated_at: new Date().toISOString() },
+        { user_id, xc_username, xc_password, notes: notes || null, updated_at: new Date().toISOString() },
         { onConflict: 'user_id' }
       )
       .select()

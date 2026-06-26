@@ -6,6 +6,21 @@ const { authMiddleware } = require('../middleware/auth');
 const MP_API   = 'https://api.mercadopago.com';
 const mpHeader = () => ({ Authorization: `Bearer ${process.env.MP_ACCESS_TOKEN}` });
 
+function xcServerUrl() {
+  const url = process.env.IPTV_SERVER_URL;
+  if (!url) throw new Error('IPTV_SERVER_URL não configurado no servidor');
+  return url.replace(/\/$/, '');
+}
+
+async function getUserCred(userId) {
+  const { data } = await supabase
+    .from('iptv_credentials')
+    .select('xc_username, xc_password, active')
+    .eq('user_id', userId)
+    .single();
+  return data;
+}
+
 // GET /iptv/plans — planos IPTV ativos (público)
 router.get('/plans', async (req, res) => {
   try {
@@ -22,27 +37,15 @@ router.get('/plans', async (req, res) => {
   }
 });
 
-// GET /iptv/status — estado IPTV do usuário (requer auth)
-// Retorna: { status: 'active'|'pending'|'none', ...extras }
+// GET /iptv/status — estado IPTV do usuário
 router.get('/status', authMiddleware, async (req, res) => {
   try {
-    // 1. Verifica credenciais ativas
-    const { data: cred } = await supabase
-      .from('iptv_credentials')
-      .select('server_url, xc_username, xc_password, active')
-      .eq('user_id', req.user.id)
-      .single();
+    const cred = await getUserCred(req.user.id);
 
     if (cred && cred.active) {
-      return res.json({
-        status: 'active',
-        server_url:   cred.server_url,
-        xc_username:  cred.xc_username,
-        xc_password:  cred.xc_password,
-      });
+      return res.json({ status: 'active' });
     }
 
-    // 2. Verifica pedido pendente
     const { data: order } = await supabase
       .from('iptv_orders')
       .select('plan_name, amount, created_at')
@@ -54,39 +57,69 @@ router.get('/status', authMiddleware, async (req, res) => {
 
     if (order) {
       return res.json({
-        status:    'pending',
-        plan_name: order.plan_name,
-        amount:    order.amount,
+        status:     'pending',
+        plan_name:  order.plan_name,
+        amount:     order.amount,
         ordered_at: order.created_at,
       });
     }
 
-    // 3. Sem assinatura
     res.json({ status: 'none' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// GET /iptv/me — credenciais XC (mantido para compatibilidade)
-router.get('/me', authMiddleware, async (req, res) => {
+// GET /iptv/categories — proxy para XC API
+router.get('/categories', authMiddleware, async (req, res) => {
   try {
-    const { data, error } = await supabase
-      .from('iptv_credentials')
-      .select('server_url, xc_username, xc_password, active')
-      .eq('user_id', req.user.id)
-      .single();
+    const cred = await getUserCred(req.user.id);
+    if (!cred || !cred.active) return res.status(403).json({ error: 'Sem acesso IPTV ativo' });
 
-    if (error || !data) return res.status(404).json({ error: 'Sem credenciais IPTV vinculadas' });
-    if (!data.active) return res.status(403).json({ error: 'Assinatura IPTV inativa' });
+    const server = xcServerUrl();
+    const url = `${server}/player_api.php?username=${encodeURIComponent(cred.xc_username)}&password=${encodeURIComponent(cred.xc_password)}&action=get_live_categories`;
 
-    res.json({ server_url: data.server_url, xc_username: data.xc_username, xc_password: data.xc_password });
+    const { data } = await axios.get(url, { timeout: 10000 });
+    res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// POST /iptv/subscribe — cria preferência MP para plano IPTV (requer auth)
+// GET /iptv/streams?category_id=X — proxy para XC API
+router.get('/streams', authMiddleware, async (req, res) => {
+  try {
+    const cred = await getUserCred(req.user.id);
+    if (!cred || !cred.active) return res.status(403).json({ error: 'Sem acesso IPTV ativo' });
+
+    const server = xcServerUrl();
+    let url = `${server}/player_api.php?username=${encodeURIComponent(cred.xc_username)}&password=${encodeURIComponent(cred.xc_password)}&action=get_live_streams`;
+    if (req.query.category_id) url += `&category_id=${encodeURIComponent(req.query.category_id)}`;
+
+    const { data } = await axios.get(url, { timeout: 15000 });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /iptv/stream-url/:streamId — retorna URL de reprodução
+router.get('/stream-url/:streamId', authMiddleware, async (req, res) => {
+  try {
+    const cred = await getUserCred(req.user.id);
+    if (!cred || !cred.active) return res.status(403).json({ error: 'Sem acesso IPTV ativo' });
+
+    const server = xcServerUrl();
+    const { streamId } = req.params;
+    const url = `${server}/live/${encodeURIComponent(cred.xc_username)}/${encodeURIComponent(cred.xc_password)}/${streamId}.ts`;
+
+    res.json({ url });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /iptv/subscribe — cria preferência MP para plano IPTV
 router.post('/subscribe', authMiddleware, async (req, res) => {
   const { plan_id } = req.body;
   if (!plan_id) return res.status(400).json({ error: 'plan_id obrigatório' });
@@ -104,8 +137,8 @@ router.post('/subscribe', authMiddleware, async (req, res) => {
     const userId    = req.user.id;
     const userEmail = req.user.email || '';
 
-    const backBase  = process.env.FRONTEND_URL || 'https://movies0-movie.mgf7wb.easypanel.host';
-    const notifUrl  = process.env.BACKEND_URL
+    const backBase = process.env.FRONTEND_URL || 'https://movies0-movie.mgf7wb.easypanel.host';
+    const notifUrl = process.env.BACKEND_URL
       ? `${process.env.BACKEND_URL}/api/payments/webhook/mp`
       : 'https://movies0-movie.mgf7wb.easypanel.host/api/payments/webhook/mp';
 
@@ -113,10 +146,10 @@ router.post('/subscribe', authMiddleware, async (req, res) => {
       `${MP_API}/checkout/preferences`,
       {
         items: [{
-          id:         plan.id,
-          title:      `FlixHome IPTV – ${plan.name}`,
-          quantity:   1,
-          unit_price: Number(plan.price),
+          id:          plan.id,
+          title:       `FlixHome IPTV – ${plan.name}`,
+          quantity:    1,
+          unit_price:  Number(plan.price),
           currency_id: 'BRL',
         }],
         payer:     { email: userEmail },
@@ -125,10 +158,9 @@ router.post('/subscribe', authMiddleware, async (req, res) => {
           failure: `${backBase}/iptv/falha`,
           pending: `${backBase}/iptv/pendente`,
         },
-        notification_url: notifUrl,
-        // Prefixo 'iptv|' distingue do pagamento de filmes/séries no webhook
+        notification_url:   notifUrl,
         external_reference: `iptv|${userId}|${plan.id}|${plan.price}`,
-        auto_return: 'approved',
+        auto_return:        'approved',
       },
       { headers: { ...mpHeader(), 'Content-Type': 'application/json' } }
     );

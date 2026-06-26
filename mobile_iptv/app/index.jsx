@@ -6,18 +6,15 @@ import {
 import { useRouter } from 'expo-router';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../lib/api';
-import { xcGetCategories } from '../utils/xcApi';
 
-// status: 'loading' | 'active' | 'pending' | 'none'
 export default function HomeScreen() {
   const { user, logout } = useAuth();
   const router = useRouter();
 
-  const [status,     setStatus]     = useState('loading');
-  const [creds,      setCreds]      = useState(null);
+  const [status,      setStatus]      = useState('loading');
   const [pendingInfo, setPendingInfo] = useState(null);
-  const [categories, setCategories] = useState([]);
-  const [search,     setSearch]     = useState('');
+  const [categories,  setCategories]  = useState([]);
+  const [search,      setSearch]      = useState('');
 
   const load = useCallback(async () => {
     setStatus('loading');
@@ -25,9 +22,8 @@ export default function HomeScreen() {
       const { data } = await api.get('/iptv/status');
 
       if (data.status === 'active') {
-        setCreds(data);
-        const cats = await xcGetCategories(data.server_url, data.xc_username, data.xc_password);
-        setCategories(Array.isArray(cats) ? cats : []);
+        const cats = await api.get('/iptv/categories');
+        setCategories(Array.isArray(cats.data) ? cats.data : []);
         setStatus('active');
       } else if (data.status === 'pending') {
         setPendingInfo(data);
@@ -42,7 +38,6 @@ export default function HomeScreen() {
 
   useEffect(() => { load(); }, [load]);
 
-  // ── LOADING ──
   if (status === 'loading') return (
     <View style={styles.center}>
       <ActivityIndicator size="large" color="#c91c2c" />
@@ -50,7 +45,6 @@ export default function HomeScreen() {
     </View>
   );
 
-  // ── SEM ASSINATURA → vai para tela de planos ──
   if (status === 'none') return (
     <View style={styles.center}>
       <Text style={styles.icon}>📺</Text>
@@ -65,7 +59,6 @@ export default function HomeScreen() {
     </View>
   );
 
-  // ── PENDENTE ──
   if (status === 'pending') return (
     <View style={styles.center}>
       <Text style={styles.icon}>⏳</Text>
@@ -84,7 +77,6 @@ export default function HomeScreen() {
     </View>
   );
 
-  // ── ATIVO → lista de categorias ──
   const filtered = search.trim()
     ? categories.filter(c => c.category_name?.toLowerCase().includes(search.toLowerCase()))
     : categories;
@@ -122,11 +114,8 @@ export default function HomeScreen() {
             onPress={() => router.push({
               pathname: '/channels',
               params: {
-                category_id:  item.category_id,
+                category_id:   item.category_id,
                 category_name: item.category_name,
-                server_url:   creds.server_url,
-                xc_username:  creds.xc_username,
-                xc_password:  creds.xc_password,
               },
             })}
           >
