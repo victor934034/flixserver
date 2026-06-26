@@ -24,7 +24,7 @@ const isUrl = (s) => typeof s === 'string' && s.startsWith('http');
 function ProfileAvatar({ profile, size = 88 }) {
   if (!profile) {
     return (
-      <View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2 }]}>
+      <View style={[styles.avatar, { width: size, height: size, borderRadius: Math.round(size * 0.22) }]}>
         <Text style={[styles.avatarText, { fontSize: size * 0.4 }]}>?</Text>
       </View>
     );
@@ -33,13 +33,13 @@ function ProfileAvatar({ profile, size = 88 }) {
     return (
       <Image
         source={{ uri: profile.avatar }}
-        style={[styles.avatarPhoto, { width: size, height: size, borderRadius: size / 2 }]}
+        style={[styles.avatarPhoto, { width: size, height: size, borderRadius: Math.round(size * 0.22) }]}
       />
     );
   }
   const av = getAvatar(profile.avatar);
   return (
-    <View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2, backgroundColor: av.color }]}>
+    <View style={[styles.avatar, { width: size, height: size, borderRadius: Math.round(size * 0.22), backgroundColor: av.color }]}>
       <Text style={{ fontSize: size * 0.45 }}>{av.emoji}</Text>
     </View>
   );

@@ -16,13 +16,13 @@ function AvatarCircle({ avatarId, size = 72 }) {
     return (
       <Image
         source={{ uri: avatarId }}
-        style={{ width: size, height: size, borderRadius: size / 2 }}
+        style={{ width: size, height: size, borderRadius: Math.round(size * 0.22) }}
       />
     );
   }
   const av = getAvatar(avatarId);
   return (
-    <View style={[styles.emojiCircle, { width: size, height: size, borderRadius: size / 2, backgroundColor: av.color }]}>
+    <View style={[styles.emojiCircle, { width: size, height: size, borderRadius: Math.round(size * 0.22), backgroundColor: av.color }]}>
       <Text style={{ fontSize: size * 0.44 }}>{av.emoji}</Text>
     </View>
   );
