@@ -1,7 +1,7 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
-  ActivityIndicator, TextInput, RefreshControl,
+  ActivityIndicator, TextInput, RefreshControl, AppState,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -12,14 +12,19 @@ const CACHE_KEY = 'iptv_categories_cache';
 let _memCache = null;
 
 export default function IptvScreen() {
-  const router  = useRouter();
-  const insets  = useSafeAreaInsets();
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
 
+  const [loadKey,     setLoadKey]     = useState(0);
   const [status,      setStatus]      = useState(_memCache ? 'active' : 'loading');
   const [pendingInfo, setPendingInfo] = useState(null);
   const [categories,  setCategories]  = useState(_memCache || []);
   const [search,      setSearch]      = useState('');
   const [refreshing,  setRefreshing]  = useState(false);
+
+  const appStateRef = useRef(AppState.currentState);
+  const statusRef   = useRef(status);
+  useEffect(() => { statusRef.current = status; }, [status]);
 
   const fetchCategories = useCallback(async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true);
@@ -33,13 +38,39 @@ export default function IptvScreen() {
     if (showRefresh) setRefreshing(false);
   }, []);
 
+  const checkStatus = useCallback(async () => {
+    try {
+      const { data } = await api.get('/iptv/status');
+      if (data.status === 'active' && statusRef.current !== 'active') {
+        _memCache = null;
+        setStatus('loading');
+        setCategories([]);
+        setLoadKey(k => k + 1);
+      } else if (data.status === 'pending') {
+        setPendingInfo(data);
+        if (statusRef.current !== 'pending') setStatus('pending');
+      } else if (data.status === 'none' && statusRef.current !== 'none') {
+        _memCache = null;
+        await AsyncStorage.removeItem(CACHE_KEY);
+        setStatus('none');
+      }
+    } catch {}
+  }, []);
+
+  // Main load effect — re-runs on loadKey change
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       if (_memCache) {
+        setCategories(_memCache);
+        setStatus('active');
+        // Background verify
         try {
           const { data } = await api.get('/iptv/status');
+          if (cancelled) return;
           if (data.status !== 'active') {
             _memCache = null;
+            await AsyncStorage.removeItem(CACHE_KEY);
             setStatus(data.status === 'pending' ? 'pending' : 'none');
             if (data.status === 'pending') setPendingInfo(data);
           } else {
@@ -50,14 +81,18 @@ export default function IptvScreen() {
       }
 
       const cached = await AsyncStorage.getItem(CACHE_KEY);
+      if (cancelled) return;
       if (cached) {
-        _memCache = JSON.parse(cached);
-        setCategories(_memCache);
-        setStatus('active');
+        try {
+          _memCache = JSON.parse(cached);
+          setCategories(_memCache);
+          setStatus('active');
+        } catch {}
       }
 
       try {
         const { data } = await api.get('/iptv/status');
+        if (cancelled) return;
         if (data.status === 'active') {
           setStatus('active');
           fetchCategories(false);
@@ -71,9 +106,37 @@ export default function IptvScreen() {
           setStatus('none');
         }
       } catch {
-        if (!cached) setStatus('none');
+        if (!cancelled && !cached) setStatus('none');
       }
     })();
+    return () => { cancelled = true; };
+  }, [loadKey]);
+
+  // Poll every 30s when pending — auto-activate when admin turns it on
+  useEffect(() => {
+    if (status !== 'pending' && status !== 'none') return;
+    const interval = setInterval(checkStatus, 30000);
+    return () => clearInterval(interval);
+  }, [status, checkStatus]);
+
+  // AppState listener — check on app foreground
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (appStateRef.current.match(/inactive|background/) && nextState === 'active') {
+        const s = statusRef.current;
+        if (s === 'pending' || s === 'none') checkStatus();
+      }
+      appStateRef.current = nextState;
+    });
+    return () => sub.remove();
+  }, [checkStatus]);
+
+  const reload = useCallback(() => {
+    _memCache = null;
+    AsyncStorage.removeItem(CACHE_KEY);
+    setStatus('loading');
+    setCategories([]);
+    setLoadKey(k => k + 1);
   }, []);
 
   const filtered = search.trim()
@@ -101,13 +164,13 @@ export default function IptvScreen() {
     <View style={[styles.center, { paddingTop: insets.top }]}>
       <Text style={styles.icon}>⏳</Text>
       <Text style={styles.title}>Pagamento confirmado!</Text>
-      <Text style={styles.pendingPlan}>{pendingInfo?.plan_name}</Text>
+      {pendingInfo?.plan_name && <Text style={styles.pendingPlan}>{pendingInfo.plan_name}</Text>}
       <Text style={styles.sub}>
         Sua assinatura está sendo ativada pelo administrador.{'\n'}
-        Prazo: até 24 horas após o pagamento.
+        Você será notificado assim que ativar.
       </Text>
-      <TouchableOpacity style={styles.btn} onPress={() => { setStatus('loading'); _memCache = null; }}>
-        <Text style={styles.btnText}>Verificar novamente</Text>
+      <TouchableOpacity style={styles.btn} onPress={checkStatus}>
+        <Text style={styles.btnText}>Verificar agora</Text>
       </TouchableOpacity>
     </View>
   );
@@ -146,10 +209,7 @@ export default function IptvScreen() {
             activeOpacity={0.7}
             onPress={() => router.push({
               pathname: '/iptv-channels',
-              params: {
-                category_id:   item.category_id,
-                category_name: item.category_name,
-              },
+              params: { category_id: item.category_id, category_name: item.category_name },
             })}
           >
             <Text style={styles.cardName} numberOfLines={2}>{item.category_name}</Text>

@@ -120,6 +120,8 @@ export default function PlayerScreen() {
   const durSec = player.duration || 0;
   const remainSec = Math.max(0, durSec - currentTime);
   const progress = durSec > 0 ? currentTime / durSec : 0;
+  const displayProgress = dragProgress !== null ? dragProgress : progress;
+  const displayTime = dragProgress !== null ? dragProgress * durSec : currentTime;
   const isBuffering = status === 'loading';
   const isEnded = !isPlaying && durSec > 0 && currentTime > 0 && remainSec < 1.5;
   const showSkipIntro = introEnd > 0 && currentTime < introEnd && currentTime > 2;
@@ -147,6 +149,7 @@ export default function PlayerScreen() {
   const { activeProfile } = useProfile();
   const [streamBlocked, setStreamBlocked] = useState(false);
   const [streamBlockInfo, setStreamBlockInfo] = useState(null);
+  const [dragProgress, setDragProgress] = useState(null);
   const sessionId = useRef(`${Date.now()}_${Math.random().toString(36).substr(2, 9)}`).current;
   const heartbeatRef = useRef(null);
   const brightnessRef = useRef(0.8);
@@ -288,16 +291,25 @@ export default function PlayerScreen() {
     onMoveShouldSetPanResponder: () => true,
     onPanResponderGrant: (e) => {
       pStartX = e.nativeEvent.locationX;
-      const dur = player.duration;
-      if (dur > 0 && progressBarW.current > 0)
-        player.seek(Math.max(0, Math.min(1, pStartX / progressBarW.current)) * dur);
+      if (progressBarW.current > 0) {
+        setDragProgress(Math.max(0, Math.min(1, pStartX / progressBarW.current)));
+      }
     },
     onPanResponderMove: (_, g) => {
-      const dur = player.duration;
-      if (dur > 0 && progressBarW.current > 0)
-        player.seek(Math.max(0, Math.min(1, (pStartX + g.dx) / progressBarW.current)) * dur);
+      if (progressBarW.current > 0) {
+        setDragProgress(Math.max(0, Math.min(1, (pStartX + g.dx) / progressBarW.current)));
+      }
     },
-    onPanResponderRelease: () => schedHideRef.current?.(),
+    onPanResponderRelease: (_, g) => {
+      if (progressBarW.current > 0) {
+        const ratio = Math.max(0, Math.min(1, (pStartX + g.dx) / progressBarW.current));
+        const dur = player.duration;
+        if (dur > 0) player.seek(ratio * dur);
+      }
+      setDragProgress(null);
+      schedHideRef.current?.();
+    },
+    onPanResponderTerminate: () => { setDragProgress(null); },
   })).current;
 
   // ─── Control helpers ──────────────────────────────────────────────────────
@@ -581,12 +593,12 @@ export default function PlayerScreen() {
               {...progressPan.panHandlers}
             >
               <View style={styles.progressTrack} />
-              <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
-              <View style={[styles.progressDot, { left: `${Math.min(progress * 100, 99)}%` }]} />
+              <View style={[styles.progressFill, { width: `${displayProgress * 100}%` }]} />
+              <View style={[styles.progressDot, { left: `${Math.min(displayProgress * 100, 99)}%` }]} />
             </View>
 
             <View style={styles.timeRow}>
-              <Text style={styles.timeText}>{fmtSec(currentTime)}</Text>
+              <Text style={styles.timeText}>{fmtSec(displayTime)}</Text>
               <Text style={styles.timeText}>{fmtSec(durSec)}</Text>
             </View>
 
