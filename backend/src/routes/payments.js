@@ -131,6 +131,49 @@ router.post('/webhook/mp', async (req, res) => {
     if (payment.status !== 'approved') return;
 
     const extRef = payment.external_reference || '';
+
+    // --- Pagamento de plano IPTV ---
+    if (extRef.startsWith('iptv|')) {
+      const [, userId, planId, amount] = extRef.split('|');
+      if (!userId) return;
+
+      // Busca dados do usuário e do plano
+      const [userRes, planRes] = await Promise.all([
+        supabase.from('users').select('name, email').eq('id', userId).single(),
+        supabase.from('iptv_plans').select('name').eq('id', planId).single(),
+      ]);
+
+      const userName  = userRes.data?.name  || 'Usuário';
+      const userEmail = userRes.data?.email || '';
+      const planName  = planRes.data?.name  || 'Plano IPTV';
+
+      // Registra pedido pendente
+      await supabase.from('iptv_orders').insert({
+        user_id:       userId,
+        user_name:     userName,
+        user_email:    userEmail,
+        plan_id:       planId || null,
+        plan_name:     planName,
+        amount:        Number(amount) || 0,
+        mp_payment_id: String(payment.id),
+        status:        'pending',
+      });
+
+      // Notifica admin via WhatsApp
+      const { notifyAdminIptvOrder } = require('../services/whatsapp');
+      await notifyAdminIptvOrder({
+        userName,
+        userEmail,
+        planName,
+        amount: Number(amount) || 0,
+        paymentId: String(payment.id),
+      });
+
+      console.log(`[MP IPTV] Pedido criado: user=${userId} plano=${planName} valor=${amount}`);
+      return;
+    }
+
+    // --- Pagamento de assinatura filmes/séries ---
     const [userId, planId, daysStr] = extRef.split('|');
     if (!userId || !planId) return;
 

@@ -573,6 +573,95 @@ router.put('/users/:id/subscription', async (req, res) => {
   }
 });
 
+// ---- IPTV PLANS ----
+router.get('/iptv/plans', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('iptv_plans')
+      .select('*')
+      .order('order_index')
+      .order('created_at');
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/iptv/plans', async (req, res) => {
+  const { name, description, price, duration_months, is_active, order_index } = req.body;
+  if (!name || price == null || !duration_months) {
+    return res.status(400).json({ error: 'name, price e duration_months são obrigatórios' });
+  }
+  try {
+    const { data, error } = await supabase
+      .from('iptv_plans')
+      .insert({ name, description: description || null, price: Number(price), duration_months: Number(duration_months), is_active: is_active !== false, order_index: order_index || 0 })
+      .select()
+      .single();
+    if (error) throw error;
+    res.status(201).json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/iptv/plans/:id', async (req, res) => {
+  const allowed = ['name', 'description', 'price', 'duration_months', 'is_active', 'order_index'];
+  const update = Object.fromEntries(Object.entries(req.body).filter(([k]) => allowed.includes(k)));
+  try {
+    const { data, error } = await supabase
+      .from('iptv_plans')
+      .update(update)
+      .eq('id', req.params.id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/iptv/plans/:id', async (req, res) => {
+  try {
+    const { error } = await supabase.from('iptv_plans').delete().eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---- IPTV ORDERS ----
+router.get('/iptv/orders', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('iptv_orders')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.patch('/iptv/orders/:id/activate', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('iptv_orders')
+      .update({ status: 'activated' })
+      .eq('id', req.params.id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ---- IPTV CREDENTIALS ----
 router.get('/iptv', async (req, res) => {
   try {

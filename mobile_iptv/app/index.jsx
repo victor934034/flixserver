@@ -8,59 +8,86 @@ import { useAuth } from '../contexts/AuthContext';
 import api from '../lib/api';
 import { xcGetCategories } from '../utils/xcApi';
 
+// status: 'loading' | 'active' | 'pending' | 'none'
 export default function HomeScreen() {
   const { user, logout } = useAuth();
   const router = useRouter();
 
-  const [creds, setCreds] = useState(null);
-  const [noSub, setNoSub] = useState(false);
-  const [noSubMsg, setNoSubMsg] = useState('');
+  const [status,     setStatus]     = useState('loading');
+  const [creds,      setCreds]      = useState(null);
+  const [pendingInfo, setPendingInfo] = useState(null);
   const [categories, setCategories] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
+  const [search,     setSearch]     = useState('');
 
   const load = useCallback(async () => {
-    setLoading(true);
-    setNoSub(false);
+    setStatus('loading');
     try {
-      const { data } = await api.get('/iptv/me');
-      setCreds(data);
-      const cats = await xcGetCategories(data.server_url, data.xc_username, data.xc_password);
-      setCategories(Array.isArray(cats) ? cats : []);
-    } catch (e) {
-      setNoSub(true);
-      setNoSubMsg(e.response?.data?.error || e.message || 'Sem assinatura IPTV');
-      setCreds(null);
-      setCategories([]);
-    } finally {
-      setLoading(false);
+      const { data } = await api.get('/iptv/status');
+
+      if (data.status === 'active') {
+        setCreds(data);
+        const cats = await xcGetCategories(data.server_url, data.xc_username, data.xc_password);
+        setCategories(Array.isArray(cats) ? cats : []);
+        setStatus('active');
+      } else if (data.status === 'pending') {
+        setPendingInfo(data);
+        setStatus('pending');
+      } else {
+        setStatus('none');
+      }
+    } catch {
+      setStatus('none');
     }
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
-  const filtered = search.trim()
-    ? categories.filter(c => c.category_name?.toLowerCase().includes(search.toLowerCase()))
-    : categories;
-
-  if (loading) return (
+  // ── LOADING ──
+  if (status === 'loading') return (
     <View style={styles.center}>
       <ActivityIndicator size="large" color="#c91c2c" />
-      <Text style={styles.loadingText}>Conectando ao servidor IPTV…</Text>
+      <Text style={styles.loadingText}>Verificando assinatura…</Text>
     </View>
   );
 
-  if (noSub) return (
+  // ── SEM ASSINATURA → vai para tela de planos ──
+  if (status === 'none') return (
     <View style={styles.center}>
-      <Text style={styles.noSubIcon}>📺</Text>
-      <Text style={styles.noSubTitle}>Sem acesso IPTV</Text>
-      <Text style={styles.noSubText}>{noSubMsg}</Text>
-      <Text style={styles.noSubHint}>Entre em contato para assinar o plano IPTV.</Text>
+      <Text style={styles.icon}>📺</Text>
+      <Text style={styles.noSubTitle}>FlixHome IPTV</Text>
+      <Text style={styles.noSubText}>Você ainda não tem uma assinatura IPTV ativa.</Text>
+      <TouchableOpacity style={styles.primaryBtn} onPress={() => router.push('/plans')}>
+        <Text style={styles.primaryBtnText}>Ver planos disponíveis</Text>
+      </TouchableOpacity>
       <TouchableOpacity style={styles.logoutBtn} onPress={logout}>
         <Text style={styles.logoutText}>Sair da conta</Text>
       </TouchableOpacity>
     </View>
   );
+
+  // ── PENDENTE ──
+  if (status === 'pending') return (
+    <View style={styles.center}>
+      <Text style={styles.icon}>⏳</Text>
+      <Text style={styles.pendingTitle}>Pagamento confirmado!</Text>
+      <Text style={styles.pendingPlan}>{pendingInfo?.plan_name}</Text>
+      <Text style={styles.pendingText}>
+        Sua assinatura está sendo ativada pelo administrador.{'\n'}
+        Prazo: até 24 horas após o pagamento.
+      </Text>
+      <TouchableOpacity style={styles.primaryBtn} onPress={load}>
+        <Text style={styles.primaryBtnText}>Verificar novamente</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.logoutBtn} onPress={logout}>
+        <Text style={styles.logoutText}>Sair da conta</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  // ── ATIVO → lista de categorias ──
+  const filtered = search.trim()
+    ? categories.filter(c => c.category_name?.toLowerCase().includes(search.toLowerCase()))
+    : categories;
 
   return (
     <View style={styles.container}>
@@ -95,11 +122,11 @@ export default function HomeScreen() {
             onPress={() => router.push({
               pathname: '/channels',
               params: {
-                category_id: item.category_id,
+                category_id:  item.category_id,
                 category_name: item.category_name,
-                server_url: creds.server_url,
-                xc_username: creds.xc_username,
-                xc_password: creds.xc_password,
+                server_url:   creds.server_url,
+                xc_username:  creds.xc_username,
+                xc_password:  creds.xc_password,
               },
             })}
           >
@@ -110,7 +137,6 @@ export default function HomeScreen() {
         ListEmptyComponent={
           <Text style={styles.empty}>Nenhuma categoria encontrada</Text>
         }
-        contentContainerStyle={filtered.length === 0 && styles.emptyContainer}
       />
     </View>
   );
@@ -122,17 +148,23 @@ const styles = StyleSheet.create({
   center: {
     flex: 1, backgroundColor: '#0a0a0a',
     alignItems: 'center', justifyContent: 'center',
-    gap: 12, padding: 32,
+    gap: 14, padding: 32,
   },
-  loadingText: { color: '#555', marginTop: 8, fontSize: 14 },
+  loadingText: { color: '#555', fontSize: 14 },
+  icon: { fontSize: 60, marginBottom: 4 },
 
-  header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    padding: 16, paddingTop: 20,
-    borderBottomWidth: 1, borderBottomColor: '#141414',
+  noSubTitle: { color: '#fff', fontSize: 22, fontWeight: '800' },
+  noSubText:  { color: '#555', fontSize: 14, textAlign: 'center', lineHeight: 22 },
+
+  pendingTitle: { color: '#fff', fontSize: 22, fontWeight: '800' },
+  pendingPlan:  { color: '#c91c2c', fontWeight: '700', fontSize: 15 },
+  pendingText:  { color: '#555', fontSize: 14, textAlign: 'center', lineHeight: 22 },
+
+  primaryBtn: {
+    backgroundColor: '#c91c2c', paddingHorizontal: 28, paddingVertical: 14,
+    borderRadius: 10, marginTop: 4,
   },
-  title: { color: '#fff', fontSize: 22, fontWeight: '800' },
-  greeting: { color: '#555', fontSize: 13, marginTop: 2 },
+  primaryBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
 
   logoutBtn: {
     backgroundColor: '#1a1a1a', paddingHorizontal: 14, paddingVertical: 8,
@@ -140,25 +172,25 @@ const styles = StyleSheet.create({
   },
   logoutText: { color: '#888', fontSize: 13 },
 
+  header: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    padding: 16, paddingTop: 20,
+    borderBottomWidth: 1, borderBottomColor: '#141414',
+  },
+  title:    { color: '#fff', fontSize: 22, fontWeight: '800' },
+  greeting: { color: '#555', fontSize: 13, marginTop: 2 },
+
   search: {
     backgroundColor: '#141414', color: '#fff', padding: 12,
     margin: 12, borderRadius: 10, borderWidth: 1, borderColor: '#222',
     fontSize: 14,
   },
-
   catRow: {
     flexDirection: 'row', alignItems: 'center',
     paddingHorizontal: 16, paddingVertical: 18,
     borderBottomWidth: 1, borderBottomColor: '#111',
   },
-  catName: { flex: 1, color: '#fff', fontSize: 15 },
+  catName:  { flex: 1, color: '#fff', fontSize: 15 },
   catArrow: { color: '#333', fontSize: 22 },
-
-  emptyContainer: { flex: 1, justifyContent: 'center' },
-  empty: { color: '#333', textAlign: 'center', fontSize: 14 },
-
-  noSubIcon: { fontSize: 60, marginBottom: 4 },
-  noSubTitle: { color: '#fff', fontSize: 22, fontWeight: '700' },
-  noSubText: { color: '#c91c2c', fontSize: 14, textAlign: 'center' },
-  noSubHint: { color: '#444', fontSize: 13, textAlign: 'center', marginTop: 4 },
+  empty:    { color: '#333', textAlign: 'center', fontSize: 14, marginTop: 40 },
 });
