@@ -152,6 +152,7 @@ export default function PlayerScreen() {
   const brightnessRef = useRef(0.8);
   const ctrlOpacity = useRef(new Animated.Value(1)).current;
   const hideTimerRef = useRef(null);
+  const schedHideRef = useRef(null);
   const sleepRef = useRef(null);
   const nextCountRef = useRef(null);
   const timerEndRef = useRef(null);
@@ -287,9 +288,16 @@ export default function PlayerScreen() {
     onMoveShouldSetPanResponder: () => true,
     onPanResponderGrant: (e) => {
       pStartX = e.nativeEvent.locationX;
-      seekToRatio(pStartX / progressBarW.current);
+      const dur = player.duration;
+      if (dur > 0 && progressBarW.current > 0)
+        player.seek(Math.max(0, Math.min(1, pStartX / progressBarW.current)) * dur);
     },
-    onPanResponderMove: (_, g) => { seekToRatio((pStartX + g.dx) / progressBarW.current); },
+    onPanResponderMove: (_, g) => {
+      const dur = player.duration;
+      if (dur > 0 && progressBarW.current > 0)
+        player.seek(Math.max(0, Math.min(1, (pStartX + g.dx) / progressBarW.current)) * dur);
+    },
+    onPanResponderRelease: () => schedHideRef.current?.(),
   })).current;
 
   // ─── Control helpers ──────────────────────────────────────────────────────
@@ -297,6 +305,7 @@ export default function PlayerScreen() {
     clearTimeout(hideTimerRef.current);
     hideTimerRef.current = setTimeout(() => { if (!sheet) fadeCtrl(false); }, 4000);
   }, [sheet]);
+  schedHideRef.current = schedHide;
 
   const fadeCtrl = (show) => {
     setCtrlVisible(show);
