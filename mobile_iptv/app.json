@@ -3,7 +3,7 @@
     "name": "Flixhome IPTV",
     "slug": "flixhome-iptv",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "landscape",
     "userInterfaceStyle": "dark",
     "icon": "./assets/icon.png",
     "assetBundlePatterns": ["**/*"],
