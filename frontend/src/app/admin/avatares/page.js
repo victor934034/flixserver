@@ -128,7 +128,7 @@ export default function AdminAvatares() {
           </div>
 
           {/* Preview */}
-          <div style={{ width: 72, height: 72, borderRadius: 36, overflow: 'hidden', border: previewOk ? '2px solid #E50914' : '2px dashed #333', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#1a1a1a' }}>
+          <div style={{ width: 72, height: 72, borderRadius: 16, overflow: 'hidden', border: previewOk ? '2px solid #E50914' : '2px dashed #333', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#1a1a1a' }}>
             {url.trim() ? (
               <img
                 src={url}
@@ -210,7 +210,7 @@ function Section({ title, avatars, accent = '#E50914', onToggleActive, onToggleK
               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
               width: 130,
             }}>
-              <div style={{ width: 80, height: 80, borderRadius: 40, overflow: 'hidden', border: `2px solid ${accent}33` }}>
+              <div style={{ width: 80, height: 80, borderRadius: 18, overflow: 'hidden', border: `2px solid ${accent}33` }}>
                 <img src={av.url} alt={av.label || ''} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
               </div>
               {av.label && <span style={{ color: '#aaa', fontSize: 12, textAlign: 'center', fontWeight: 500 }}>{av.label}</span>}
