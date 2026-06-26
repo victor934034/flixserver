@@ -22,9 +22,14 @@ export default function HomeScreen() {
       const { data } = await api.get('/iptv/status');
 
       if (data.status === 'active') {
-        const cats = await api.get('/iptv/categories');
-        setCategories(Array.isArray(cats.data) ? cats.data : []);
         setStatus('active');
+        // busca categorias separado — erro aqui não volta para "none"
+        try {
+          const cats = await api.get('/iptv/categories');
+          setCategories(Array.isArray(cats.data) ? cats.data : []);
+        } catch {
+          setCategories([]);
+        }
       } else if (data.status === 'pending') {
         setPendingInfo(data);
         setStatus('pending');
