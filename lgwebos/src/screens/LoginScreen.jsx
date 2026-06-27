@@ -1,21 +1,29 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext.jsx';
+import { useAuth }  from '../contexts/AuthContext.jsx';
 import { authAPI } from '../api/index.js';
-import FocusItem from '../components/FocusItem.jsx';
 import { KEY, useKeyDown } from '../hooks/useNav.js';
 
-// ── Login por código via celular ──────────────────────────────────────────────
+function Spinner({ size = 36 }) {
+  return (
+    <div style={{
+      width: size, height: size,
+      border: '4px solid rgba(255,255,255,0.08)', borderTopColor: '#E50914',
+      borderRadius: '50%', animation: 'spin 0.8s linear infinite',
+    }} />
+  );
+}
+
 function CodeLogin({ onSuccess }) {
   const { loginWithToken } = useAuth();
   const [code,   setCode]   = useState('');
-  const [status, setStatus] = useState('loading');
+  const [status, setStatus] = useState('loading'); // 'loading'|'waiting'|'error'
   const codeRef     = useRef('');
-  const intervalRef = useRef(null);
+  const pollRef     = useRef(null);
 
   useEffect(() => {
     requestCode();
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
 
   async function requestCode() {
@@ -32,13 +40,13 @@ function CodeLogin({ onSuccess }) {
   }
 
   function startPolling() {
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    intervalRef.current = setInterval(async () => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
       if (!codeRef.current) return;
       try {
         const { data } = await authAPI.tvCodeStatus(codeRef.current);
         if (data.status === 'authorized') {
-          clearInterval(intervalRef.current);
+          clearInterval(pollRef.current);
           loginWithToken(data.token, data.user);
           onSuccess();
         }
@@ -50,26 +58,20 @@ function CodeLogin({ onSuccess }) {
 
   if (status === 'loading') return (
     <div style={{ textAlign: 'center', padding: '40px 0' }}>
-      <div style={{
-        width: 36, height: 36,
-        border: '4px solid rgba(255,255,255,0.08)', borderTopColor: '#E50914',
-        borderRadius: '50%', animation: 'spin 0.8s linear infinite',
-        margin: '0 auto 16px',
-      }} />
-      <span style={{ color: 'rgba(255,255,255,0.35)', fontSize: 14 }}>Gerando código…</span>
+      <Spinner />
+      <div style={{ color: 'rgba(255,255,255,0.35)', fontSize: 14, marginTop: 16 }}>Gerando código…</div>
     </div>
   );
 
   if (status === 'error') return (
     <div style={{ textAlign: 'center', paddingTop: 24 }}>
-      <p style={{ color: '#ff7070', fontSize: 14, marginBottom: 20 }}>Erro ao gerar código</p>
-      <FocusItem
-        onEnterPress={requestCode} onClick={requestCode}
-        style={{ display: 'inline-block', padding: '12px 28px', background: '#E50914', borderRadius: 8, border: '2px solid transparent', cursor: 'none' }}
-        focusedStyle={{ borderColor: '#fff' }}
+      <p style={{ color: '#ff7070', fontSize: 14, marginBottom: 20 }}>Erro ao gerar código. Verifique a conexão.</p>
+      <button
+        onClick={requestCode}
+        style={{ padding: '12px 28px', background: '#E50914', border: 'none', borderRadius: 8, color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}
       >
-        <span style={{ color: '#fff', fontSize: 14, fontWeight: 700 }}>Tentar novamente</span>
-      </FocusItem>
+        Tentar novamente
+      </button>
     </div>
   );
 
@@ -92,54 +94,44 @@ function CodeLogin({ onSuccess }) {
         {[
           'Abra o app FlixHome no celular',
           'Vá em Perfil → Autorizar TV',
-          `Digite o código: ${formatted}`,
-        ].map((txt, i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 10 }}>
-            <div style={{
-              width: 22, height: 22, borderRadius: 11, background: '#E50914', flexShrink: 0,
-              display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 1,
-            }}>
-              <span style={{ color: '#fff', fontSize: 12, fontWeight: 800 }}>{i + 1}</span>
+          'Digite o código: ' + formatted,
+        ].map(function(txt, i) {
+          return (
+            <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 10 }}>
+              <div style={{ width: 22, height: 22, borderRadius: 11, background: '#E50914', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 1 }}>
+                <span style={{ color: '#fff', fontSize: 12, fontWeight: 800 }}>{i + 1}</span>
+              </div>
+              <span style={{ color: '#bbb', fontSize: 14, lineHeight: 1.5 }}>{txt}</span>
             </div>
-            <span style={{ color: '#bbb', fontSize: 14, lineHeight: 1.5 }}>{txt}</span>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, color: 'rgba(255,255,255,0.35)', fontSize: 13, marginBottom: 18 }}>
-        <div style={{
-          width: 18, height: 18,
-          border: '3px solid rgba(255,255,255,0.08)', borderTopColor: '#E50914',
-          borderRadius: '50%', animation: 'spin 0.8s linear infinite',
-        }} />
+        <Spinner size={18} />
         Aguardando aprovação no celular…
       </div>
 
       <div style={{ textAlign: 'center' }}>
-        <FocusItem
-          onEnterPress={requestCode} onClick={requestCode}
+        <button
+          onClick={requestCode}
           style={{
             display: 'inline-block', padding: '10px 22px',
-            background: 'rgba(255,255,255,0.06)',
-            border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8,
-            cursor: 'none',
+            background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)',
+            borderRadius: 8, cursor: 'pointer', color: 'rgba(255,255,255,0.5)', fontSize: 13,
           }}
-          focusedStyle={{ borderColor: '#fff' }}
         >
-          <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13 }}>Gerar novo código</span>
-        </FocusItem>
+          Gerar novo código
+        </button>
       </div>
     </div>
   );
 }
 
-// ── LoginScreen ───────────────────────────────────────────────────────────────
 export default function LoginScreen() {
   const navigate = useNavigate();
 
-  function onSuccess() { navigate('/', { replace: true }); }
-
-  useKeyDown(e => {
+  useKeyDown(function(e) {
     if (e.keyCode === KEY.BACK || e.keyCode === KEY.BACKSPACE) e.preventDefault();
   }, []);
 
@@ -149,8 +141,6 @@ export default function LoginScreen() {
       background: 'radial-gradient(ellipse at 30% 40%, #1a0606 0%, #141414 60%)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
     }}>
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-
       <div style={{
         width: 520, padding: '44px 48px',
         background: 'rgba(18,18,18,0.97)',
@@ -163,12 +153,10 @@ export default function LoginScreen() {
           </div>
           <span style={{ fontSize: 20, fontWeight: 900, color: '#fff', letterSpacing: 2 }}>FLIXHOME</span>
         </div>
-
         <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.45)', marginBottom: 28 }}>
           Entre no app FlixHome no celular e use o código abaixo para acessar a TV.
         </p>
-
-        <CodeLogin onSuccess={onSuccess} />
+        <CodeLogin onSuccess={function() { navigate('/', { replace: true }); }} />
       </div>
     </div>
   );

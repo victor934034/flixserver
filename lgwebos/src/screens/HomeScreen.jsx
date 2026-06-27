@@ -48,31 +48,29 @@ function PortraitCard({ item, focused, hovered, onClick, onEnter, onLeave }) {
       onMouseLeave={onLeave}
       style={{
         flexShrink: 0, width: PORT_W, cursor: 'pointer',
-        transform: isHighlit ? 'scale(1.04) translateY(-3px)' : 'scale(1) translateY(0)',
-        transition: 'transform 0.18s cubic-bezier(.4,0,.2,1)',
         position: 'relative',
-        willChange: isHighlit ? 'transform' : 'auto',
       }}
     >
       {/* Image */}
-      <div style={{ width: PORT_W, height: PORT_H, position: 'relative' }}>
+      <div style={{
+        width: PORT_W, height: PORT_H, position: 'relative',
+        borderRadius: 8, background: '#0a0a0a', overflow: 'hidden',
+        boxShadow: isHighlit ? 'inset 0 0 0 3px #fff' : 'none',
+        transition: 'box-shadow 0.18s',
+      }}>
         {img ? (
           <img
             src={img}
             alt=""
             style={{
-              width: '100%', height: '100%', objectFit: 'cover',
-              display: 'block', borderRadius: 8,
-              outline: isHighlit ? '3px solid #fff' : 'none',
-              outlineOffset: '0px',
+              width: '100%', height: '100%', objectFit: 'contain',
+              display: 'block',
             }}
           />
         ) : (
           <div style={{
-            width: '100%', height: '100%', borderRadius: 8,
+            width: '100%', height: '100%',
             background: 'linear-gradient(135deg,#1c1c1c,#2a2a2a)',
-            boxShadow: isHighlit ? '0 0 0 3px #fff' : 'none',
-            transition: 'box-shadow 0.2s ease',
           }} />
         )}
 
@@ -91,7 +89,7 @@ function PortraitCard({ item, focused, hovered, onClick, onEnter, onLeave }) {
         {/* Play overlay on focus/hover */}
         {isHighlit && (
           <div style={{
-            position: 'absolute', inset: 0, borderRadius: 8,
+            position: 'absolute', inset: 0,
             background: 'rgba(0,0,0,0.28)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
@@ -142,28 +140,28 @@ function LandscapeCard({ item, focused, hovered, onClick, onEnter, onLeave }) {
       onMouseLeave={onLeave}
       style={{
         flexShrink: 0, width: LAND_W, cursor: 'pointer',
-        transform: isHighlit ? 'scale(1.03) translateY(-2px)' : 'scale(1)',
-        transition: 'transform 0.18s cubic-bezier(.4,0,.2,1)',
-        willChange: isHighlit ? 'transform' : 'auto',
+        position: 'relative',
       }}
     >
-      <div style={{ width: LAND_W, height: LAND_H, position: 'relative' }}>
+      <div style={{
+        width: LAND_W, height: LAND_H, position: 'relative',
+        borderRadius: 8, overflow: 'hidden',
+        boxShadow: isHighlit ? 'inset 0 0 0 3px #fff' : 'none',
+        transition: 'box-shadow 0.18s',
+      }}>
         {img ? (
           <img
             src={img}
             alt=""
             style={{
               width: '100%', height: '100%', objectFit: 'cover',
-              display: 'block', borderRadius: 8,
-              outline: isHighlit ? '3px solid #fff' : 'none',
-              outlineOffset: '0px',
+              display: 'block',
             }}
           />
         ) : (
           <div style={{
-            width: '100%', height: '100%', borderRadius: 8,
+            width: '100%', height: '100%',
             background: 'linear-gradient(135deg,#1c1c1c,#2a2a2a)',
-            boxShadow: isHighlit ? '0 0 0 3px #fff' : 'none',
           }} />
         )}
 
@@ -471,42 +469,88 @@ function SearchPanel({ onSelect, onBack }) {
   const [query,   setQuery]   = useState('');
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [resFoc,  setResFoc]  = useState(0);
-  const inputRef = useRef(null);
-  const debRef   = useRef(null);
-  const stRef    = useRef({ results: [], resFoc: 0 });
-  stRef.current  = { results, resFoc };
+  const [resFoc,  setResFoc]  = useState(-1); // -1 = input focused
+  const inputRef  = useRef(null);
+  const gridRef   = useRef(null);
+  const itemRefs  = useRef([]);
+  const debRef    = useRef(null);
+  const stRef     = useRef({ results: [], resFoc: -1 });
+  stRef.current   = { results, resFoc };
+
+  const COLS = 6;
 
   useEffect(() => { setTimeout(() => inputRef.current && inputRef.current.focus(), 80); }, []);
 
   useEffect(() => {
     clearTimeout(debRef.current);
-    if (!query.trim()) { setResults([]); return; }
+    if (!query.trim()) { setResults([]); setResFoc(-1); return; }
     debRef.current = setTimeout(async () => {
       setLoading(true);
       try {
         const [mv, sr] = await Promise.all([
-          moviesAPI.search(query).then(r => (r.data || []).slice(0, 20)),
-          seriesAPI.search(query).then(r => (r.data || []).slice(0, 20)),
+          moviesAPI.search(query).then(r => (r.data || []).slice(0, 18)),
+          seriesAPI.search(query).then(r => (r.data || []).slice(0, 18)),
         ]);
         setResults([...mv, ...sr]);
-        setResFoc(0);
+        setResFoc(-1);
       } catch { setResults([]); }
       finally { setLoading(false); }
     }, 400);
   }, [query]);
 
+  // Keep focused result scrolled into view
+  useEffect(() => {
+    if (resFoc < 0) return;
+    const el = itemRefs.current[resFoc];
+    if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [resFoc]);
+
   useKeyDown(e => {
     const { results, resFoc } = stRef.current;
-    if (e.keyCode === KEY.BACK)      { e.preventDefault(); onBack(); return; }
-    if (e.keyCode === KEY.BACKSPACE && document.activeElement !== inputRef.current) { e.preventDefault(); onBack(); return; }
-    if (document.activeElement === inputRef.current) return;
-    if (e.keyCode === KEY.UP)    { e.preventDefault(); setResFoc(f => Math.max(0, f - 1)); }
-    if (e.keyCode === KEY.DOWN)  { e.preventDefault(); setResFoc(f => Math.min(results.length - 1, f + 1)); }
-    if (e.keyCode === KEY.ENTER) { e.preventDefault(); if (results[resFoc]) onSelect(results[resFoc]); }
-  });
+    const k = e.keyCode;
+    if (k === KEY.BACK) { e.preventDefault(); onBack(); return; }
 
-  const COLS = 4;
+    const inputFocused = document.activeElement === inputRef.current;
+
+    if (k === KEY.BACKSPACE && !inputFocused) { e.preventDefault(); onBack(); return; }
+
+    if (inputFocused) {
+      if (k === KEY.DOWN && results.length > 0) {
+        e.preventDefault();
+        inputRef.current.blur();
+        setResFoc(0);
+      }
+      return;
+    }
+
+    // Grid navigation (COLS columns)
+    if (k === KEY.UP) {
+      e.preventDefault();
+      if (resFoc < COLS) {
+        // first row → go back to input
+        setResFoc(-1);
+        inputRef.current && inputRef.current.focus();
+      } else {
+        setResFoc(f => Math.max(0, f - COLS));
+      }
+    }
+    if (k === KEY.DOWN) {
+      e.preventDefault();
+      setResFoc(f => Math.min(results.length - 1, f + COLS));
+    }
+    if (k === KEY.LEFT) {
+      e.preventDefault();
+      if (resFoc % COLS > 0) setResFoc(f => f - 1);
+    }
+    if (k === KEY.RIGHT) {
+      e.preventDefault();
+      if (resFoc % COLS < COLS - 1 && resFoc + 1 < results.length) setResFoc(f => f + 1);
+    }
+    if (k === KEY.ENTER) {
+      e.preventDefault();
+      if (results[resFoc]) onSelect(results[resFoc]);
+    }
+  });
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', padding: '0 ' + PAD_L + 'px', overflow: 'hidden' }}>
@@ -538,7 +582,7 @@ function SearchPanel({ onSelect, onBack }) {
       </div>
 
       {/* Results grid */}
-      <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 32 }}>
+      <div ref={gridRef} style={{ flex: 1, overflowY: 'auto', paddingBottom: 32 }}>
         {loading && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 0', color: 'rgba(255,255,255,0.4)', fontSize: 14 }}>
             <div style={{ width: 18, height: 18, border: '2px solid rgba(255,255,255,0.15)', borderTopColor: ACCENT, borderRadius: '50%', animation: 'spin 0.8s linear infinite', flexShrink: 0 }} />
@@ -558,21 +602,23 @@ function SearchPanel({ onSelect, onBack }) {
               return (
                 <div
                   key={item.id}
+                  ref={el => { itemRefs.current[i] = el; }}
                   onClick={() => onSelect(item)}
                   style={{
                     display: 'flex', flexDirection: 'column',
                     borderRadius: 10, overflow: 'hidden', cursor: 'pointer',
-                    background: isFoc ? 'rgba(255,255,255,0.07)' : 'rgba(255,255,255,0.03)',
+                    background: isFoc ? 'rgba(255,255,255,0.09)' : 'transparent',
                     border: '2px solid ' + (isFoc ? '#fff' : 'rgba(255,255,255,0.06)'),
-                    transform: isFoc ? 'scale(1.03)' : 'scale(1)',
-                    transition: 'all 0.15s',
+                    transition: 'background 0.15s, border-color 0.15s',
                   }}
                 >
                   {img && (
-                    <img src={img} alt="" style={{ width: '100%', aspectRatio: '16/10', objectFit: 'cover', display: 'block' }} />
+                    <div style={{ width: '100%', aspectRatio: '2/3', background: '#0a0a0a', overflow: 'hidden' }}>
+                      <img src={img} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
+                    </div>
                   )}
                   <div style={{ padding: '10px 12px 12px' }}>
-                    <div style={{ fontSize: 14, fontWeight: isFoc ? 700 : 500, color: isFoc ? '#fff' : 'rgba(255,255,255,0.7)', marginBottom: 4 }}>
+                    <div style={{ fontSize: 13, fontWeight: isFoc ? 700 : 500, color: isFoc ? '#fff' : 'rgba(255,255,255,0.7)', marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {item.title || item.name}
                     </div>
                     <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>

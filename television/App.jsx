@@ -10,6 +10,8 @@ import LoginScreen from './src/screens/LoginScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import DetailScreen from './src/screens/DetailScreen';
 import PlayerScreen from './src/screens/PlayerScreen';
+import SubscriptionScreen from './src/screens/SubscriptionScreen';
+import IptvScreen from './src/screens/IptvScreen';
 
 const Stack = createStackNavigator();
 
@@ -36,6 +38,8 @@ function AppNavigator() {
         <Stack.Screen name="Home" component={HomeScreen} />
         <Stack.Screen name="Detail" component={DetailScreen} />
         <Stack.Screen name="Player" component={PlayerScreen} />
+        <Stack.Screen name="Subscription" component={SubscriptionScreen} />
+        <Stack.Screen name="Iptv" component={IptvScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

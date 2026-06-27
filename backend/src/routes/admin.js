@@ -758,4 +758,65 @@ router.delete('/iptv/:userId', async (req, res) => {
   }
 });
 
+// ---- SEED PLANS ----
+router.post('/seed-plans', async (req, res) => {
+  const STREAMING_PLANS = [
+    { id: 'monthly_2',   name: 'Mensal · 2 Telas',     price: 9.90,   promo_price: 2.90, duration_days: 30,  active: true,  badge: null,           description: 'Acesso por 1 mês',        highlight: false, max_streams: 2 },
+    { id: 'monthly_3',   name: 'Mensal · 3 Telas',     price: 14.90,  promo_price: 4.90, duration_days: 30,  active: true,  badge: null,           description: 'Acesso por 1 mês',        highlight: false, max_streams: 3 },
+    { id: 'monthly_5',   name: 'Mensal · 5 Telas',     price: 19.90,  promo_price: 6.90, duration_days: 30,  active: true,  badge: null,           description: 'Acesso por 1 mês',        highlight: false, max_streams: 5 },
+    { id: 'quarterly_2', name: 'Trimestral · 2 Telas', price: 19.90,  promo_price: null, duration_days: 90,  active: true,  badge: null,           description: 'Equivale a R$ 6,63/mês',  highlight: false, max_streams: 2 },
+    { id: 'quarterly_3', name: 'Trimestral · 3 Telas', price: 29.90,  promo_price: null, duration_days: 90,  active: true,  badge: 'MAIS POPULAR', description: 'Equivale a R$ 9,97/mês',  highlight: true,  max_streams: 3 },
+    { id: 'quarterly_5', name: 'Trimestral · 5 Telas', price: 44.90,  promo_price: null, duration_days: 90,  active: true,  badge: null,           description: 'Equivale a R$ 14,97/mês', highlight: false, max_streams: 5 },
+    { id: 'yearly_2',    name: 'Anual · 2 Telas',      price: 49.90,  promo_price: null, duration_days: 365, active: true,  badge: null,           description: 'Equivale a R$ 4,16/mês',  highlight: false, max_streams: 2 },
+    { id: 'yearly_3',    name: 'Anual · 3 Telas',      price: 79.90,  promo_price: null, duration_days: 365, active: true,  badge: null,           description: 'Equivale a R$ 6,66/mês',  highlight: false, max_streams: 3 },
+    { id: 'yearly_5',    name: 'Anual · 5 Telas',      price: 119.90, promo_price: null, duration_days: 365, active: true,  badge: 'MELHOR CUSTO', description: 'Equivale a R$ 9,99/mês',  highlight: true,  max_streams: 5 },
+  ];
+
+  const IPTV_PRICES = [
+    { name: '1 MÊS S/ADULTO',    price: 24.90,  duration_months: 1  },
+    { name: '1 MÊS C/ADULTO',    price: 27.90,  duration_months: 1  },
+    { name: '3 MESES S/ADULTO',  price: 54.90,  duration_months: 3  },
+    { name: '3 MESES C/ADULTO',  price: 57.90,  duration_months: 3  },
+    { name: '6 MESES S/ADULTO',  price: 109.90, duration_months: 6  },
+    { name: '6 MESES C/ADULTO',  price: 114.90, duration_months: 6  },
+    { name: '12 MESES S/ADULTO', price: 159.90, duration_months: 12 },
+    { name: '12 MESES C/ADULTO', price: 164.90, duration_months: 12 },
+  ];
+
+  try {
+    // 1. Save streaming plans to system_settings
+    const { error: settingsErr } = await supabase
+      .from('system_settings')
+      .upsert({ key: 'plans_config', value: JSON.stringify(STREAMING_PLANS) }, { onConflict: 'key' });
+    if (settingsErr) throw new Error('streaming plans: ' + settingsErr.message);
+
+    // 2. Update each IPTV plan price by name (skip if table doesn't exist)
+    let iptvUpdated = 0;
+    let iptvSkipped = false;
+    for (const p of IPTV_PRICES) {
+      const { error } = await supabase
+        .from('iptv_plans')
+        .update({ price: p.price, duration_months: p.duration_months })
+        .ilike('name', p.name);
+      if (error) {
+        if (error.message?.includes('does not exist') || error.code === '42P01') {
+          iptvSkipped = true;
+          break;
+        }
+        console.warn('[seed-plans] iptv update error:', error.message);
+      } else {
+        iptvUpdated++;
+      }
+    }
+
+    res.json({
+      ok: true,
+      streaming_plans: STREAMING_PLANS.length,
+      iptv_plans_updated: iptvSkipped ? 'skipped (table missing)' : iptvUpdated,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

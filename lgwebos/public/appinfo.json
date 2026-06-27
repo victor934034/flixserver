@@ -1,14 +1,12 @@
 {
-  "id": "com.flixhome.lgtv",
+  "id": "com.flixhome.app",
   "version": "1.0.0",
   "vendor": "FlixHome",
   "type": "web",
   "main": "index.html",
   "title": "FlixHome",
-  "iconColor": "#141414",
-  "largeIcon": "icon_large.png",
   "icon": "icon.png",
-  "bgColor": "#141414",
-  "allowVideoCapture": false,
-  "handlesRelaunch": false
+  "largeIcon": "icon.png",
+  "transparent": false,
+  "disableBackHistoryAPI": true
 }

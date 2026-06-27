@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
-    "bot": "node tmdb-bot.js"
+    "bot": "node tmdb-bot.js",
+    "seed:plans": "node scripts/seed-plans.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.43.0",

@@ -22,9 +22,7 @@ function CategoryCard({ item, focused, onClick }) {
         border: '2px solid ' + (focused ? '#fff' : 'rgba(255,255,255,0.07)'),
         display: 'flex', alignItems: 'center', padding: '0 22px', gap: 14,
         cursor: 'pointer',
-        transform: focused ? 'scale(1.04)' : 'scale(1)',
-        transition: 'all 0.18s cubic-bezier(.4,0,.2,1)',
-        boxShadow: focused ? '0 8px 32px rgba(0,0,0,0.5)' : 'none',
+        transition: 'background 0.15s, border-color 0.15s',
       }}
     >
       <div style={{ flex: 1, overflow: 'hidden' }}>
@@ -32,7 +30,7 @@ function CategoryCard({ item, focused, onClick }) {
           fontSize: 14, fontWeight: focused ? 800 : 600,
           color: focused ? '#0a0a0a' : '#fff',
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          transition: 'color 0.18s',
+          transition: 'color 0.15s',
         }}>
           {item.category_name}
         </div>
@@ -50,6 +48,7 @@ export default function IptvScreen() {
   const [categories, setCategories] = useState(_catCache || []);
   const [focusRow,   setFocusRow]   = useState(0);
   const [focusCol,   setFocusCol]   = useState(0);
+  const [btnFocus,   setBtnFocus]   = useState(0); // for none/pending: 0=back, 1=plans
   const scrollRef = useRef(null);
   const st = useRef({});
 
@@ -74,7 +73,7 @@ export default function IptvScreen() {
 
   const rows = Math.ceil(categories.length / COLS);
 
-  st.current = { focusRow, focusCol, rows, categories };
+  st.current = { focusRow, focusCol, rows, categories, status, btnFocus };
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -88,10 +87,26 @@ export default function IptvScreen() {
   }, [focusRow]);
 
   useKeyDown(e => {
-    const { focusRow, focusCol, rows, categories } = st.current;
+    const { focusRow, focusCol, rows, categories, status, btnFocus } = st.current;
     const k = e.keyCode;
 
+    // Always handle BACK
     if (k === KEY.BACK || k === KEY.BACKSPACE) { e.preventDefault(); navigate('/'); return; }
+
+    // None/pending state — navigate between action buttons
+    if (status === 'none' || status === 'pending') {
+      const maxBtn = status === 'none' ? 1 : 0;
+      if (k === KEY.LEFT)  { e.preventDefault(); setBtnFocus(b => Math.max(0, b - 1)); }
+      if (k === KEY.RIGHT) { e.preventDefault(); setBtnFocus(b => Math.min(maxBtn, b + 1)); }
+      if (k === KEY.ENTER) {
+        e.preventDefault();
+        if (btnFocus === 0) navigate('/');
+        else navigate('/subscription?tab=iptv');
+      }
+      return;
+    }
+
+    if (status !== 'active') return;
 
     const colsInRow = (r) => Math.min(COLS, categories.length - r * COLS);
 
@@ -134,24 +149,86 @@ export default function IptvScreen() {
   );
 
   if (status === 'none') return (
-    <div style={centerStyle}>
-      <div style={{ fontSize: 68, marginBottom: 16 }}>📺</div>
-      <div style={{ fontSize: 28, fontWeight: 900, color: '#fff', marginBottom: 12 }}>FlixHome IPTV</div>
-      <div style={{ fontSize: 16, color: 'rgba(255,255,255,0.4)', textAlign: 'center', maxWidth: 520, lineHeight: 1.6, marginBottom: 32 }}>
-        Você ainda não tem uma assinatura IPTV ativa.<br/>Entre em contato com o administrador.
+    <div style={{ width: '100%', height: '100%', background: '#0a0a0a', display: 'flex', flexDirection: 'column' }}>
+      {/* Header */}
+      <div style={{ padding: '32px ' + PAD + 'px 20px', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 16, borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+        <svg width="28" height="28" viewBox="0 0 24 24" fill={ACCENT}><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12zM9 10l6 3.5L9 17z"/></svg>
+        <div style={{ fontSize: 22, fontWeight: 900, color: '#fff' }}>FlixHome IPTV</div>
       </div>
-      <button onClick={() => navigate('/')} style={backBtnStyle}>← Voltar</button>
+
+      {/* Body */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 0 }}>
+        <div style={{ fontSize: 72, marginBottom: 24 }}>📺</div>
+        <div style={{ fontSize: 32, fontWeight: 900, color: '#fff', marginBottom: 12 }}>Acesso IPTV não ativo</div>
+        <div style={{ fontSize: 16, color: 'rgba(255,255,255,0.4)', textAlign: 'center', maxWidth: 560, lineHeight: 1.7, marginBottom: 48 }}>
+          Você ainda não tem um plano que inclui IPTV.<br/>
+          Adicione IPTV ao seu plano ou escolha um plano completo.
+        </div>
+
+        <div style={{ display: 'flex', gap: 16 }}>
+          <div
+            onClick={() => navigate('/')}
+            style={{
+              padding: '15px 36px', borderRadius: 10, cursor: 'pointer',
+              background: btnFocus === 0 ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.06)',
+              border: '2px solid ' + (btnFocus === 0 ? '#fff' : 'rgba(255,255,255,0.12)'),
+              color: '#fff', fontSize: 16, fontWeight: 700,
+              transition: 'background 0.15s, border-color 0.15s',
+            }}
+          >
+            ← Voltar
+          </div>
+          <div
+            onClick={() => navigate('/subscription?tab=iptv')}
+            style={{
+              padding: '15px 36px', borderRadius: 10, cursor: 'pointer',
+              background: btnFocus === 1 ? '#fff' : ACCENT,
+              border: '2px solid ' + (btnFocus === 1 ? '#fff' : ACCENT),
+              color: btnFocus === 1 ? '#0a0a0a' : '#fff',
+              fontSize: 16, fontWeight: 700,
+              transition: 'background 0.15s, border-color 0.15s, color 0.15s',
+            }}
+          >
+            📺 Ver planos com IPTV
+          </div>
+        </div>
+
+        <div style={{ marginTop: 24, fontSize: 13, color: 'rgba(255,255,255,0.2)' }}>
+          Use ← → para navegar • ENTER para confirmar
+        </div>
+      </div>
     </div>
   );
 
   if (status === 'pending') return (
-    <div style={centerStyle}>
-      <div style={{ fontSize: 68, marginBottom: 16 }}>⏳</div>
-      <div style={{ fontSize: 28, fontWeight: 900, color: '#fff', marginBottom: 12 }}>Ativando IPTV…</div>
-      <div style={{ fontSize: 16, color: 'rgba(255,255,255,0.4)', textAlign: 'center', maxWidth: 520, lineHeight: 1.6, marginBottom: 32 }}>
-        Sua assinatura está sendo ativada pelo administrador.<br/>Volte em breve.
+    <div style={{ width: '100%', height: '100%', background: '#0a0a0a', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ padding: '32px ' + PAD + 'px 20px', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 16, borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+        <svg width="28" height="28" viewBox="0 0 24 24" fill={ACCENT}><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12zM9 10l6 3.5L9 17z"/></svg>
+        <div style={{ fontSize: 22, fontWeight: 900, color: '#fff' }}>FlixHome IPTV</div>
       </div>
-      <button onClick={() => navigate('/')} style={backBtnStyle}>← Voltar</button>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 0 }}>
+        <div style={{ fontSize: 72, marginBottom: 24 }}>⏳</div>
+        <div style={{ fontSize: 32, fontWeight: 900, color: '#fff', marginBottom: 12 }}>Ativação em andamento</div>
+        <div style={{ fontSize: 16, color: 'rgba(255,255,255,0.4)', textAlign: 'center', maxWidth: 560, lineHeight: 1.7, marginBottom: 48 }}>
+          Seu plano IPTV foi recebido e está sendo ativado pelo administrador.<br/>
+          Você será notificado assim que estiver pronto.
+        </div>
+        <div
+          onClick={() => navigate('/')}
+          style={{
+            padding: '15px 36px', borderRadius: 10, cursor: 'pointer',
+            background: 'rgba(255,255,255,0.08)',
+            border: '2px solid ' + (btnFocus === 0 ? '#fff' : 'rgba(255,255,255,0.15)'),
+            color: '#fff', fontSize: 16, fontWeight: 700,
+            transition: 'border-color 0.15s',
+          }}
+        >
+          ← Voltar ao início
+        </div>
+        <div style={{ marginTop: 24, fontSize: 13, color: 'rgba(255,255,255,0.2)' }}>
+          ENTER para voltar
+        </div>
+      </div>
     </div>
   );
 
@@ -161,6 +238,7 @@ export default function IptvScreen() {
       <div style={{ padding: '32px ' + PAD + 'px 20px', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 24 }}>
         <button
           onClick={() => navigate('/')}
+          tabIndex={-1}
           style={{
             display: 'inline-flex', alignItems: 'center', gap: 8,
             background: 'rgba(255,255,255,0.07)', border: '1.5px solid rgba(255,255,255,0.10)',
@@ -200,7 +278,6 @@ export default function IptvScreen() {
                     onClick={() => navigate('/iptv-channels', { state: { category_id: cat.category_id, category_name: cat.category_name } })}
                   />
                 ))}
-                {/* Fill empty slots so row has COLS items */}
                 {rowCats.length < COLS && Array.from({ length: COLS - rowCats.length }, (_, fi) => (
                   <div key={'empty-' + fi} style={{ flex: 1, height: CARD_H }} />
                 ))}
@@ -220,8 +297,4 @@ const centerStyle = {
 const spinStyle = {
   width: 48, height: 48, border: '3px solid rgba(255,255,255,0.06)',
   borderTopColor: ACCENT, borderRadius: '50%', animation: 'spin 0.85s linear infinite',
-};
-const backBtnStyle = {
-  background: ACCENT, border: 'none', borderRadius: 10, padding: '14px 36px',
-  color: '#fff', fontSize: 16, fontWeight: 700, cursor: 'pointer',
 };

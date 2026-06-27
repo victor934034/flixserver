@@ -27,6 +27,7 @@ const NAV = [
   { icon: 'tv-outline',    label: 'Séries',      idx: 2 },
   { icon: 'heart-outline', label: 'Minha Lista', idx: 3 },
   { icon: 'search',        label: 'Buscar',      idx: 4 },
+  { icon: 'radio-outline', label: 'IPTV',        idx: 5 },
 ];
 
 // ─── TVPressable ──────────────────────────────────────────────────────────────
@@ -445,6 +446,17 @@ export default function HomeScreen({ navigation }) {
   const onSidebarBlur = useCallback(() => { blurTimer.current = setTimeout(() => setSidebarOpen(false), 160); }, []);
   const onContentFoc  = useCallback(() => { clearTimeout(blurTimer.current); setSidebarOpen(false); }, []);
 
+  // Subscription gate
+  useEffect(() => {
+    api.get('/settings').then(({ data }) => {
+      if (data.subscription_enabled !== 'true') return;
+      api.get('/auth/me').then(({ data: me }) => {
+        const valid = me?.plan && me?.plan_expires_at && new Date(me.plan_expires_at).getTime() > Date.now();
+        if (!valid) navigation.replace('Subscription');
+      }).catch(() => {});
+    }).catch(() => {});
+  }, []);
+
   useEffect(() => {
     loadData();
     return () => { clearTimeout(blurTimer.current); clearTimeout(searchTimer.current); };
@@ -517,6 +529,7 @@ export default function HomeScreen({ navigation }) {
   const isSeries = item => item?.total_seasons !== undefined || item?.content_type === 'series';
 
   function selectNav(idx) {
+    if (idx === 5) { navigation.navigate('Iptv'); return; }
     setActiveNav(idx);
     if (idx !== 4) setSearchQuery('');
     setSidebarOpen(false);
