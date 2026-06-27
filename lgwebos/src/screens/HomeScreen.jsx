@@ -48,9 +48,10 @@ function PortraitCard({ item, focused, hovered, onClick, onEnter, onLeave }) {
       onMouseLeave={onLeave}
       style={{
         flexShrink: 0, width: PORT_W, cursor: 'pointer',
-        transform: isHighlit ? 'scale(1.06) translateY(-4px)' : 'scale(1) translateY(0)',
-        transition: 'transform 0.2s cubic-bezier(.4,0,.2,1)',
+        transform: isHighlit ? 'scale(1.04) translateY(-3px)' : 'scale(1) translateY(0)',
+        transition: 'transform 0.18s cubic-bezier(.4,0,.2,1)',
         position: 'relative',
+        willChange: isHighlit ? 'transform' : 'auto',
       }}
     >
       {/* Image */}
@@ -62,10 +63,8 @@ function PortraitCard({ item, focused, hovered, onClick, onEnter, onLeave }) {
             style={{
               width: '100%', height: '100%', objectFit: 'cover',
               display: 'block', borderRadius: 8,
-              boxShadow: isHighlit
-                ? '0 0 0 3px #fff, 0 12px 36px rgba(0,0,0,0.8)'
-                : '0 4px 16px rgba(0,0,0,0.55)',
-              transition: 'box-shadow 0.2s ease',
+              outline: isHighlit ? '3px solid #fff' : 'none',
+              outlineOffset: '0px',
             }}
           />
         ) : (
@@ -84,8 +83,7 @@ function PortraitCard({ item, focused, hovered, onClick, onEnter, onLeave }) {
             background: 'rgba(0,0,0,0.72)', borderRadius: 4,
             padding: '3px 7px', fontSize: 10, fontWeight: 700,
             color: 'rgba(255,255,255,0.7)', letterSpacing: 0.5,
-            backdropFilter: 'blur(4px)',
-          }}>
+            }}>
             {item.genres[0]}
           </div>
         )}
@@ -144,8 +142,9 @@ function LandscapeCard({ item, focused, hovered, onClick, onEnter, onLeave }) {
       onMouseLeave={onLeave}
       style={{
         flexShrink: 0, width: LAND_W, cursor: 'pointer',
-        transform: isHighlit ? 'scale(1.05) translateY(-3px)' : 'scale(1)',
-        transition: 'transform 0.2s cubic-bezier(.4,0,.2,1)',
+        transform: isHighlit ? 'scale(1.03) translateY(-2px)' : 'scale(1)',
+        transition: 'transform 0.18s cubic-bezier(.4,0,.2,1)',
+        willChange: isHighlit ? 'transform' : 'auto',
       }}
     >
       <div style={{ width: LAND_W, height: LAND_H, position: 'relative' }}>
@@ -156,10 +155,8 @@ function LandscapeCard({ item, focused, hovered, onClick, onEnter, onLeave }) {
             style={{
               width: '100%', height: '100%', objectFit: 'cover',
               display: 'block', borderRadius: 8,
-              boxShadow: isHighlit
-                ? '0 0 0 3px #fff, 0 10px 32px rgba(0,0,0,0.8)'
-                : '0 4px 14px rgba(0,0,0,0.55)',
-              transition: 'box-shadow 0.2s ease',
+              outline: isHighlit ? '3px solid #fff' : 'none',
+              outlineOffset: '0px',
             }}
           />
         ) : (
@@ -263,7 +260,7 @@ function CardRow({ data, colFocus, isActive, isLandscape, onSelect }) {
         display: 'flex', flexDirection: 'row',
         overflowX: 'hidden',
         paddingLeft: PAD_L, paddingRight: PAD_L,
-        paddingBottom: 16, paddingTop: 4,
+        paddingBottom: 24, paddingTop: 16,
         gap: CARD_GAP,
       }}
     >
@@ -315,15 +312,15 @@ function HeroBanner({ item, focusedBtn, onWatch, onDetail }) {
           alt=""
           style={{
             position: 'absolute', inset: 0, width: '100%', height: '100%',
-            objectFit: 'cover', display: 'block', opacity: 0.12,
-            filter: 'blur(4px)',
+            objectFit: 'cover', display: 'block', opacity: 0.18,
+            transform: 'scale(1.02)',
           }}
         />
       )}
 
-      {/* Gradient overlays */}
-      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to right, #0c1520 0%, rgba(12,21,32,0.97) 35%, rgba(12,21,32,0.55) 60%, transparent 100%)' }} />
-      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, #0a0a0a 0%, rgba(10,10,10,0.4) 22%, transparent 50%)' }} />
+      {/* Gradient overlays — merged into one pass for GPU efficiency */}
+      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to right, rgba(10,12,20,0.98) 0%, rgba(10,12,20,0.92) 35%, rgba(10,12,20,0.45) 65%, transparent 100%)' }} />
+      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, #0a0a0a 0%, transparent 40%)' }} />
 
       {/* Right poster */}
       {poster && (
@@ -337,14 +334,13 @@ function HeroBanner({ item, focusedBtn, onWatch, onDetail }) {
             style={{
               width: '100%', height: '100%', objectFit: 'cover',
               borderRadius: 12,
-              boxShadow: '0 24px 64px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.07)',
               display: 'block',
             }}
           />
           {/* Fade left edge of poster into bg */}
           <div style={{
-            position: 'absolute', top: 0, left: 0, bottom: 0, width: '45%',
-            background: 'linear-gradient(to right, #0c1520 0%, transparent 100%)',
+            position: 'absolute', top: 0, left: 0, bottom: 0, width: '55%',
+            background: 'linear-gradient(to right, rgba(10,10,10,1) 0%, rgba(10,10,10,0) 100%)',
             borderRadius: '12px 0 0 12px',
           }} />
         </div>
@@ -428,13 +424,11 @@ function HeroBanner({ item, focusedBtn, onWatch, onDetail }) {
               background: '#fff', color: '#0a0a0a',
               border: 'none', borderRadius: 8, padding: '15px 38px',
               fontSize: 17, fontWeight: 800, cursor: 'pointer',
-              boxShadow: focusedBtn === 0
-                ? '0 0 0 4px rgba(255,255,255,0.45), 0 8px 32px rgba(0,0,0,0.6)'
-                : '0 4px 20px rgba(0,0,0,0.5)',
+              outline: focusedBtn === 0 ? '3px solid rgba(255,255,255,0.7)' : 'none',
+              outlineOffset: '3px',
               transform: focusedBtn === 0 ? 'scale(1.04)' : 'scale(1)',
-              transition: 'box-shadow 0.18s, transform 0.18s',
-              animation: focusedBtn === 0 ? 'glow 1.8s ease-in-out infinite' : 'none',
-              outline: 'none',
+              transition: 'transform 0.18s, outline 0.18s',
+              boxShadow: 'none',
             }}
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
@@ -454,13 +448,11 @@ function HeroBanner({ item, focusedBtn, onWatch, onDetail }) {
                 : '2px solid rgba(255,255,255,0.2)',
               borderRadius: 8, padding: '14px 28px',
               fontSize: 17, fontWeight: 700, cursor: 'pointer',
-              backdropFilter: 'blur(6px)',
-              boxShadow: focusedBtn === 1
-                ? '0 0 0 3px rgba(255,255,255,0.2), 0 8px 24px rgba(0,0,0,0.5)'
-                : '0 4px 16px rgba(0,0,0,0.4)',
+              outline: focusedBtn === 1 ? '3px solid rgba(255,255,255,0.7)' : 'none',
+              outlineOffset: '3px',
               transform: focusedBtn === 1 ? 'scale(1.04)' : 'scale(1)',
-              transition: 'all 0.18s',
-              outline: 'none',
+              transition: 'transform 0.18s, border-color 0.18s',
+              boxShadow: 'none',
             }}
           >
             <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor">
@@ -884,7 +876,7 @@ export default function HomeScreen() {
                   <div
                     key={sec.key}
                     ref={el => { rowEls.current[ri] = el; }}
-                    style={{ marginTop: si === 0 ? -8 : 8, marginBottom: 12 }}
+                    style={{ marginTop: si === 0 ? 12 : 8, marginBottom: 0 }}
                   >
                     <SectionLabel title={sec.title} isActive={isActive} isHistory={isHistory} />
                     <CardRow
