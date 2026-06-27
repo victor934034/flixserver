@@ -10,6 +10,9 @@ import ProfileSelectScreen          from './screens/ProfileSelectScreen.jsx';
 import SplashScreen                 from './screens/SplashScreen.jsx';
 import { castAPI, moviesAPI, seriesAPI } from './api/index.js';
 import api from './api/index.js';
+import IptvScreen         from './screens/IptvScreen.jsx';
+import IptvChannelsScreen from './screens/IptvChannelsScreen.jsx';
+import IptvPlayerScreen   from './screens/IptvPlayerScreen.jsx';
 
 // Shared pre-fetch cache — HomeScreen reads from here on first load
 export const prefetchCache = {};
@@ -208,6 +211,9 @@ export default function App() {
                 <Route path="/"               element={<Guard><HomeScreen /></Guard>} />
                 <Route path="/detail"         element={<Guard><DetailScreen /></Guard>} />
                 <Route path="/player"         element={<Guard><PlayerScreen /></Guard>} />
+                <Route path="/iptv"           element={<Guard><IptvScreen /></Guard>} />
+                <Route path="/iptv-channels"  element={<Guard><IptvChannelsScreen /></Guard>} />
+                <Route path="/iptv-player"    element={<Guard><IptvPlayerScreen /></Guard>} />
                 <Route path="*"               element={<Navigate to="/" replace />} />
               </Routes>
             </SplashOrchestrator>

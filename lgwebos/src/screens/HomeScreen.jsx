@@ -7,7 +7,7 @@ import { prefetchCache } from '../App.jsx';
 import Sidebar from '../components/Sidebar.jsx';
 import { KEY, useKeyDown } from '../hooks/useNav.js';
 
-const NAV       = ['home', 'movies', 'series', 'search'];
+const NAV       = ['home', 'movies', 'series', 'search', 'iptv'];
 const ACCENT    = '#c91c2c';
 
 // Card sizes (from DC design spec)
@@ -700,6 +700,7 @@ export default function HomeScreen() {
   const goToNav = useCallback((idx) => {
     const key = NAV[idx];
     if (!key) { logout(); navigate('/login', { replace: true }); return; }
+    if (key === 'iptv') { navigate('/iptv'); return; }
     setActiveNav(key);
     setFocusArea('content');
     setSideExpanded(false);
@@ -832,6 +833,7 @@ export default function HomeScreen() {
         focusIdx={focusArea === 'sidebar' ? navFocus : -1}
         expanded={showSidebar}
         onSelect={key => {
+          if (key === 'iptv') { navigate('/iptv'); return; }
           setActiveNav(key);
           setFocusArea('content');
           setSideExpanded(false);
