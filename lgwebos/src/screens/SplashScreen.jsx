@@ -66,6 +66,15 @@ export default function SplashScreen({ onReady }) {
       pointerEvents: visible ? 'auto' : 'none',
     }}>
       {/* Logo */}
+      <img
+        src="/icon.png"
+        alt="FlixHome"
+        style={{
+          width: 120, height: 120, borderRadius: 24, objectFit: 'cover',
+          marginBottom: 28,
+          boxShadow: '0 0 60px rgba(201,28,44,0.35), 0 8px 40px rgba(0,0,0,0.8)',
+        }}
+      />
       <div style={{
         fontSize: 72, fontWeight: 900, letterSpacing: 12,
         color: '#c91c2c',

@@ -148,9 +148,7 @@ export default function LoginScreen() {
         boxShadow: '0 40px 100px rgba(0,0,0,0.7)',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 36 }}>
-          <div style={{ width: 44, height: 44, borderRadius: 10, background: '#E50914', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <span style={{ fontSize: 24, fontWeight: 900, color: '#fff' }}>F</span>
-          </div>
+          <img src="/icon.png" alt="FlixHome" style={{ width: 44, height: 44, borderRadius: 10, objectFit: 'cover' }} />
           <span style={{ fontSize: 20, fontWeight: 900, color: '#fff', letterSpacing: 2 }}>FLIXHOME</span>
         </div>
         <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.45)', marginBottom: 28 }}>

@@ -60,10 +60,10 @@ export const castAPI = {
 
 // ── IPTV ──────────────────────────────────────────────────────────────────────
 export const iptvAPI = {
-  status:     ()      => api.get('/iptv/status'),
-  categories: ()      => api.get('/iptv/categories'),
-  streams:    (catId) => api.get('/iptv/streams', { params: { category_id: catId } }),
-  streamUrl:  (id)    => api.get('/iptv/stream-url/' + id),
+  status:     ()      => api.get('/api/iptv/status'),
+  categories: ()      => api.get('/api/iptv/categories'),
+  streams:    (catId) => api.get('/api/iptv/streams', { params: { category_id: catId } }),
+  streamUrl:  (id)    => api.get('/api/iptv/stream-url/' + id),
 };
 
 export default api;

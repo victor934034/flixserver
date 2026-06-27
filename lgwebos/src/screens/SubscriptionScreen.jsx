@@ -116,6 +116,7 @@ export default function SubscriptionScreen() {
     }}>
       {/* Logo */}
       <div style={{ textAlign: 'center', paddingTop: 52, paddingBottom: 36 }}>
+        <img src="/icon.png" alt="FlixHome" style={{ width: 72, height: 72, borderRadius: 16, objectFit: 'cover', marginBottom: 16 }} />
         <div style={{ fontSize: 36, fontWeight: 900, color: ACCENT, letterSpacing: 8, marginBottom: 10 }}>FLIXHOME</div>
         <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 6 }}>Escolha seu plano</div>
         <div style={{ fontSize: 15, color: '#666' }}>
