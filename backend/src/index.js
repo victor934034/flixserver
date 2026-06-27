@@ -39,7 +39,8 @@ const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 500,
   message: { error: 'Muitas requisições, tente novamente em alguns minutos.' },
-  skip: (req) => req.path.startsWith('/auth/'),
+  // Exclui auth (tem limiter próprio) e upload (admin autenticado, muitas requisições de partes)
+  skip: (req) => req.path.startsWith('/auth/') || req.path.startsWith('/upload/'),
 });
 app.use('/api/', limiter);
 

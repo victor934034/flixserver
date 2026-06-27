@@ -686,10 +686,14 @@ router.get('/iptv', async (req, res) => {
       .from('iptv_credentials')
       .select('*, user:user_id(id, name, email)')
       .order('created_at', { ascending: false });
-    if (error) throw error;
+    if (error) {
+      console.warn('[admin/iptv] query error:', error.message);
+      return res.json([]);
+    }
     res.json(data || []);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.warn('[admin/iptv] error:', err.message);
+    res.json([]);
   }
 });
 
@@ -707,7 +711,12 @@ router.post('/iptv', async (req, res) => {
       )
       .select()
       .single();
-    if (error) throw error;
+    if (error) {
+      if (error.message?.includes('does not exist') || error.code === '42P01') {
+        return res.status(503).json({ error: 'Tabela iptv_credentials não existe no banco. Crie-a no Supabase.' });
+      }
+      throw error;
+    }
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
