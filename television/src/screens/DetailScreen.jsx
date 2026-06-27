@@ -289,7 +289,7 @@ export default function DetailScreen({ navigation, route }) {
 
   const versions = [];
   if (detail.file_dubbing)   versions.push({ key: 'dubbing',   label: 'Dublado',   sub: 'Áudio português', icon: 'volume-high' });
-  if (detail.file_subtitled) versions.push({ key: 'subtitled', label: 'Legendado',  sub: 'Áudio original',  icon: 'subtitles-outline' });
+  if (detail.file_subtitled) versions.push({ key: 'subtitled', label: 'Legendado',  sub: 'Áudio original',  icon: 'text-outline' });
   if (detail.file_cinema)    versions.push({ key: 'cinema',    label: 'Cinema',     sub: null,              icon: 'film-outline' });
   if (detail.file_4k)        versions.push({ key: '4k',        label: '4K HDR',     sub: 'Ultra HD',        icon: 'diamond-outline' });
 
