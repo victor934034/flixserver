@@ -152,7 +152,7 @@ export default function RootLayout() {
                   <Stack.Screen name="historico" />
                   <Stack.Screen name="parental-controls" />
                   <Stack.Screen name="sugestao" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
-                  <Stack.Screen name="player" options={{ animation: 'fade', gestureEnabled: false }} />
+                  <Stack.Screen name="player" options={{ animation: 'fade', gestureEnabled: false, orientation: 'landscape' }} />
                   <Stack.Screen name="iptv-channels" options={{ headerShown: false, animation: 'slide_from_right' }} />
                   <Stack.Screen name="iptv-player" options={{ headerShown: false, animation: 'fade', gestureEnabled: false, orientation: 'landscape' }} />
                   <Stack.Screen name="iptv-plans" options={{ headerShown: false, animation: 'slide_from_bottom', presentation: 'modal' }} />

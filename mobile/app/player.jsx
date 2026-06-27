@@ -120,8 +120,6 @@ export default function PlayerScreen() {
   const durSec = player.duration || 0;
   const remainSec = Math.max(0, durSec - currentTime);
   const progress = durSec > 0 ? currentTime / durSec : 0;
-  const displayProgress = dragProgress !== null ? dragProgress : progress;
-  const displayTime = dragProgress !== null ? dragProgress * durSec : currentTime;
   const isBuffering = status === 'loading';
   const isEnded = !isPlaying && durSec > 0 && currentTime > 0 && remainSec < 1.5;
   const showSkipIntro = introEnd > 0 && currentTime < introEnd && currentTime > 2;
@@ -150,6 +148,9 @@ export default function PlayerScreen() {
   const [streamBlocked, setStreamBlocked] = useState(false);
   const [streamBlockInfo, setStreamBlockInfo] = useState(null);
   const [dragProgress, setDragProgress] = useState(null);
+  // Computed after dragProgress to avoid TDZ / forward-reference
+  const displayProgress = dragProgress !== null ? dragProgress : progress;
+  const displayTime     = dragProgress !== null ? dragProgress * durSec : currentTime;
   const sessionId = useRef(`${Date.now()}_${Math.random().toString(36).substr(2, 9)}`).current;
   const heartbeatRef = useRef(null);
   const brightnessRef = useRef(0.8);
