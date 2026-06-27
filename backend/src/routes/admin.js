@@ -773,14 +773,14 @@ router.post('/seed-plans', async (req, res) => {
   ];
 
   const IPTV_PRICES = [
-    { name: '1 MÊS S/ADULTO',    price: 24.90,  duration_months: 1  },
-    { name: '1 MÊS C/ADULTO',    price: 27.90,  duration_months: 1  },
-    { name: '3 MESES S/ADULTO',  price: 54.90,  duration_months: 3  },
-    { name: '3 MESES C/ADULTO',  price: 57.90,  duration_months: 3  },
-    { name: '6 MESES S/ADULTO',  price: 109.90, duration_months: 6  },
-    { name: '6 MESES C/ADULTO',  price: 114.90, duration_months: 6  },
-    { name: '12 MESES S/ADULTO', price: 159.90, duration_months: 12 },
-    { name: '12 MESES C/ADULTO', price: 164.90, duration_months: 12 },
+    { name: '1 MÊS S/ADULTO',    price: 24.90,  duration_months: 1,  order_index: 0 },
+    { name: '1 MÊS C/ADULTO',    price: 27.90,  duration_months: 1,  order_index: 1 },
+    { name: '3 MESES S/ADULTO',  price: 54.90,  duration_months: 3,  order_index: 2 },
+    { name: '3 MESES C/ADULTO',  price: 57.90,  duration_months: 3,  order_index: 3 },
+    { name: '6 MESES S/ADULTO',  price: 109.90, duration_months: 6,  order_index: 4 },
+    { name: '6 MESES C/ADULTO',  price: 114.90, duration_months: 6,  order_index: 5 },
+    { name: '12 MESES S/ADULTO', price: 159.90, duration_months: 12, order_index: 6 },
+    { name: '12 MESES C/ADULTO', price: 164.90, duration_months: 12, order_index: 7 },
   ];
 
   try {
@@ -790,29 +790,37 @@ router.post('/seed-plans', async (req, res) => {
       .upsert({ key: 'plans_config', value: JSON.stringify(STREAMING_PLANS) }, { onConflict: 'key' });
     if (settingsErr) throw new Error('streaming plans: ' + settingsErr.message);
 
-    // 2. Update each IPTV plan price by name (skip if table doesn't exist)
-    let iptvUpdated = 0;
-    let iptvSkipped = false;
-    for (const p of IPTV_PRICES) {
-      const { error } = await supabase
-        .from('iptv_plans')
-        .update({ price: p.price, duration_months: p.duration_months })
-        .ilike('name', p.name);
-      if (error) {
-        if (error.message?.includes('does not exist') || error.code === '42P01') {
-          iptvSkipped = true;
-          break;
+    // 2. Upsert IPTV plans (insert if missing, update price if exists)
+    const { data: existingIptv, error: fetchErr } = await supabase
+      .from('iptv_plans')
+      .select('id, name');
+
+    let iptvResult = 'skipped (table missing)';
+    if (!fetchErr) {
+      const byName = {};
+      for (const row of existingIptv || []) byName[row.name.toLowerCase()] = row.id;
+
+      let inserted = 0, updated = 0;
+      for (const p of IPTV_PRICES) {
+        const existId = byName[p.name.toLowerCase()];
+        if (existId) {
+          const { error } = await supabase.from('iptv_plans')
+            .update({ price: p.price, duration_months: p.duration_months })
+            .eq('id', existId);
+          if (!error) updated++;
+        } else {
+          const { error } = await supabase.from('iptv_plans')
+            .insert({ name: p.name, price: p.price, duration_months: p.duration_months, is_active: true, order_index: p.order_index });
+          if (!error) inserted++;
         }
-        console.warn('[seed-plans] iptv update error:', error.message);
-      } else {
-        iptvUpdated++;
       }
+      iptvResult = `${inserted} inserted, ${updated} updated`;
     }
 
     res.json({
       ok: true,
       streaming_plans: STREAMING_PLANS.length,
-      iptv_plans_updated: iptvSkipped ? 'skipped (table missing)' : iptvUpdated,
+      iptv_plans: iptvResult,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
