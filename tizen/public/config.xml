@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<widget xmlns="http://www.w3.org/ns/widgets"
+        xmlns:tizen="http://tizen.org/ns/widgets"
+        id="http://flixhome.app"
+        version="1.0.0">
+
+    <tizen:application id="com.flixhome.app"
+                       package="flixhome"
+                       required_version="4.0"/>
+
+    <content src="index.html"/>
+
+    <name>FlixHome</name>
+    <icon src="icon.png"/>
+    <description>Filmes, séries e IPTV</description>
+
+    <feature name="http://tizen.org/feature/network.internet"/>
+
+    <tizen:privilege name="http://tizen.org/privilege/internet"/>
+    <tizen:privilege name="http://tizen.org/privilege/tv.inputdevice"/>
+
+    <tizen:setting screen-orientation="landscape"
+                   context-menu="disable"
+                   background-support="disable"
+                   encryption="disable"
+                   install-location="auto"
+                   hw-key-event="enable"/>
+</widget>
