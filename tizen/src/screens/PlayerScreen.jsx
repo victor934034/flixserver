@@ -206,16 +206,18 @@ export default function PlayerScreen() {
     skipIntroTo               = null,
     seriesContext             = null,
     contentMeta               = null,
+    startAt                   = null,
   } = state || {};
 
   const availTracks = ['dubbing','subtitled','cinema'].filter(k => !!tracks[k]);
   const availSubs   = [].concat(['pt','en','es'].filter(k => !!subtitles[k]), ['off']);
   const initTrack   = availTracks.find(k => tracks[k] === initialUrl) || availTracks[0] || 'dubbing';
 
-  const videoRef   = useRef(null);
-  const hideTimer  = useRef(null);
-  const switchPos  = useRef(null);
-  const wasLoaded  = useRef(false);
+  const videoRef    = useRef(null);
+  const hideTimer   = useRef(null);
+  const switchPos   = useRef(startAt && startAt > 5 ? startAt : null);
+  const wasLoaded   = useRef(false);
+  const bufferingRef = useRef(false);
 
   const [trackKey,     setTrackKey]     = useState(initTrack);
   const [subKey,       setSubKey]       = useState('off');
@@ -327,6 +329,7 @@ export default function PlayerScreen() {
     if (!v) return;
     setCurrentTime(v.currentTime);
     if (v.buffered.length > 0) setBuffered(v.buffered.end(v.buffered.length - 1));
+    if (bufferingRef.current) { bufferingRef.current = false; setBuffering(false); }
   }
 
   const saveHistory = useCallback(() => {
@@ -360,6 +363,7 @@ export default function PlayerScreen() {
       }
     }
     setLoaded(true);
+    bufferingRef.current = false;
     setBuffering(false);
   }
 
@@ -464,11 +468,11 @@ export default function PlayerScreen() {
         onTimeUpdate={onTimeUpdate}
         onDurationChange={() => setDuration(videoRef.current ? videoRef.current.duration || 0 : 0)}
         onCanPlay={onCanPlay}
-        onPlay={() => { setPaused(false); setBuffering(false); }}
+        onPlay={() => { setPaused(false); bufferingRef.current = false; setBuffering(false); }}
         onPause={() => setPaused(true)}
-        onWaiting={() => { if (loaded) setBuffering(true); }}
-        onStalled={() => { if (loaded) setBuffering(true); }}
-        onPlaying={() => setBuffering(false)}
+        onWaiting={() => { if (loaded) { bufferingRef.current = true; setBuffering(true); } }}
+        onStalled={() => { if (loaded) { bufferingRef.current = true; setBuffering(true); } }}
+        onPlaying={() => { bufferingRef.current = false; setBuffering(false); }}
         onError={() => setError('Não foi possível reproduzir o vídeo')}
         onEnded={() => { if (nextEp) navigate('/player', { state: nextEp, replace: true }); else navigate(-1); }}
       >

@@ -65,6 +65,17 @@ async function checkSubscription(user, router) {
   } catch {}
 }
 
+function handleNotificationTap(data, router) {
+  if (!data || !router) return;
+  try {
+    const { screen, id } = data;
+    if (screen === 'filme' && id) router.push(`/filme/${id}`);
+    else if (screen === 'serie' && id) router.push(`/serie/${id}`);
+    else if (screen === 'subscription') router.push('/subscription');
+    else if (screen === 'home') router.replace('/(tabs)');
+  } catch {}
+}
+
 function AppGate() {
   const { token, user, loading } = useAuth();
   const { activeProfile } = useProfile();
@@ -73,6 +84,25 @@ function AppGate() {
   const navState = useRootNavigationState();
   const checkedRef = useRef(false);
   const appStateRef = useRef(AppState.currentState);
+  const notifCheckedRef = useRef(false);
+
+  // Handle notification tap navigation (once nav is ready and user is logged in)
+  useEffect(() => {
+    if (!navState?.key || !token || loading) return;
+    if (notifCheckedRef.current) return;
+    notifCheckedRef.current = true;
+
+    Notifications.getLastNotificationResponseAsync().then(response => {
+      if (response?.notification?.request?.content?.data) {
+        handleNotificationTap(response.notification.request.content.data, router);
+      }
+    });
+
+    const sub = Notifications.addNotificationResponseReceivedListener(response => {
+      handleNotificationTap(response.notification.request.content.data, router);
+    });
+    return () => sub.remove();
+  }, [navState?.key, token, loading]);
 
   useEffect(() => {
     if (!navState?.key || loading) return;

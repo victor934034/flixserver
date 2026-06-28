@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { moviesAPI, seriesAPI, watchlistAPI, likesAPI } from '../api/index.js';
+import api, { moviesAPI, seriesAPI, watchlistAPI, likesAPI } from '../api/index.js';
 import { KEY, useKeyDown } from '../hooks/useNav.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 
@@ -37,10 +37,11 @@ function Btn({ focused, danger, accent, children, onClick, style = {} }) {
   );
 }
 
-function EpisodeItem({ ep, focused, onClick }) {
+function EpisodeItem({ ep, focused, onClick, epProgress }) {
   const url = ep.file_dubbing || ep.file_subtitled || ep.file_cinema;
   if (!url) return null;
   const label = 'EP ' + String(ep.episode_number).padStart(2, '0');
+  const pct = epProgress > 0 ? Math.min(epProgress * 100, 100) : 0;
   return (
     <div
       onClick={onClick}
@@ -52,8 +53,13 @@ function EpisodeItem({ ep, focused, onClick }) {
         cursor: 'none', transition: 'background 0.15s, border-color 0.15s',
       }}
     >
-      <div style={{ width: 140, height: 78, borderRadius: 8, overflow: 'hidden', flexShrink: 0, background: '#1a1a1a' }}>
+      <div style={{ width: 140, height: 78, borderRadius: 8, overflow: 'hidden', flexShrink: 0, background: '#1a1a1a', position: 'relative' }}>
         {ep.thumbnail_url && <img src={ep.thumbnail_url} alt={label} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
+        {pct > 0 && (
+          <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 3, background: 'rgba(0,0,0,0.4)' }}>
+            <div style={{ height: '100%', width: pct + '%', background: '#E50914' }} />
+          </div>
+        )}
       </div>
       <div style={{ flex: 1 }}>
         <div style={{ fontSize: 13, color: '#E50914', fontWeight: 700, marginBottom: 4 }}>{label}</div>
@@ -101,12 +107,15 @@ export default function DetailScreen() {
   const { activeProfile } = useAuth();
   const type = params.get('type') || 'movie';
   const id   = params.get('id');
-  const isSeries = type === 'series';
+  const startAt   = params.get('startAt') ? Number(params.get('startAt')) : null;
+  const epId      = params.get('epId') || null;
+  const seasonNum = params.get('seasonNum') ? Number(params.get('seasonNum')) : null;
+  const isSeries  = type === 'series';
 
   const [detail,    setDetail]    = useState(null);
   const [episodes,  setEpisodes]  = useState([]);
   const [seasons,   setSeasons]   = useState([]);
-  const [season,    setSeason]    = useState(1);
+  const [season,    setSeason]    = useState(seasonNum || 1);
   const [loading,   setLoading]   = useState(true);
   const [error,     setError]     = useState(null);
 
@@ -116,6 +125,16 @@ export default function DetailScreen() {
 
   // Likes
   const [likeData,  setLikeData]  = useState({ likes: 0, dislikes: 0, userVote: null });
+
+  // Episode watch progress map: ep.id → ratio (0–1) for progress bar
+  const [epProgress, setEpProgress] = useState({});
+  // Episode seconds watched: ep.id → seconds (for resume)
+  const [epSeconds, setEpSeconds] = useState({});
+  // Movie seconds watched (for resume)
+  const [movieSeconds, setMovieSeconds] = useState(0);
+
+  // Whether we already auto-played via epId (avoid re-triggering)
+  const autoPlayedRef = useRef(false);
 
   // Focus
   // sections: 'back'(0) | 'actions'(1) | 'seasons'(2) | 'episodes'(3)
@@ -154,6 +173,49 @@ export default function DetailScreen() {
     seriesAPI.episodes(id, season).then(r => setEpisodes(r.data || [])).catch(() => setEpisodes([]));
   }, [id, isSeries, season]);
 
+  // Auto-play matching episode when coming from Continue Watching (epId + startAt in URL)
+  useEffect(() => {
+    if (!epId || !isSeries || autoPlayedRef.current) return;
+    const ep = episodes.find(e => String(e.id) === String(epId));
+    if (!ep) return;
+    autoPlayedRef.current = true;
+    playEpisode(ep, startAt);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [episodes, epId]);
+
+  // Fetch episode watch history — progress bars + resume seconds
+  useEffect(() => {
+    if (!id || !isSeries) return;
+    const profileId = activeProfile && activeProfile.id;
+    if (!profileId) return;
+    api.get('/api/history', { params: { profile_id: profileId, limit: 200 } })
+      .then(r => {
+        const progressMap = {}, secondsMap = {};
+        (r.data || []).forEach(h => {
+          if (h.episode_id && h.duration > 0) {
+            progressMap[h.episode_id] = h.progress / h.duration;
+            secondsMap[h.episode_id] = h.progress;
+          }
+        });
+        setEpProgress(progressMap);
+        setEpSeconds(secondsMap);
+      }).catch(() => {});
+  }, [id, isSeries, activeProfile]);
+
+  // Fetch movie watch history for resume
+  useEffect(() => {
+    if (!id || isSeries) return;
+    const profileId = activeProfile && activeProfile.id;
+    if (!profileId) return;
+    api.get('/api/history', { params: { profile_id: profileId, limit: 50 } })
+      .then(r => {
+        const h = (r.data || []).find(item =>
+          item.content_id === id && !item.episode_id && !item.completed && item.progress > 5
+        );
+        if (h) setMovieSeconds(h.progress);
+      }).catch(() => {});
+  }, [id, isSeries, activeProfile]);
+
   // Scroll focused episode into view
   useEffect(() => {
     if (section !== 'episodes') return;
@@ -180,7 +242,7 @@ export default function DetailScreen() {
 
   const actions = detail ? buildActions() : [];
 
-  function playMovie(vk) {
+  function playMovie(vk, resumeAt) {
     if (!detail) return;
     const url = detail['file_' + vk] || detail.file_dubbing || detail.file_subtitled || detail.file_cinema;
     if (!url) return;
@@ -189,10 +251,11 @@ export default function DetailScreen() {
       tracks: { dubbing: detail.file_dubbing || null, subtitled: detail.file_subtitled || null, cinema: detail.file_cinema || null },
       subtitles: { pt: detail.subtitle_pt || null, en: detail.subtitle_en || null, es: detail.subtitle_es || null },
       contentMeta: { content_type: 'movie', content_id: detail.id },
+      ...(resumeAt > 5 ? { startAt: resumeAt } : {}),
     }});
   }
 
-  function playEpisode(ep) {
+  function playEpisode(ep, resumeAt) {
     const url = ep.file_dubbing || ep.file_subtitled || ep.file_cinema;
     if (!url) return;
     const epLabel = 'T' + ep.season_number + 'E' + String(ep.episode_number).padStart(2, '0');
@@ -214,13 +277,14 @@ export default function DetailScreen() {
         episode_id: ep.id,
         series_id: detail ? detail.id : null,
       },
+      ...(resumeAt > 5 ? { startAt: resumeAt } : {}),
     }});
   }
 
   async function activateAction(act) {
     if (!act) return;
-    if (act.id.startsWith('play_')) { playMovie(act.id.replace('play_', '')); return; }
-    if (act.id === 'play') { if (currentEps[0]) playEpisode(currentEps[0]); return; }
+    if (act.id.startsWith('play_')) { playMovie(act.id.replace('play_', ''), startAt || movieSeconds); return; }
+    if (act.id === 'play') { if (currentEps[0]) playEpisode(currentEps[0], startAt || epSeconds[currentEps[0].id] || 0); return; }
     if (act.id === 'watchlist') {
       setWlLoading(true);
       const profileId = activeProfile && activeProfile.id;
@@ -247,10 +311,10 @@ export default function DetailScreen() {
 
   // Keep mutable snapshot to avoid stale closures in key handler
   const st = useRef({});
-  st.current = { section, secIdx, seasons, currentEps, actions, isSeries, season };
+  st.current = { section, secIdx, seasons, currentEps, actions, isSeries, season, epSeconds };
 
   useKeyDown(e => {
-    const { section, secIdx, seasons, currentEps, actions, isSeries, season } = st.current;
+    const { section, secIdx, seasons, currentEps, actions, isSeries, season, epSeconds } = st.current;
     const k = e.keyCode;
     if (k === KEY.BACK || k === KEY.BACKSPACE) { e.preventDefault(); navigate(-1); return; }
 
@@ -283,7 +347,7 @@ export default function DetailScreen() {
         else { setSection('actions'); setSecIdx(0); }
       }
       if (k === KEY.DOWN)  { e.preventDefault(); setSecIdx(i => Math.min(currentEps.length - 1, i + 1)); }
-      if (k === KEY.ENTER) { e.preventDefault(); if (currentEps[secIdx]) playEpisode(currentEps[secIdx]); }
+      if (k === KEY.ENTER) { e.preventDefault(); if (currentEps[secIdx]) playEpisode(currentEps[secIdx], epSeconds[currentEps[secIdx].id] || 0); }
     }
   });
 
@@ -407,7 +471,8 @@ export default function DetailScreen() {
               <EpisodeItem
                 ep={ep}
                 focused={section === 'episodes' && secIdx === ei}
-                onClick={() => playEpisode(ep)}
+                onClick={() => playEpisode(ep, epSeconds[ep.id] || 0)}
+                epProgress={epProgress[ep.id] || 0}
               />
             </div>
           ))}

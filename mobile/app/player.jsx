@@ -99,8 +99,9 @@ export default function PlayerScreen() {
   const initVer = useRef((params.currentVersion && versions[params.currentVersion]) ? params.currentVersion : availVer[0]).current;
   const subtitles = useRef(params.subtitles ? JSON.parse(params.subtitles) : {}).current;
   const availSubs = useRef(Object.entries(subtitles).filter(([, u]) => u)).current;
-  const nextEp = useRef(params.nextEpisode ? JSON.parse(params.nextEpisode) : null).current;
-  const introEnd = params.introEnd ? Number(params.introEnd) : 0;
+  const nextEp = useRef(params.nextEpisode && params.nextEpisode !== 'undefined' ? JSON.parse(params.nextEpisode) : null).current;
+  const introEnd = params.introEnd && params.introEnd !== 'undefined' ? Number(params.introEnd) : 0;
+  const startAt = params.startAt && params.startAt !== 'undefined' ? Number(params.startAt) : 0;
 
   const initialSource = useRef({ uri: versions[initVer] }).current;
 
@@ -129,7 +130,7 @@ export default function PlayerScreen() {
 
   // ─── State ────────────────────────────────────────────────────────────────
   const [activeVer, setActiveVer] = useState(initVer);
-  const [savedPosSec, setSavedPosSec] = useState(null);
+  const [savedPosSec, setSavedPosSec] = useState(startAt > 5 ? startAt : null);
   const [activeSub, setActiveSub] = useState(null);
   const [audioTracks, setAudioTracks] = useState([]);
   const [activeAudio, setActiveAudio] = useState(null);
@@ -350,23 +351,32 @@ export default function PlayerScreen() {
     if (!ctrlVisible) fadeCtrl(true);
   };
 
-  const saveProgress = useCallback(async () => {
-    if (!id || currentTime < 5) return;
+  // Ref holds the latest save function so the interval never needs to restart
+  const saveProgressRef = useRef(null);
+  saveProgressRef.current = async () => {
+    const ct = player.currentTime;
+    const dur = player.duration || 0;
+    if (!id || ct < 5) return;
     try {
       await api.post('/history', {
         content_type: type === 'episode' ? 'episode' : 'movie',
         content_id: id,
-        progress: Math.floor(currentTime),
-        duration: Math.floor(durSec),
+        episode_id: type === 'episode' ? id : undefined,
+        series_id: type === 'episode' ? (seriesId || undefined) : undefined,
+        progress: Math.floor(ct),
+        duration: Math.floor(dur),
         profile_id: activeProfile?.id || null,
       });
     } catch {}
-  }, [id, type, currentTime, durSec, activeProfile]);
+  };
 
   useEffect(() => {
-    const t = setInterval(saveProgress, 15000);
-    return () => clearInterval(t);
-  }, [saveProgress]);
+    const t = setInterval(() => saveProgressRef.current?.(), 15000);
+    return () => {
+      clearInterval(t);
+      saveProgressRef.current?.();
+    };
+  }, []);
 
   const switchVer = (v) => {
     if (v !== activeVer) {
@@ -413,18 +423,17 @@ export default function PlayerScreen() {
     saveProgress();
     const url = nextEp.file_dubbing || nextEp.file_subtitled || nextEp.file_cinema;
     if (!url) return;
-    router.replace({
-      pathname: '/player',
-      params: {
-        url, title: nextEp.title || `Episódio ${nextEp.episode_number}`,
-        id: nextEp.id, type: 'episode', seriesId: seriesId || undefined,
-        currentVersion: activeVer,
-        versions: JSON.stringify({ dubbing: nextEp.file_dubbing || null, subtitled: nextEp.file_subtitled || null, cinema: nextEp.file_cinema || null }),
-        subtitles: JSON.stringify({ pt: nextEp.subtitle_pt || null, en: nextEp.subtitle_en || null, es: nextEp.subtitle_es || null }),
-        nextEpisode: nextEp.next ? JSON.stringify(nextEp.next) : undefined,
-        introEnd: nextEp.intro_end ? String(nextEp.intro_end) : undefined,
-      },
-    });
+    const nextParams = {
+      url, title: nextEp.title || `Episódio ${nextEp.episode_number}`,
+      id: String(nextEp.id), type: 'episode',
+      currentVersion: activeVer,
+      versions: JSON.stringify({ dubbing: nextEp.file_dubbing || null, subtitled: nextEp.file_subtitled || null, cinema: nextEp.file_cinema || null }),
+      subtitles: JSON.stringify({ pt: nextEp.subtitle_pt || null, en: nextEp.subtitle_en || null, es: nextEp.subtitle_es || null }),
+    };
+    if (seriesId) nextParams.seriesId = seriesId;
+    if (nextEp.next) nextParams.nextEpisode = JSON.stringify(nextEp.next);
+    if (nextEp.intro_end) nextParams.introEnd = String(nextEp.intro_end);
+    router.replace({ pathname: '/player', params: nextParams });
   };
 
   const sendCastToTV = useCallback(async () => {
@@ -827,6 +836,34 @@ export default function PlayerScreen() {
                   </TouchableOpacity>
                 )}
 
+                {/* Web Video Cast */}
+                {!isLocal && Platform.OS === 'android' && (
+                  <TouchableOpacity
+                    style={styles.castOption}
+                    activeOpacity={0.8}
+                    onPress={async () => {
+                      const videoUrl = versions[activeVer];
+                      if (!videoUrl) return;
+                      const wvcScheme = `webvideocast://${videoUrl.replace(/^https?:\/\//, '')}`;
+                      try {
+                        await Linking.openURL(wvcScheme);
+                      } catch {
+                        Linking.openURL('https://play.google.com/store/apps/details?id=com.instantbits.cast.webvideo');
+                      }
+                    }}
+                  >
+                    <View style={[styles.castIconBox, { backgroundColor: '#1a73e8' }]}>
+                      <Ionicons name="cast-outline" size={24} color="#fff" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.castOptionTitle}>Web Video Cast</Text>
+                      <Text style={styles.castOptionDesc}>
+                        Transmite para Chromecast, DLNA, Fire TV, Roku e outros. Requer o app Web Video Cast instalado.
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                )}
+
                 {Platform.OS === 'ios' && (
                   <View style={styles.castOption}>
                     <View style={styles.castIconBox}>
@@ -858,18 +895,30 @@ export default function PlayerScreen() {
                 </View>
 
                 {!isLocal && (
-                  <View style={styles.castOption}>
+                  <TouchableOpacity
+                    style={styles.castOption}
+                    activeOpacity={0.8}
+                    onPress={async () => {
+                      const videoUrl = versions[activeVer];
+                      if (!videoUrl) return;
+                      const vlcUrl = `vlc://${videoUrl}`;
+                      try {
+                        await Linking.openURL(vlcUrl);
+                      } catch {
+                        Share.share({ message: videoUrl, title });
+                      }
+                    }}
+                  >
                     <View style={styles.castIconBox}>
-                      <Ionicons name="logo-youtube" size={24} color="#fff" />
+                      <Ionicons name="play-circle-outline" size={24} color="#fff" />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.castOptionTitle}>Abrir no VLC / Navegador da TV</Text>
+                      <Text style={styles.castOptionTitle}>Abrir no VLC</Text>
                       <Text style={styles.castOptionDesc}>
-                        Compartilhe o link abaixo e abra no VLC, Kodi ou navegador da sua smart TV.
-                        Compatível com todos os formatos de áudio (incluindo AAC).
+                        Abre o vídeo direto no VLC. Se não estiver instalado, compartilha o link para abrir em outro player.
                       </Text>
                     </View>
-                  </View>
+                  </TouchableOpacity>
                 )}
 
                 {!isLocal && (

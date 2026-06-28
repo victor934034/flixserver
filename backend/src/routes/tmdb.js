@@ -120,6 +120,54 @@ router.get('/search-multiple', async (req, res) => {
   }
 });
 
+// Lista temporadas de uma série (para upload de desenhos)
+router.get('/tv-seasons/:tmdbId', async (req, res) => {
+  const axios = require('axios');
+  const TMDB_BASE = 'https://api.themoviedb.org/3';
+  const TMDB_IMG = 'https://image.tmdb.org/t/p/w300';
+  try {
+    const { data } = await axios.get(`${TMDB_BASE}/tv/${req.params.tmdbId}`, {
+      params: { api_key: process.env.TMDB_API_KEY, language: 'pt-BR' },
+    });
+    const seasons = (data.seasons || [])
+      .filter(s => s.season_number > 0)
+      .map(s => ({
+        season_number: s.season_number,
+        name: s.name,
+        episode_count: s.episode_count,
+        air_date: s.air_date,
+        poster_url: s.poster_path ? `${TMDB_IMG}${s.poster_path}` : null,
+      }));
+    res.json({ tmdb_id: data.id, title: data.name, seasons });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Lista episódios de uma temporada específica (para upload de desenhos)
+router.get('/tv-season/:tmdbId/:seasonNum', async (req, res) => {
+  const axios = require('axios');
+  const TMDB_BASE = 'https://api.themoviedb.org/3';
+  const TMDB_IMG = 'https://image.tmdb.org/t/p/w300';
+  try {
+    const { data } = await axios.get(
+      `${TMDB_BASE}/tv/${req.params.tmdbId}/season/${req.params.seasonNum}`,
+      { params: { api_key: process.env.TMDB_API_KEY, language: 'pt-BR' } },
+    );
+    const episodes = (data.episodes || []).map(ep => ({
+      episode_number: ep.episode_number,
+      title: ep.name,
+      description: ep.overview,
+      thumbnail_url: ep.still_path ? `${TMDB_IMG}${ep.still_path}` : null,
+      air_date: ep.air_date,
+      runtime: ep.runtime,
+    }));
+    res.json({ season_number: data.season_number, name: data.name, episodes });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Importação em lote via Bot TMDB
 router.post('/batch', async (req, res) => {
   const { files } = req.body; // [{ url, version }]

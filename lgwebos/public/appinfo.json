@@ -6,7 +6,7 @@
   "main": "index.html",
   "title": "FlixHome",
   "icon": "icon.png",
-  "largeIcon": "icon.png",
+  "largeIcon": "icon_large.png",
   "transparent": false,
   "disableBackHistoryAPI": true
 }

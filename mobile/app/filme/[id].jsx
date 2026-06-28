@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import api from '../../lib/api';
 import { useDownloads } from '../../contexts/DownloadContext';
 import { useParental } from '../../contexts/ParentalContext';
+import { useProfile } from '../../contexts/ProfileContext';
 
 async function checkInList(contentId) {
   try {
@@ -19,7 +20,7 @@ async function checkInList(contentId) {
 }
 
 export default function FilmeDetail() {
-  const { id } = useLocalSearchParams();
+  const { id, startAt } = useLocalSearchParams();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
@@ -31,6 +32,8 @@ export default function FilmeDetail() {
   const [likeLoading, setLikeLoading] = useState(false);
   const { getStatus, startDownload, cancelDownload, deleteDownload } = useDownloads();
   const { checkAccess } = useParental();
+  const { activeProfile } = useProfile();
+  const [movieProgress, setMovieProgress] = useState(0);
 
   useEffect(() => {
     api.get(`/movies/${id}`)
@@ -42,6 +45,18 @@ export default function FilmeDetail() {
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [id]);
+
+  // Fetch saved position for this movie (used when not coming from Continue Watching)
+  useEffect(() => {
+    if (!id || !activeProfile?.id) return;
+    api.get('/history', { params: { limit: 50, profile_id: activeProfile.id } })
+      .then(r => {
+        const h = (r.data || []).find(item =>
+          item.content_id === String(id) && item.content_type === 'movie' && !item.completed && item.progress > 5
+        );
+        if (h) setMovieProgress(h.progress);
+      }).catch(() => {});
+  }, [id, activeProfile?.id]);
 
   const handleVote = async (vote) => {
     if (likeLoading) return;
@@ -86,27 +101,27 @@ export default function FilmeDetail() {
     const dlStatus = getStatus(movie.id, version);
     const playUrl = dlStatus.state === 'done' ? dlStatus.filePath : remoteUrl;
 
-    router.push({
-      pathname: '/player',
-      params: {
-        url: playUrl,
-        title: movie.title,
-        id: movie.id,
-        type: 'movie',
-        currentVersion: version,
-        versions: JSON.stringify({
-          dubbing: dlStatus.state === 'done' && version === 'dubbing' ? dlStatus.filePath : (movie.file_dubbing || null),
-          subtitled: dlStatus.state === 'done' && version === 'subtitled' ? dlStatus.filePath : (movie.file_subtitled || null),
-          cinema: dlStatus.state === 'done' && version === 'cinema' ? dlStatus.filePath : (movie.file_cinema || null),
-          '4k': dlStatus.state === 'done' && version === '4k' ? dlStatus.filePath : (movie.file_4k || null),
-        }),
-        subtitles: JSON.stringify({
-          pt: movie.subtitle_pt || null,
-          en: movie.subtitle_en || null,
-          es: movie.subtitle_es || null,
-        }),
-      },
-    });
+    const playerParams = {
+      url: playUrl,
+      title: movie.title,
+      id: String(movie.id),
+      type: 'movie',
+      currentVersion: version,
+      versions: JSON.stringify({
+        dubbing: dlStatus.state === 'done' && version === 'dubbing' ? dlStatus.filePath : (movie.file_dubbing || null),
+        subtitled: dlStatus.state === 'done' && version === 'subtitled' ? dlStatus.filePath : (movie.file_subtitled || null),
+        cinema: dlStatus.state === 'done' && version === 'cinema' ? dlStatus.filePath : (movie.file_cinema || null),
+        '4k': dlStatus.state === 'done' && version === '4k' ? dlStatus.filePath : (movie.file_4k || null),
+      }),
+      subtitles: JSON.stringify({
+        pt: movie.subtitle_pt || null,
+        en: movie.subtitle_en || null,
+        es: movie.subtitle_es || null,
+      }),
+    };
+    const resumeSec = startAt ? Number(startAt) : movieProgress;
+    if (resumeSec > 5) playerParams.startAt = String(Math.floor(resumeSec));
+    router.push({ pathname: '/player', params: playerParams });
   };
 
   const handleDownload = (version, url) => {

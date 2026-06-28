@@ -4,22 +4,31 @@ import {
   Image, TouchableOpacity, useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import HeroBanner from '../../components/HeroBanner';
 import ContentRow from '../../components/ContentRow';
 import api from '../../lib/api';
+import { useProfile } from '../../contexts/ProfileContext';
 
 function ContinueCard({ item }) {
   const router = useRouter();
   const W = 140;
   const H = 80;
   const progress = item.duration > 0 ? Math.min(item.progress / item.duration, 1) : 0;
-  const route = item.content_type === 'movie'
-    ? `/filme/${item.content_id}`
-    : `/serie/${item.series_id || item.content_id}`;
+
+  const handlePress = () => {
+    if (item.content_type === 'movie') {
+      router.push({ pathname: `/filme/${item.content_id}`, params: { startAt: String(Math.floor(item.progress)) } });
+    } else {
+      const seriesId = item.series_id || item.content_id;
+      const epParams = { startAt: String(Math.floor(item.progress)), episodeId: String(item.episode_id || item.content_id) };
+      if (item.season_number) epParams.seasonNum = String(item.season_number);
+      router.push({ pathname: `/serie/${seriesId}`, params: epParams });
+    }
+  };
 
   return (
-    <TouchableOpacity onPress={() => router.push(route)} style={styles.continueCard} activeOpacity={0.75}>
+    <TouchableOpacity onPress={handlePress} style={styles.continueCard} activeOpacity={0.75}>
       {item.poster_url ? (
         <Image source={{ uri: item.poster_url }} style={{ width: W, height: H, borderRadius: 6 }} resizeMode="cover" />
       ) : (
@@ -41,6 +50,7 @@ function ContinueCard({ item }) {
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
+  const { activeProfile } = useProfile();
   const [featured, setFeatured] = useState([]);
   const [movies, setMovies] = useState([]);
   const [series, setSeries] = useState([]);
@@ -48,26 +58,46 @@ export default function HomeScreen() {
   const [popular, setPopular] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  const fetchHistory = useCallback(async () => {
+    // Sem perfil ativo nunca buscar — evita misturar histórico de perfis diferentes
+    if (!activeProfile?.id) {
+      setContinueItems([]);
+      return;
+    }
+    try {
+      const hRes = await api.get(`/history?limit=10&profile_id=${activeProfile.id}`);
+      const history = Array.isArray(hRes.data) ? hRes.data : [];
+      setContinueItems(history.filter(h => !h.completed && h.progress > 0 && h.title));
+    } catch {}
+  }, [activeProfile?.id]);
+
   useEffect(() => {
     Promise.all([
       api.get('/featured').catch(() => ({ data: [] })),
       api.get('/movies?limit=20').catch(() => ({ data: [] })),
       api.get('/series?limit=20').catch(() => ({ data: [] })),
-      api.get('/history?limit=10').catch(() => ({ data: [] })),
       api.get('/movies/section/popular').catch(() => ({ data: [] })),
       api.get('/series/section/popular').catch(() => ({ data: [] })),
-    ]).then(([fRes, mRes, sRes, hRes, popMoviesRes, popSeriesRes]) => {
+    ]).then(([fRes, mRes, sRes, popMoviesRes, popSeriesRes]) => {
       setFeatured(Array.isArray(fRes.data) ? fRes.data : []);
       setMovies(Array.isArray(mRes.data) ? mRes.data : (mRes.data?.data ?? []));
       setSeries(Array.isArray(sRes.data) ? sRes.data : (sRes.data?.data ?? []));
-      const history = Array.isArray(hRes.data) ? hRes.data : [];
-      setContinueItems(history.filter(h => !h.completed && h.progress > 0 && h.title));
       const popM = Array.isArray(popMoviesRes.data) ? popMoviesRes.data : [];
       const popS = Array.isArray(popSeriesRes.data) ? popSeriesRes.data : [];
       const merged = [...popM, ...popS].sort((a, b) => (b.views || 0) - (a.views || 0)).slice(0, 20);
       setPopular(merged);
     }).finally(() => setLoading(false));
   }, []);
+
+  // Re-busca histórico quando perfil muda (mesmo que a aba já esteja focada)
+  useEffect(() => {
+    fetchHistory();
+  }, [fetchHistory]);
+
+  // Re-busca histórico ao ganhar foco (ao voltar do player)
+  useFocusEffect(useCallback(() => {
+    fetchHistory();
+  }, [fetchHistory]));
 
   if (loading) {
     return (

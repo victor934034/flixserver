@@ -10,6 +10,7 @@ const NAV = [
   { href: '/admin/filmes', label: 'Filmes' },
   { href: '/admin/series', label: 'Séries' },
   { href: '/admin/upload', label: 'Upload' },
+  { href: '/admin/upload-desenhos', label: 'Upload Desenhos' },
   { href: '/admin/importar', label: 'Importar TMDB' },
   { href: '/admin/usuarios', label: 'Usuários' },
   { href: '/admin/categorias', label: 'Categorias' },

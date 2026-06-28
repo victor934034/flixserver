@@ -365,7 +365,7 @@ function EmptyState({ icon, title, desc }) {
 
 // ─── HomeScreen ───────────────────────────────────────────────────────────────
 export default function HomeScreen({ navigation }) {
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
 
   const [activeNav, setActiveNav]       = useState(0);
   const [featured, setFeatured]         = useState(null);
@@ -577,6 +577,20 @@ export default function HomeScreen({ navigation }) {
               </Animated.Text>
             </View>
 
+            {/* Profile section */}
+            <View style={s.profileBox}>
+              <View style={s.profileAvatar}>
+                {user?.avatar_url
+                  ? <Image source={{ uri: user.avatar_url }} style={s.profileAvatarImg} />
+                  : <Text style={s.profileAvatarLetter}>{(user?.name || 'U')[0].toUpperCase()}</Text>
+                }
+              </View>
+              <Animated.View style={[s.profileInfo, { opacity: labelOp }]}>
+                <Text style={s.profileName} numberOfLines={1}>{user?.name || 'Usuário'}</Text>
+                <Text style={s.profileSub} numberOfLines={1}>Perfil</Text>
+              </Animated.View>
+            </View>
+
             <View style={s.navDividerTop} />
 
             {NAV.map(n => (
@@ -724,6 +738,20 @@ const s = StyleSheet.create({
   },
   logoIconTxt: { fontSize: r(22), fontWeight: '900', color: '#fff' },
   logoWordmark: { fontSize: r(17), fontWeight: '900', color: '#E50914', letterSpacing: r(2), flexShrink: 1 },
+
+  profileBox: {
+    flexDirection: 'row', alignItems: 'center', gap: r(10),
+    paddingHorizontal: r(10), paddingVertical: r(8), overflow: 'hidden',
+  },
+  profileAvatar: {
+    width: r(38), height: r(38), borderRadius: r(9), flexShrink: 0,
+    backgroundColor: '#E50914', justifyContent: 'center', alignItems: 'center', overflow: 'hidden',
+  },
+  profileAvatarImg: { width: r(38), height: r(38) },
+  profileAvatarLetter: { fontSize: r(18), fontWeight: '900', color: '#fff' },
+  profileInfo: { flex: 1, overflow: 'hidden' },
+  profileName: { fontSize: r(13), fontWeight: '700', color: '#fff' },
+  profileSub: { fontSize: r(11), color: 'rgba(255,255,255,0.4)', marginTop: r(1) },
 
   navDividerTop: { height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginHorizontal: r(10), marginBottom: r(6) },
   navDivider:    { height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginHorizontal: r(10), marginTop: r(4), marginBottom: r(6) },

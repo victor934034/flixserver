@@ -61,9 +61,32 @@ const LOGOUT_ICON = (
   </svg>
 );
 
+const PROFILE_ICON = (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+  </svg>
+);
+
+function ProfileAvatar({ profile, size = 36 }) {
+  const av = profile?.avatar;
+  if (av && av.startsWith('http')) {
+    return <img src={av} style={{ width: size, height: size, borderRadius: Math.round(size * 0.22), objectFit: 'cover', flexShrink: 0 }} />;
+  }
+  const letter = (profile?.name || 'P')[0].toUpperCase();
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: Math.round(size * 0.22), flexShrink: 0,
+      background: ACCENT, display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      <span style={{ fontSize: Math.round(size * 0.45), fontWeight: 900, color: '#fff', lineHeight: 1 }}>{letter}</span>
+    </div>
+  );
+}
+
 export default function Sidebar({
   activeNav, focusIdx, expanded,
-  onSelect, onLogout, onMouseEnter, onMouseLeave,
+  onSelect, onLogout, onSwitchProfile, activeProfile,
+  onMouseEnter, onMouseLeave,
 }) {
   const w = expanded ? SB_EX : SB;
 
@@ -105,6 +128,33 @@ export default function Sidebar({
           </span>
         </div>
 
+        {/* Profile display */}
+        {activeProfile && (
+          <div style={{ padding: '0 10px 8px', flexShrink: 0 }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 12,
+              padding: '9px 10px', borderRadius: 10,
+              background: 'rgba(255,255,255,0.05)',
+              overflow: 'hidden',
+            }}>
+              <ProfileAvatar profile={activeProfile} size={36} />
+              <div style={{
+                overflow: 'hidden',
+                opacity: expanded ? 1 : 0,
+                transition: 'opacity 0.15s ease',
+                minWidth: 0,
+              }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {activeProfile.name}
+                </div>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', whiteSpace: 'nowrap', marginTop: 2 }}>
+                  Trocar perfil ›
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div style={{ height: 1, background: 'rgba(255,255,255,0.06)', margin: '0 12px 8px' }} />
 
         {/* Nav items */}
@@ -126,13 +176,23 @@ export default function Sidebar({
           })}
         </div>
 
-        {/* Separator + logout */}
+        {/* Separator + profile switch + logout */}
         <div style={{ flexShrink: 0 }}>
           <div style={{ height: 1, background: 'rgba(255,255,255,0.06)', margin: '4px 12px 8px' }} />
           <SideItem
+            icon={activeProfile?.avatar
+              ? <ProfileAvatar profile={activeProfile} size={22} />
+              : PROFILE_ICON}
+            label={activeProfile ? activeProfile.name : 'Trocar Perfil'}
+            focused={focusIdx === NAV.length}
+            active={false}
+            expanded={expanded}
+            onClick={onSwitchProfile}
+          />
+          <SideItem
             icon={LOGOUT_ICON}
             label="Sair"
-            focused={focusIdx === NAV.length}
+            focused={focusIdx === NAV.length + 1}
             active={false}
             expanded={expanded}
             danger

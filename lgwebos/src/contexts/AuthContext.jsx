@@ -17,11 +17,6 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     const token   = localStorage.getItem('token');
     const userStr = localStorage.getItem('user');
-    const profStr = localStorage.getItem('profile');
-
-    if (profStr) {
-      try { setActiveProfileState(JSON.parse(profStr)); } catch {}
-    }
 
     if (token && userStr) {
       try { setUser(JSON.parse(userStr)); } catch {}

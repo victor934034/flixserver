@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, Image, TouchableOpacity,
   ActivityIndicator, useWindowDimensions, Alert,
@@ -10,15 +10,17 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import api from '../../lib/api';
 import { useDownloads } from '../../contexts/DownloadContext';
 import { useParental } from '../../contexts/ParentalContext';
+import { useProfile } from '../../contexts/ProfileContext';
 
 export default function SerieDetail() {
-  const { id } = useLocalSearchParams();
+  const { id, startAt, episodeId, seasonNum } = useLocalSearchParams();
   const router = useRouter();
+  const autoPlayedRef = useRef(false);
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const [serie, setSerie] = useState(null);
   const [episodes, setEpisodes] = useState([]);
-  const [season, setSeason] = useState(1);
+  const [season, setSeason] = useState(seasonNum ? Number(seasonNum) : 1);
   const [loading, setLoading] = useState(true);
   const [listItem, setListItem] = useState(null);
   const [listLoading, setListLoading] = useState(false);
@@ -26,6 +28,8 @@ export default function SerieDetail() {
   const [likeLoading, setLikeLoading] = useState(false);
   const { getStatus, startDownload, cancelDownload, deleteDownload } = useDownloads();
   const { checkAccess } = useParental();
+  const { activeProfile } = useProfile();
+  const [epSeconds, setEpSeconds] = useState({});
 
   useEffect(() => {
     Promise.all([
@@ -67,6 +71,33 @@ export default function SerieDetail() {
     } catch {}
     setListLoading(false);
   };
+
+  // Fetch saved positions for all episodes (used when not coming from Continue Watching)
+  useEffect(() => {
+    if (!id || !activeProfile?.id || episodes.length === 0) return;
+    api.get('/history', { params: { limit: 200, profile_id: activeProfile.id } })
+      .then(r => {
+        const map = {};
+        (r.data || []).forEach(h => {
+          const epId = h.episode_id || (h.content_type === 'episode' ? h.content_id : null);
+          if (epId && h.progress > 5 && !h.completed) {
+            map[String(epId)] = h.progress;
+          }
+        });
+        setEpSeconds(map);
+      }).catch(() => {});
+  }, [id, activeProfile?.id, episodes.length]);
+
+  // Auto-play matching episode when coming from Continue Watching
+  useEffect(() => {
+    if (!episodeId || autoPlayedRef.current || episodes.length === 0) return;
+    const ep = episodes.find(e => String(e.id) === String(episodeId));
+    if (!ep) return;
+    autoPlayedRef.current = true;
+    const resumeSec = startAt ? Number(startAt) : 0;
+    playEp(ep, undefined, resumeSec);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [episodes, episodeId]);
 
   const seasons = [...new Set(episodes.map(e => e.season_number))].sort((a, b) => a - b);
   const currentEps = episodes
@@ -117,7 +148,7 @@ export default function SerieDetail() {
     }
   };
 
-  const playEp = async (ep, preferredVersion) => {
+  const playEp = async (ep, preferredVersion, resumeSec) => {
     const version = preferredVersion || (ep.file_dubbing ? 'dubbing' : ep.file_subtitled ? 'subtitled' : 'cinema');
     const remoteUrl = ep.file_dubbing || ep.file_subtitled || ep.file_cinema;
     if (!remoteUrl) return;
@@ -140,29 +171,28 @@ export default function SerieDetail() {
     const rawNext = idx >= 0 && idx + 1 < allSorted.length ? allSorted[idx + 1] : null;
     const nextEp = rawNext && (rawNext.file_dubbing || rawNext.file_subtitled || rawNext.file_cinema) ? rawNext : null;
 
-    router.push({
-      pathname: '/player',
-      params: {
-        url,
-        title: `${serie.title} · T${ep.season_number}E${String(ep.episode_number).padStart(2, '0')}${ep.title ? ` · ${ep.title}` : ''}`,
-        id: ep.id,
-        type: 'episode',
-        currentVersion: version,
-        versions: JSON.stringify({
-          dubbing: ep.file_dubbing || null,
-          subtitled: ep.file_subtitled || null,
-          cinema: ep.file_cinema || null,
-        }),
-        subtitles: JSON.stringify({
-          pt: ep.subtitle_pt || null,
-          en: ep.subtitle_en || null,
-          es: ep.subtitle_es || null,
-        }),
-        seriesId: id,
-        ...(nextEp ? { nextEpisode: JSON.stringify(buildEpParam(nextEp)) } : {}),
-        ...(ep.intro_end ? { introEnd: String(ep.intro_end) } : {}),
-      },
-    });
+    const playerParams = {
+      url,
+      title: `${serie.title} · T${ep.season_number}E${String(ep.episode_number).padStart(2, '0')}${ep.title ? ` · ${ep.title}` : ''}`,
+      id: String(ep.id),
+      type: 'episode',
+      currentVersion: version,
+      versions: JSON.stringify({
+        dubbing: ep.file_dubbing || null,
+        subtitled: ep.file_subtitled || null,
+        cinema: ep.file_cinema || null,
+      }),
+      subtitles: JSON.stringify({
+        pt: ep.subtitle_pt || null,
+        en: ep.subtitle_en || null,
+        es: ep.subtitle_es || null,
+      }),
+      seriesId: id,
+    };
+    if (nextEp) playerParams.nextEpisode = JSON.stringify(buildEpParam(nextEp));
+    if (ep.intro_end) playerParams.introEnd = String(ep.intro_end);
+    if (resumeSec > 5) playerParams.startAt = String(Math.floor(resumeSec));
+    router.push({ pathname: '/player', params: playerParams });
   };
 
   if (loading) return (
@@ -208,7 +238,7 @@ export default function SerieDetail() {
 
         <View style={styles.actionRow}>
           {episodes.length > 0 && (
-            <TouchableOpacity style={styles.btnPlay} onPress={() => playEp(episodes[0])}>
+            <TouchableOpacity style={styles.btnPlay} onPress={() => playEp(episodes[0], undefined, epSeconds[String(episodes[0].id)] || 0)}>
               <Ionicons name="play" size={18} color="#000" />
               <Text style={styles.btnPlayText}>Assistir</Text>
             </TouchableOpacity>
@@ -274,7 +304,7 @@ export default function SerieDetail() {
             <View key={ep.id} style={styles.episodeWrap}>
               <TouchableOpacity
                 style={[styles.episode, !hasFile && styles.episodeDisabled]}
-                onPress={() => playEp(ep)}
+                onPress={() => playEp(ep, undefined, epSeconds[String(ep.id)] || 0)}
                 disabled={!hasFile}
                 activeOpacity={0.7}
               >

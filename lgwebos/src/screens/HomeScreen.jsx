@@ -693,7 +693,7 @@ function buildSections(activeNav, pm, nm, ps, ns) {
 
 // ── HomeScreen ────────────────────────────────────────────────────────────────
 export default function HomeScreen() {
-  const { logout, activeProfile } = useAuth();
+  const { logout, activeProfile, setActiveProfile } = useAuth();
   const navigate = useNavigate();
 
   const [activeNav,    setActiveNav]    = useState('home');
@@ -708,7 +708,8 @@ export default function HomeScreen() {
   const [colFocus,     setColFocus]     = useState(0);
   const [bannerBtn,    setBannerBtn]    = useState(0); // 0=Assistir, 1=Mais Info
 
-  const dataCache  = useRef({});
+  const dataCache     = useRef({});
+  const prevProfileId = useRef(undefined);
   const scrollRef  = useRef(null);
   const rowEls     = useRef([]);
   const vertRafRef = useRef(null);
@@ -722,7 +723,13 @@ export default function HomeScreen() {
     if (item.content_type === 'movie' || item.content_type === 'episode') {
       const id   = item.series_id || item.content_id;
       const type = item.content_type === 'episode' ? 'series' : 'movie';
-      navigate('/detail?type=' + type + '&id=' + id);
+      let url = '/detail?type=' + type + '&id=' + id;
+      if (item.progress > 5) url += '&startAt=' + Math.floor(item.progress);
+      if (item.content_type === 'episode' && item.content_id) {
+        url += '&epId=' + item.content_id;
+        if (item.season_number) url += '&seasonNum=' + item.season_number;
+      }
+      navigate(url);
       return;
     }
     const type = item.total_seasons !== undefined ? 'series' : 'movie';
@@ -736,8 +743,9 @@ export default function HomeScreen() {
   }, [navigate]);
 
   const goToNav = useCallback((idx) => {
+    if (idx === NAV.length) { setActiveProfile(null); navigate('/profile-select', { replace: true }); return; }
+    if (idx > NAV.length)   { logout(); navigate('/login', { replace: true }); return; }
     const key = NAV[idx];
-    if (!key) { logout(); navigate('/login', { replace: true }); return; }
     if (key === 'iptv') { navigate('/iptv'); return; }
     setActiveNav(key);
     setFocusArea('content');
@@ -745,7 +753,7 @@ export default function HomeScreen() {
     setRowFocus(0);
     setColFocus(0);
     setBannerBtn(0);
-  }, [logout, navigate]);
+  }, [logout, navigate, setActiveProfile]);
 
   // Load watchlist when minha-lista is active
   useEffect(() => {
@@ -778,6 +786,14 @@ export default function HomeScreen() {
   useEffect(() => {
     if (activeNav === 'search') return;
     if (activeNav === 'minha-lista') return;
+
+    // Quando o perfil muda, invalida o cache para rebuscar o histórico correto
+    const curProfileId = activeProfile?.id ?? null;
+    if (prevProfileId.current !== undefined && prevProfileId.current !== curProfileId) {
+      dataCache.current = {};
+    }
+    prevProfileId.current = curProfileId;
+
     if (prefetchCache[activeNav] && !dataCache.current[activeNav]) {
       dataCache.current[activeNav] = prefetchCache[activeNav];
     }
@@ -838,7 +854,7 @@ export default function HomeScreen() {
     }
 
     if (focusArea === 'sidebar') {
-      const total = NAV.length + 1;
+      const total = NAV.length + 2;
       if (k === KEY.UP)    { e.preventDefault(); setNavFocus(f => Math.max(0, f - 1)); }
       if (k === KEY.DOWN)  { e.preventDefault(); setNavFocus(f => Math.min(total - 1, f + 1)); }
       if (k === KEY.RIGHT) { e.preventDefault(); setFocusArea('content'); setSideExpanded(false); }
@@ -911,6 +927,8 @@ export default function HomeScreen() {
           setBannerBtn(0);
         }}
         onLogout={() => { logout(); navigate('/login', { replace: true }); }}
+        onSwitchProfile={() => { setActiveProfile(null); navigate('/profile-select', { replace: true }); }}
+        activeProfile={activeProfile}
         onMouseEnter={() => setSideHovered(true)}
         onMouseLeave={() => setSideHovered(false)}
       />

@@ -1,33 +1,31 @@
 const router = require('express').Router();
-const { optionalAuth } = require('../middleware/auth');
+const { authMiddleware } = require('../middleware/auth');
 
-// In-memory cast store: userId → item, plus a global fallback
+// In-memory cast store: userId → item (completely isolated per user)
 const castByUser = new Map();
-let globalCast = null;
 
-// POST /api/cast — salva o item a transmitir (mobile ou web → TV)
-router.post('/', optionalAuth, (req, res) => {
+router.use(authMiddleware);
+
+// POST /api/cast — mobile envia o item para a TV do próprio usuário
+router.post('/', (req, res) => {
   const { url, title = '', position = 0, subtitleUrl = null, version = null } = req.body;
   if (!url) return res.status(400).json({ error: 'url é obrigatório' });
-  const item = { url, title, position, subtitleUrl, version, sentAt: Date.now() };
-  globalCast = item;
-  if (req.user) castByUser.set(req.user.id, item);
+  castByUser.set(req.user.id, { url, title, position, subtitleUrl, version, sentAt: Date.now() });
   res.json({ ok: true });
 });
 
-// GET /api/cast — LG TV polling: retorna item atual (expira em 2 min)
-router.get('/', optionalAuth, (req, res) => {
-  const item = (req.user && castByUser.get(req.user.id)) || globalCast;
+// GET /api/cast — TV polling: retorna item do próprio usuário (expira em 2 min)
+router.get('/', (req, res) => {
+  const item = castByUser.get(req.user.id);
   if (!item || Date.now() - item.sentAt > 120_000) {
     return res.json({ hasContent: false });
   }
   res.json({ hasContent: true, ...item });
 });
 
-// DELETE /api/cast — TV confirma recebimento, limpa estado
-router.delete('/', optionalAuth, (req, res) => {
-  if (req.user) castByUser.delete(req.user.id);
-  globalCast = null;
+// DELETE /api/cast — TV confirma recebimento, limpa só o item deste usuário
+router.delete('/', (req, res) => {
+  castByUser.delete(req.user.id);
   res.json({ ok: true });
 });
 

@@ -1,0 +1,245 @@
+.heading { font-size: 1.6rem; font-weight: 700; margin-bottom: 0.5rem; }
+.subheading { font-size: 0.9rem; color: var(--text-muted); margin-bottom: 1.5rem; }
+
+/* Search */
+.searchRow { display: flex; gap: 0.75rem; margin-bottom: 1.5rem; }
+.searchInput {
+  flex: 1;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-radius: 6px;
+  padding: 0.6rem 1rem;
+  font-size: 0.95rem;
+}
+.searchInput:focus { outline: none; border-color: var(--accent); }
+.btnSearch {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 0.6rem 1.5rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btnSearch:disabled { opacity: 0.5; cursor: default; }
+
+/* Results grid */
+.resultsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+.resultCard {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.2s, transform 0.15s;
+}
+.resultCard:hover { border-color: var(--accent); transform: translateY(-2px); }
+.resultPoster { width: 100%; aspect-ratio: 2/3; object-fit: cover; display: block; background: #222; }
+.resultInfo { padding: 0.5rem 0.6rem; }
+.resultTitle { font-size: 0.8rem; font-weight: 600; line-height: 1.3; }
+.resultYear { font-size: 0.72rem; color: var(--text-muted); margin-top: 2px; }
+
+/* Breadcrumb / back nav */
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+.breadcrumb button {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0;
+  text-decoration: underline;
+}
+.breadcrumb span { color: var(--text-secondary); }
+
+/* Selected series banner */
+.seriesBanner {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1.5rem;
+}
+.seriesBannerPoster { width: 48px; height: 72px; object-fit: cover; border-radius: 4px; background: #222; flex-shrink: 0; }
+.seriesBannerTitle { font-size: 1rem; font-weight: 700; }
+.seriesBannerSub { font-size: 0.8rem; color: var(--text-muted); margin-top: 2px; }
+
+/* Seasons grid */
+.seasonsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+.seasonCard {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 0.75rem;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+.seasonCard:hover { border-color: var(--accent); background: rgba(229,9,20,0.05); }
+.seasonNum { font-size: 1.1rem; font-weight: 700; }
+.seasonEpCount { font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; }
+
+/* Episodes section */
+.episodesHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+.episodesTitle { font-size: 1rem; font-weight: 700; }
+
+/* Controls row */
+.controlsRow {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 1.25rem;
+}
+.versionSelect {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+}
+.btnAutoAssign {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.btnAutoAssign:hover { border-color: var(--text-muted); color: var(--text-primary); }
+.btnStart {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 0.5rem 1.5rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  margin-left: auto;
+}
+.btnStart:disabled { opacity: 0.5; cursor: default; }
+
+/* Dropzone */
+.dropzone {
+  border: 2px dashed var(--border);
+  border-radius: 10px;
+  padding: 2rem;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+  background: var(--bg-secondary);
+  margin-bottom: 1.25rem;
+}
+.dropzone.active { border-color: var(--accent); background: rgba(229,9,20,0.05); }
+.dropzone:hover { border-color: var(--text-muted); }
+.dropText { font-size: 0.95rem; color: var(--text-primary); margin-bottom: 0.25rem; }
+.dropSub { font-size: 0.8rem; color: var(--text-muted); }
+
+/* Episode list */
+.epList { display: flex; flex-direction: column; gap: 0.5rem; }
+
+.epRow {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  transition: border-color 0.2s;
+}
+.epRow.done { border-color: rgba(70,211,105,0.3); }
+.epRow.error { border-color: rgba(229,9,20,0.3); }
+.epRow.hasFile { border-color: rgba(70,211,105,0.15); }
+
+.epThumb {
+  width: 72px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 4px;
+  background: #1a1a1a;
+  flex-shrink: 0;
+}
+.epThumbPlaceholder {
+  width: 72px;
+  height: 40px;
+  border-radius: 4px;
+  background: #1a1a1a;
+  flex-shrink: 0;
+}
+
+.epInfo { flex: 1; min-width: 0; }
+.epNum { font-size: 0.72rem; color: var(--text-muted); margin-bottom: 1px; }
+.epTitle { font-size: 0.85rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.epFile { font-size: 0.72rem; color: var(--success); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.epNoFile { font-size: 0.72rem; color: var(--text-muted); margin-top: 2px; }
+
+.epActions { display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0; }
+
+.btnPickFile {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btnPickFile:hover { border-color: var(--text-muted); color: var(--text-primary); }
+.btnClear {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 0 4px;
+}
+.btnClear:hover { color: var(--accent); }
+
+/* Progress */
+.progressWrap { width: 100%; }
+.progressBar { width: 100%; height: 3px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden; margin-top: 3px; }
+.progressFill { height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.2s; }
+.progressMeta { font-size: 0.7rem; color: #888; margin-top: 2px; display: flex; gap: 10px; }
+.progressSpeed { color: #46d369; font-weight: 600; }
+
+/* Badges */
+.badgeDone { color: var(--success); font-size: 0.8rem; font-weight: 600; }
+.badgeError { color: var(--accent); font-size: 0.8rem; font-weight: 600; }
+.badgeUploading { color: var(--text-muted); font-size: 0.8rem; }
+
+/* Misc */
+.loading { color: var(--text-muted); font-size: 0.9rem; padding: 1rem 0; }
+.errorMsg { color: #ff6b6b; font-size: 0.8rem; margin-top: 4px; }
+.noResults { color: var(--text-muted); font-size: 0.9rem; text-align: center; padding: 2rem; }
