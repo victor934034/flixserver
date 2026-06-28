@@ -95,7 +95,7 @@ export default function SerieDetail() {
     if (!ep) return;
     autoPlayedRef.current = true;
     const resumeSec = startAt ? Number(startAt) : 0;
-    playEp(ep, undefined, resumeSec);
+    playEp(ep, undefined, resumeSec, true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [episodes, episodeId]);
 
@@ -148,7 +148,7 @@ export default function SerieDetail() {
     }
   };
 
-  const playEp = async (ep, preferredVersion, resumeSec) => {
+  const playEp = async (ep, preferredVersion, resumeSec, replace = false) => {
     const version = preferredVersion || (ep.file_dubbing ? 'dubbing' : ep.file_subtitled ? 'subtitled' : 'cinema');
     const remoteUrl = ep.file_dubbing || ep.file_subtitled || ep.file_cinema;
     if (!remoteUrl) return;
@@ -192,7 +192,11 @@ export default function SerieDetail() {
     if (nextEp) playerParams.nextEpisode = JSON.stringify(buildEpParam(nextEp));
     if (ep.intro_end) playerParams.introEnd = String(ep.intro_end);
     if (resumeSec > 5) playerParams.startAt = String(Math.floor(resumeSec));
-    router.push({ pathname: '/player', params: playerParams });
+    if (replace) {
+      router.replace({ pathname: '/player', params: playerParams });
+    } else {
+      router.push({ pathname: '/player', params: playerParams });
+    }
   };
 
   if (loading) return (

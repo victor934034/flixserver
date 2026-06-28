@@ -838,30 +838,37 @@ export default function PlayerScreen() {
 
                 {/* Web Video Cast */}
                 {!isLocal && Platform.OS === 'android' && (
-                  <TouchableOpacity
-                    style={styles.castOption}
-                    activeOpacity={0.8}
-                    onPress={async () => {
-                      const videoUrl = versions[activeVer];
-                      if (!videoUrl) return;
-                      const wvcScheme = `webvideocast://${videoUrl.replace(/^https?:\/\//, '')}`;
-                      try {
-                        await Linking.openURL(wvcScheme);
-                      } catch {
-                        Linking.openURL('https://play.google.com/store/apps/details?id=com.instantbits.cast.webvideo');
-                      }
-                    }}
-                  >
+                  <View style={styles.castOption}>
                     <View style={[styles.castIconBox, { backgroundColor: '#1a73e8' }]}>
                       <Ionicons name="cast-outline" size={24} color="#fff" />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.castOptionTitle}>Web Video Cast</Text>
                       <Text style={styles.castOptionDesc}>
-                        Transmite para Chromecast, DLNA, Fire TV, Roku e outros. Requer o app Web Video Cast instalado.
+                        Transmite para Chromecast, DLNA, Fire TV, Roku e outros.
                       </Text>
+                      <View style={{ flexDirection: 'row', gap: 10, marginTop: 8 }}>
+                        <TouchableOpacity
+                          onPress={() => {
+                            const v = versions[activeVer];
+                            if (!v) return;
+                            Linking.openURL(`webvideocast://${v.replace(/^https?:\/\//, '')}`);
+                          }}
+                          style={{ backgroundColor: '#1a73e8', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6 }}
+                          activeOpacity={0.8}
+                        >
+                          <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>Abrir no WVC</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => Linking.openURL('https://play.google.com/store/apps/details?id=com.instantbits.cast.webvideo')}
+                          style={{ borderWidth: 1, borderColor: '#444', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6 }}
+                          activeOpacity={0.8}
+                        >
+                          <Text style={{ color: '#aaa', fontSize: 12 }}>Instalar</Text>
+                        </TouchableOpacity>
+                      </View>
                     </View>
-                  </TouchableOpacity>
+                  </View>
                 )}
 
                 {Platform.OS === 'ios' && (
