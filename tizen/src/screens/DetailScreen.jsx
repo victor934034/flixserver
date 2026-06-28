@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { moviesAPI, seriesAPI, watchlistAPI, likesAPI } from '../api/index.js';
 import { KEY, useKeyDown } from '../hooks/useNav.js';
+import { useAuth } from '../contexts/AuthContext.jsx';
 
 const VERSION_META = {
   dubbing:   { label: 'Dublado',   color: '#E50914' },
@@ -95,8 +96,9 @@ function SubtitleBadge({ label }) {
 }
 
 export default function DetailScreen() {
-  const [params]   = useSearchParams();
-  const navigate   = useNavigate();
+  const [params]          = useSearchParams();
+  const navigate          = useNavigate();
+  const { activeProfile } = useAuth();
   const type = params.get('type') || 'movie';
   const id   = params.get('id');
   const isSeries = type === 'series';
@@ -137,7 +139,8 @@ export default function DetailScreen() {
     }).catch(() => setError('Erro ao carregar')).finally(() => setLoading(false));
 
     // Load watchlist
-    watchlistAPI.get().then(r => {
+    const profileId = activeProfile && activeProfile.id;
+    watchlistAPI.get(profileId).then(r => {
       const item = (r.data || []).find(i => i.content_id === id);
       setWlItem(item || null);
     }).catch(() => {});
@@ -185,6 +188,7 @@ export default function DetailScreen() {
       url, title: detail.title || detail.name || '',
       tracks: { dubbing: detail.file_dubbing || null, subtitled: detail.file_subtitled || null, cinema: detail.file_cinema || null },
       subtitles: { pt: detail.subtitle_pt || null, en: detail.subtitle_en || null, es: detail.subtitle_es || null },
+      contentMeta: { content_type: 'movie', content_id: detail.id },
     }});
   }
 
@@ -204,6 +208,12 @@ export default function DetailScreen() {
         episodes: currentEps,
         currentEpId: ep.id,
       },
+      contentMeta: {
+        content_type: 'episode',
+        content_id: ep.id,
+        episode_id: ep.id,
+        series_id: detail ? detail.id : null,
+      },
     }});
   }
 
@@ -213,12 +223,13 @@ export default function DetailScreen() {
     if (act.id === 'play') { if (currentEps[0]) playEpisode(currentEps[0]); return; }
     if (act.id === 'watchlist') {
       setWlLoading(true);
+      const profileId = activeProfile && activeProfile.id;
       try {
         if (wlItem) {
           await watchlistAPI.remove(wlItem.id);
           setWlItem(null);
         } else {
-          const r = await watchlistAPI.add(isSeries ? 'series' : 'movie', id);
+          const r = await watchlistAPI.add(isSeries ? 'series' : 'movie', id, profileId);
           setWlItem(r.data);
         }
       } catch {} finally { setWlLoading(false); }

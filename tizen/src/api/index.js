@@ -41,9 +41,15 @@ export const seriesAPI = {
 
 // ── Watchlist ─────────────────────────────────────────────────────────────────
 export const watchlistAPI = {
-  get:    ()                  => api.get('/api/watchlist'),
-  add:    (type, id)          => api.post('/api/watchlist', { content_type: type, content_id: id }),
+  get:    (profileId)         => api.get('/api/watchlist', profileId ? { params: { profile_id: profileId } } : {}),
+  add:    (type, id, profileId) => api.post('/api/watchlist', { content_type: type, content_id: id, profile_id: profileId || null }),
   remove: (itemId)            => api.delete('/api/watchlist/' + itemId),
+};
+
+// ── History ───────────────────────────────────────────────────────────────────
+export const historyAPI = {
+  get:  (profileId) => api.get('/api/history', profileId ? { params: { profile_id: profileId } } : {}),
+  save: (data)      => api.post('/api/history', data),
 };
 
 // ── Likes ─────────────────────────────────────────────────────────────────────

@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
-import { moviesAPI, seriesAPI } from '../api/index.js';
+import { moviesAPI, seriesAPI, watchlistAPI } from '../api/index.js';
 import api from '../api/index.js';
 import { prefetchCache } from '../App.jsx';
 import Sidebar from '../components/Sidebar.jsx';
 import { KEY, useKeyDown } from '../hooks/useNav.js';
 
-const NAV       = ['home', 'movies', 'series', 'search', 'iptv'];
+const NAV       = ['home', 'movies', 'series', 'search', 'iptv', 'minha-lista'];
 const ACCENT    = '#c91c2c';
 
 // Card sizes (from DC design spec)
@@ -747,9 +747,37 @@ export default function HomeScreen() {
     setBannerBtn(0);
   }, [logout, navigate]);
 
+  // Load watchlist when minha-lista is active
+  useEffect(() => {
+    if (activeNav !== 'minha-lista') return;
+    if (dataCache.current['minha-lista']) {
+      const c = dataCache.current['minha-lista'];
+      setFeatured(null);
+      setSections(c.sections);
+      setLoadingData(false);
+      return;
+    }
+    setLoadingData(true);
+    const profileId = activeProfile && activeProfile.id;
+    watchlistAPI.get(profileId)
+      .then(r => {
+        const items = r.data || [];
+        dataCache.current['minha-lista'] = {
+          sections: items.length > 0
+            ? [{ key: 'watchlist', title: 'Minha Lista', data: items }]
+            : [],
+        };
+        setFeatured(null);
+        setSections(dataCache.current['minha-lista'].sections);
+      })
+      .catch(() => { setSections([]); })
+      .finally(() => setLoadingData(false));
+  }, [activeNav, activeProfile]);
+
   // Load content
   useEffect(() => {
     if (activeNav === 'search') return;
+    if (activeNav === 'minha-lista') return;
     if (prefetchCache[activeNav] && !dataCache.current[activeNav]) {
       dataCache.current[activeNav] = prefetchCache[activeNav];
     }
@@ -800,7 +828,8 @@ export default function HomeScreen() {
   useKeyDown(e => {
     const { focusArea, navFocus, rowFocus, colFocus, sections, featured, activeNav, bannerBtn } = st.current;
     const k = e.keyCode;
-    const totalRows = 1 + sections.length;
+    const hasBanner = activeNav !== 'minha-lista';
+    const totalRows = (hasBanner ? 1 : 0) + sections.length;
 
     if (k === KEY.BACK) {
       e.preventDefault();
@@ -829,8 +858,7 @@ export default function HomeScreen() {
     }
     if (k === KEY.LEFT) {
       e.preventDefault();
-      if (rowFocus === 0) {
-        // On banner: cycle banner buttons
+      if (hasBanner && rowFocus === 0) {
         if (bannerBtn > 0) { setBannerBtn(f => f - 1); }
         else { setFocusArea('sidebar'); setSideExpanded(true); setNavFocus(Math.max(0, NAV.indexOf(activeNav))); }
       } else {
@@ -845,21 +873,23 @@ export default function HomeScreen() {
     }
     if (k === KEY.RIGHT) {
       e.preventDefault();
-      if (rowFocus === 0) {
+      if (hasBanner && rowFocus === 0) {
         setBannerBtn(f => Math.min(1, f + 1));
       } else {
-        const sec = sections[rowFocus - 1];
+        const secIdx = hasBanner ? rowFocus - 1 : rowFocus;
+        const sec = sections[secIdx];
         if (sec) setColFocus(f => Math.min(f + 1, sec.data.length - 1));
       }
     }
     if (k === KEY.ENTER) {
       e.preventDefault();
-      if (rowFocus === 0) {
+      if (hasBanner && rowFocus === 0) {
         if (bannerBtn === 0) openWatch(featured);
         else openDetail(featured);
         return;
       }
-      const sec = sections[rowFocus - 1];
+      const secIdx = hasBanner ? rowFocus - 1 : rowFocus;
+      const sec = sections[secIdx];
       if (sec && sec.data[colFocus]) openDetail(sec.data[colFocus]);
     }
   });
@@ -872,6 +902,7 @@ export default function HomeScreen() {
         expanded={showSidebar}
         onSelect={key => {
           if (key === 'iptv') { navigate('/iptv'); return; }
+          if (key === 'minha-lista') delete dataCache.current['minha-lista'];
           setActiveNav(key);
           setFocusArea('content');
           setSideExpanded(false);
@@ -900,20 +931,33 @@ export default function HomeScreen() {
             ref={scrollRef}
             style={{ height: '100%', overflowY: 'auto' }}
           >
-            {/* Banner — row 0 */}
-            <div ref={el => { rowEls.current[0] = el; }}>
-              <HeroBanner
-                item={featured}
-                focusedBtn={focusArea === 'content' && rowFocus === 0 ? bannerBtn : -1}
-                onWatch={() => openWatch(featured)}
-                onDetail={() => openDetail(featured)}
-              />
-            </div>
+            {/* Banner — row 0 (hidden for minha-lista/search) */}
+            {activeNav !== 'minha-lista' && (
+              <div ref={el => { rowEls.current[0] = el; }}>
+                <HeroBanner
+                  item={featured}
+                  focusedBtn={focusArea === 'content' && rowFocus === 0 ? bannerBtn : -1}
+                  onWatch={() => openWatch(featured)}
+                  onDetail={() => openDetail(featured)}
+                />
+              </div>
+            )}
+
+            {/* Minha Lista empty state */}
+            {activeNav === 'minha-lista' && sections.length === 0 && !loadingData && (
+              <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16 }}>
+                <svg width="72" height="72" viewBox="0 0 24 24" fill="rgba(255,255,255,0.12)">
+                  <path d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2z"/>
+                </svg>
+                <div style={{ color: 'rgba(255,255,255,0.3)', fontSize: 18, fontWeight: 600 }}>Sua lista está vazia</div>
+                <div style={{ color: 'rgba(255,255,255,0.2)', fontSize: 14 }}>Adicione filmes e séries pela tela de detalhes</div>
+              </div>
+            )}
 
             {/* Sections */}
-            <div style={{ background: '#0a0a0a', paddingBottom: 64 }}>
+            <div style={{ background: '#0a0a0a', paddingBottom: 64, paddingTop: activeNav === 'minha-lista' ? 48 : 0 }}>
               {sections.map((sec, si) => {
-                const ri        = si + 1;
+                const ri        = activeNav === 'minha-lista' ? si : si + 1;
                 const isActive  = focusArea === 'content' && rowFocus === ri;
                 const isHistory = sec.key === 'history';
                 const isLand    = isHistory;

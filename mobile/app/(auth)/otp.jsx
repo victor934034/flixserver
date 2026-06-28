@@ -70,10 +70,11 @@ export default function OTPScreen() {
     try {
       if (mode === 'register') {
         await registerWithOTP(email, code, password, name);
+        router.replace('/profile-select');
       } else {
         await verifyOTP(email, code);
+        router.replace('/(tabs)');
       }
-      router.replace('/(tabs)');
     } catch (e) {
       Alert.alert('Erro', e.response?.data?.error || 'Código inválido. Tente novamente.');
       setDigits(['', '', '', '', '', '']);

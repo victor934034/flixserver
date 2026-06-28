@@ -6,11 +6,17 @@ router.use(authMiddleware);
 
 router.get('/', async (req, res) => {
   try {
-    const { data: items, error } = await supabase
+    const profileId = req.query.profile_id || req.headers['x-profile-id'] || null;
+
+    let query = supabase
       .from('watchlist')
       .select('*')
       .eq('user_id', req.user.id)
       .order('added_at', { ascending: false });
+
+    if (profileId) query = query.eq('profile_id', profileId);
+
+    const { data: items, error } = await query;
 
     if (error) throw error;
     if (!items || items.length === 0) return res.json([]);
@@ -42,24 +48,26 @@ router.get('/', async (req, res) => {
 });
 
 router.post('/', async (req, res) => {
-  const { content_type, content_id } = req.body;
+  const { content_type, content_id, profile_id } = req.body;
   if (!content_type || !content_id) {
     return res.status(400).json({ error: 'content_type e content_id são obrigatórios' });
   }
 
   try {
-    const { data: existing } = await supabase
+    let findQ = supabase
       .from('watchlist')
       .select('id')
       .eq('user_id', req.user.id)
-      .eq('content_id', content_id)
-      .single();
+      .eq('content_id', content_id);
+    if (profile_id) findQ = findQ.eq('profile_id', profile_id);
+
+    const { data: existing } = await findQ.single();
 
     if (existing) return res.status(409).json({ error: 'Já está na lista' });
 
     const { data, error } = await supabase
       .from('watchlist')
-      .insert({ user_id: req.user.id, content_type, content_id })
+      .insert({ user_id: req.user.id, content_type, content_id, profile_id: profile_id || null })
       .select()
       .single();
 

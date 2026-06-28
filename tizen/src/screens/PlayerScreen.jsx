@@ -1,6 +1,8 @@
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { KEY, useKeyDown } from '../hooks/useNav.js';
+import { useAuth } from '../contexts/AuthContext.jsx';
+import { historyAPI } from '../api/index.js';
 
 const SEEK_S  = 10;
 const HIDE_MS = 5000;
@@ -193,8 +195,9 @@ function PanelOpt({ label, sub, active, focused, onClick }) {
 
 // ── PlayerScreen ──────────────────────────────────────────────────────────────
 export default function PlayerScreen() {
-  const navigate   = useNavigate();
-  const { state }  = useLocation();
+  const navigate          = useNavigate();
+  const { state }         = useLocation();
+  const { activeProfile } = useAuth();
   const {
     url:          initialUrl  = '',
     title                     = '',
@@ -202,6 +205,7 @@ export default function PlayerScreen() {
     subtitles                 = {},
     skipIntroTo               = null,
     seriesContext             = null,
+    contentMeta               = null,
   } = state || {};
 
   const availTracks = ['dubbing','subtitled','cinema'].filter(k => !!tracks[k]);
@@ -246,8 +250,9 @@ export default function PlayerScreen() {
       subtitles: { pt: next.subtitle_pt||null, en: next.subtitle_en||null, es: next.subtitle_es||null },
       skipIntroTo: null,
       seriesContext: Object.assign({}, seriesContext, { currentEpId: next.id }),
+      contentMeta: { content_type: 'episode', content_id: next.id, episode_id: next.id, series_id: contentMeta && contentMeta.series_id },
     };
-  }, [seriesContext]);
+  }, [seriesContext, contentMeta]);
 
   const prevEp = useMemo(() => {
     if (!seriesContext) return null;
@@ -265,8 +270,9 @@ export default function PlayerScreen() {
       subtitles: { pt: prev.subtitle_pt||null, en: prev.subtitle_en||null, es: prev.subtitle_es||null },
       skipIntroTo: null,
       seriesContext: Object.assign({}, seriesContext, { currentEpId: prev.id }),
+      contentMeta: { content_type: 'episode', content_id: prev.id, episode_id: prev.id, series_id: contentMeta && contentMeta.series_id },
     };
-  }, [seriesContext]);
+  }, [seriesContext, contentMeta]);
 
   // Build button list (left group + right group)
   const leftBtns = useMemo(() => {
@@ -322,6 +328,28 @@ export default function PlayerScreen() {
     setCurrentTime(v.currentTime);
     if (v.buffered.length > 0) setBuffered(v.buffered.end(v.buffered.length - 1));
   }
+
+  const saveHistory = useCallback(() => {
+    const v = videoRef.current;
+    if (!v || !contentMeta || v.currentTime < 5) return;
+    const profileId = activeProfile && activeProfile.id;
+    historyAPI.save({
+      ...contentMeta,
+      progress: Math.floor(v.currentTime),
+      duration: Math.floor(v.duration) || 0,
+      profile_id: profileId || null,
+    }).catch(() => {});
+  }, [contentMeta, activeProfile]);
+
+  // Save history every 30s while playing
+  useEffect(() => {
+    if (!contentMeta) return;
+    const id = setInterval(saveHistory, 30000);
+    return () => {
+      clearInterval(id);
+      saveHistory(); // save on unmount/episode change
+    };
+  }, [saveHistory, contentMeta, currentUrl]);
 
   function onCanPlay() {
     if (!wasLoaded.current) {
