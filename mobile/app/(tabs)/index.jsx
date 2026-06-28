@@ -12,28 +12,66 @@ import { useProfile } from '../../contexts/ProfileContext';
 
 function ContinueCard({ item }) {
   const router = useRouter();
+  const [pressing, setPressing] = useState(false);
   const W = 140;
   const H = 80;
   const progress = item.duration > 0 ? Math.min(item.progress / item.duration, 1) : 0;
 
-  const handlePress = () => {
+  const handlePress = async () => {
+    if (pressing) return;
     if (item.content_type === 'movie') {
       router.push({ pathname: `/filme/${item.content_id}`, params: { startAt: String(Math.floor(item.progress)) } });
-    } else {
-      const seriesId = item.series_id || item.content_id;
-      const epParams = { startAt: String(Math.floor(item.progress)), episodeId: String(item.episode_id || item.content_id) };
-      if (item.season_number) epParams.seasonNum = String(item.season_number);
-      router.push({ pathname: `/serie/${seriesId}`, params: epParams });
+      return;
     }
+    // Episodes: fetch episode data and navigate directly to player
+    // This avoids the intermediate serie screen in the nav stack (no gray screen on back)
+    setPressing(true);
+    try {
+      const episodeId = item.episode_id || item.content_id;
+      const { data: ep } = await api.get(`/episodes/${episodeId}`);
+      const version = ep.file_dubbing ? 'dubbing' : ep.file_subtitled ? 'subtitled' : 'cinema';
+      const url = ep.file_dubbing || ep.file_subtitled || ep.file_cinema;
+      if (!url) { setPressing(false); return; }
+      const seriesId = item.series_id || item.content_id;
+      const playerParams = {
+        url,
+        title: `${item.title || ''} · T${ep.season_number}E${String(ep.episode_number).padStart(2, '0')}${ep.title ? ` · ${ep.title}` : ''}`,
+        id: String(ep.id),
+        type: 'episode',
+        currentVersion: version,
+        versions: JSON.stringify({
+          dubbing: ep.file_dubbing || null,
+          subtitled: ep.file_subtitled || null,
+          cinema: ep.file_cinema || null,
+        }),
+        subtitles: JSON.stringify({
+          pt: ep.subtitle_pt || null,
+          en: ep.subtitle_en || null,
+          es: ep.subtitle_es || null,
+        }),
+        seriesId: String(seriesId),
+      };
+      if (ep.intro_end) playerParams.introEnd = String(ep.intro_end);
+      if (item.progress > 5) playerParams.startAt = String(Math.floor(item.progress));
+      router.push({ pathname: '/player', params: playerParams });
+    } catch {}
+    setPressing(false);
   };
 
   return (
-    <TouchableOpacity onPress={handlePress} style={styles.continueCard} activeOpacity={0.75}>
-      {item.poster_url ? (
-        <Image source={{ uri: item.poster_url }} style={{ width: W, height: H, borderRadius: 6 }} resizeMode="cover" />
-      ) : (
-        <View style={[styles.continuePlaceholder, { width: W, height: H }]} />
-      )}
+    <TouchableOpacity onPress={handlePress} style={styles.continueCard} activeOpacity={0.75} disabled={pressing}>
+      <View style={{ width: W, height: H }}>
+        {item.poster_url ? (
+          <Image source={{ uri: item.poster_url }} style={{ width: W, height: H, borderRadius: 6, opacity: pressing ? 0.5 : 1 }} resizeMode="cover" />
+        ) : (
+          <View style={[styles.continuePlaceholder, { width: W, height: H }]} />
+        )}
+        {pressing && (
+          <View style={[StyleSheet.absoluteFill, { justifyContent: 'center', alignItems: 'center', borderRadius: 6 }]}>
+            <ActivityIndicator size="small" color="#E50914" />
+          </View>
+        )}
+      </View>
       <View style={styles.progressTrack}>
         <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
       </View>
