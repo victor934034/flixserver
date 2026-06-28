@@ -369,6 +369,7 @@ export default function PlayerScreen() {
       });
     } catch {}
   };
+  const saveProgress = () => saveProgressRef.current?.();
 
   useEffect(() => {
     const t = setInterval(() => saveProgressRef.current?.(), 15000);
@@ -849,10 +850,11 @@ export default function PlayerScreen() {
                       </Text>
                       <View style={{ flexDirection: 'row', gap: 10, marginTop: 8 }}>
                         <TouchableOpacity
-                          onPress={() => {
+                          onPress={async () => {
                             const v = versions[activeVer];
                             if (!v) return;
-                            Linking.openURL(`webvideocast://${v.replace(/^https?:\/\//, '')}`);
+                            const encodedPath = v.replace(/^https?:\/\//, '').replace(/ /g, '%20');
+                            try { await Linking.openURL(`webvideocast://${encodedPath}`); } catch {}
                           }}
                           style={{ backgroundColor: '#1a73e8', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6 }}
                           activeOpacity={0.8}
