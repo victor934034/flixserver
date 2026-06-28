@@ -839,38 +839,25 @@ export default function PlayerScreen() {
 
                 {/* Web Video Cast */}
                 {!isLocal && Platform.OS === 'android' && (
-                  <View style={styles.castOption}>
+                  <TouchableOpacity
+                    style={styles.castOption}
+                    activeOpacity={0.8}
+                    onPress={() => {
+                      const v = versions[activeVer];
+                      if (!v) return;
+                      Share.share({ message: v, title: title });
+                    }}
+                  >
                     <View style={[styles.castIconBox, { backgroundColor: '#1a73e8' }]}>
                       <Ionicons name="cast-outline" size={24} color="#fff" />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.castOptionTitle}>Web Video Cast</Text>
                       <Text style={styles.castOptionDesc}>
-                        Transmite para Chromecast, DLNA, Fire TV, Roku e outros.
+                        Toque para compartilhar a URL — selecione "Web Video Cast" na lista para transmitir via Chromecast, DLNA, Fire TV e outros.
                       </Text>
-                      <View style={{ flexDirection: 'row', gap: 10, marginTop: 8 }}>
-                        <TouchableOpacity
-                          onPress={async () => {
-                            const v = versions[activeVer];
-                            if (!v) return;
-                            const encodedPath = v.replace(/^https?:\/\//, '').replace(/ /g, '%20');
-                            try { await Linking.openURL(`webvideocast://${encodedPath}`); } catch {}
-                          }}
-                          style={{ backgroundColor: '#1a73e8', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6 }}
-                          activeOpacity={0.8}
-                        >
-                          <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>Abrir no WVC</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          onPress={() => Linking.openURL('https://play.google.com/store/apps/details?id=com.instantbits.cast.webvideo')}
-                          style={{ borderWidth: 1, borderColor: '#444', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6 }}
-                          activeOpacity={0.8}
-                        >
-                          <Text style={{ color: '#aaa', fontSize: 12 }}>Instalar</Text>
-                        </TouchableOpacity>
-                      </View>
                     </View>
-                  </View>
+                  </TouchableOpacity>
                 )}
 
                 {Platform.OS === 'ios' && (
