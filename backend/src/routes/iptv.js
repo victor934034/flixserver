@@ -111,7 +111,8 @@ router.get('/stream-url/:streamId', authMiddleware, async (req, res) => {
 
     const server = xcServerUrl();
     const { streamId } = req.params;
-    const url = `${server}/live/${encodeURIComponent(cred.xc_username)}/${encodeURIComponent(cred.xc_password)}/${streamId}.ts`;
+    const fmt = req.query.fmt || 'm3u8';
+    const url = `${server}/live/${encodeURIComponent(cred.xc_username)}/${encodeURIComponent(cred.xc_password)}/${streamId}.${fmt}`;
 
     res.json({ url });
   } catch (err) {

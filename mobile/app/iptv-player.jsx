@@ -12,17 +12,29 @@ import * as KeepAwake from 'expo-keep-awake';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function IptvPlayerScreen() {
-  const { url, name, logo } = useLocalSearchParams();
+  const { url, urlTs, name, logo } = useLocalSearchParams();
   const router  = useRouter();
   const insets  = useSafeAreaInsets();
+  const [activeUrl, setActiveUrl] = useState(url);
+  const [triedTs, setTriedTs]     = useState(false);
 
-  const player = useVideoPlayer({ uri: url }, p => { p.play(); });
+  const player = useVideoPlayer({ uri: activeUrl }, p => { p.play(); });
 
   const { isPlaying = false } = useEvent(player, 'playingChange', { isPlaying: false });
   const { status = 'idle' }   = useEvent(player, 'statusChange',  { status: 'idle' });
 
   const isBuffering = (status === 'idle' || status === 'loading');
   const isError     = status === 'error';
+
+  // Se m3u8 falhar, tenta ts automaticamente
+  useEffect(() => {
+    if (isError && !triedTs && urlTs && urlTs !== activeUrl) {
+      setTriedTs(true);
+      setActiveUrl(urlTs);
+      player.replace({ uri: urlTs });
+      player.play();
+    }
+  }, [isError]);
 
   const ctrlOpacity  = useRef(new Animated.Value(1)).current;
   const [ctrlVisible, setCtrlVisible] = useState(true);
@@ -92,7 +104,7 @@ export default function IptvPlayerScreen() {
         <View style={styles.overlay}>
           <Text style={styles.errIcon}>⚠️</Text>
           <Text style={styles.errTitle}>Canal indisponível</Text>
-          <Text style={styles.errSub}>Verifique sua conexão ou tente outro canal.</Text>
+          <Text style={styles.errSub} selectable>{activeUrl}</Text>
           <TouchableOpacity style={styles.retryBtn} onPress={retry} activeOpacity={0.8}>
             <Text style={styles.retryText}>Tentar novamente</Text>
           </TouchableOpacity>

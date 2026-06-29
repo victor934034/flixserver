@@ -47,10 +47,10 @@ export default function IptvChannelsScreen() {
   async function openChannel(item) {
     setLoadingPlay(item.stream_id);
     try {
-      const { data } = await api.get(`/iptv/stream-url/${item.stream_id}`);
+      const { data } = await api.get(`/iptv/stream-url/${item.stream_id}`, { params: { fmt: 'm3u8' } });
       router.push({
         pathname: '/iptv-player',
-        params: { url: data.url, name: item.name, logo: item.stream_icon || '' },
+        params: { url: data.url, urlTs: data.url.replace('.m3u8', '.ts'), name: item.name, logo: item.stream_icon || '' },
       });
     } catch {
       Alert.alert('Erro', 'Não foi possível abrir o canal.');
