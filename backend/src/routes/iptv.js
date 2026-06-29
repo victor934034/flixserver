@@ -15,10 +15,16 @@ function xcServerUrl() {
 async function getUserCred(userId) {
   const { data } = await supabase
     .from('iptv_credentials')
-    .select('xc_username, xc_password, active')
+    .select('xc_username, xc_password, active, server_url')
     .eq('user_id', userId)
     .single();
   return data;
+}
+
+function resolveServer(cred) {
+  const url = (cred && cred.server_url) ? cred.server_url : process.env.IPTV_SERVER_URL;
+  if (!url) throw new Error('IPTV_SERVER_URL não configurado');
+  return url.replace(/\/$/, '');
 }
 
 // GET /iptv/plans — planos IPTV ativos (público)
@@ -76,7 +82,7 @@ router.get('/categories', authMiddleware, async (req, res) => {
     const cred = await getUserCred(req.user.id);
     if (!cred || !cred.active) return res.status(403).json({ error: 'Sem acesso IPTV ativo' });
 
-    const server = xcServerUrl();
+    const server = resolveServer(cred);
     const url = `${server}/player_api.php?username=${encodeURIComponent(cred.xc_username)}&password=${encodeURIComponent(cred.xc_password)}&action=get_live_categories`;
 
     const { data } = await axios.get(url, { timeout: 10000 });
@@ -92,7 +98,7 @@ router.get('/streams', authMiddleware, async (req, res) => {
     const cred = await getUserCred(req.user.id);
     if (!cred || !cred.active) return res.status(403).json({ error: 'Sem acesso IPTV ativo' });
 
-    const server = xcServerUrl();
+    const server = resolveServer(cred);
     let url = `${server}/player_api.php?username=${encodeURIComponent(cred.xc_username)}&password=${encodeURIComponent(cred.xc_password)}&action=get_live_streams`;
     if (req.query.category_id) url += `&category_id=${encodeURIComponent(req.query.category_id)}`;
 
@@ -109,7 +115,7 @@ router.get('/stream-url/:streamId', authMiddleware, async (req, res) => {
     const cred = await getUserCred(req.user.id);
     if (!cred || !cred.active) return res.status(403).json({ error: 'Sem acesso IPTV ativo' });
 
-    const server = xcServerUrl();
+    const server = resolveServer(cred);
     const { streamId } = req.params;
     const url = `${server}/live/${encodeURIComponent(cred.xc_username)}/${encodeURIComponent(cred.xc_password)}/${streamId}.ts`;
 

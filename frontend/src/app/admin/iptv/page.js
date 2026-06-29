@@ -210,7 +210,12 @@ function CredsTab() {
   const [creds, setCreds]   = useState([]);
   const [users, setUsers]   = useState([]);
   const [loading, setLoading] = useState(true);
-  const [form, setForm]     = useState({ user_id: '', xc_username: '', xc_password: '', notes: '' });
+  const SERVERS = [
+    { label: 'Padrão (env IPTV_SERVER_URL)', value: '' },
+    { label: 'ph1.fun', value: 'http://ph1.fun' },
+    { label: 'MEGGA IPTV — c.mainbr.xyz', value: 'http://c.mainbr.xyz' },
+  ];
+  const [form, setForm]     = useState({ user_id: '', xc_username: '', xc_password: '', notes: '', server_url: '' });
   const [saving, setSaving] = useState('');
   const [msg, setMsg]       = useState('');
   const [editing, setEditing] = useState(null);
@@ -228,10 +233,10 @@ function CredsTab() {
 
   function openEdit(cred) {
     setEditing(cred.user_id);
-    setForm({ user_id: cred.user_id, xc_username: cred.xc_username, xc_password: cred.xc_password, notes: cred.notes || '' });
+    setForm({ user_id: cred.user_id, xc_username: cred.xc_username, xc_password: cred.xc_password, notes: cred.notes || '', server_url: cred.server_url || '' });
     setMsg('');
   }
-  function resetForm() { setEditing(null); setForm({ user_id: '', xc_username: '', xc_password: '', notes: '' }); setMsg(''); }
+  function resetForm() { setEditing(null); setForm({ user_id: '', xc_username: '', xc_password: '', notes: '', server_url: '' }); setMsg(''); }
 
   async function save() {
     if (!form.user_id || !form.xc_username || !form.xc_password) return setMsg('Preencha todos os campos obrigatórios.');
@@ -278,6 +283,10 @@ function CredsTab() {
             <input style={s.input} value={form.xc_password} onChange={e => setForm(p => ({ ...p, xc_password: e.target.value }))} />
           </div>
         </div>
+        <label style={s.label}>Servidor IPTV</label>
+        <select style={s.input} value={form.server_url} onChange={e => setForm(p => ({ ...p, server_url: e.target.value }))}>
+          {SERVERS.map(sv => <option key={sv.value} value={sv.value}>{sv.label}</option>)}
+        </select>
         <label style={s.label}>Observações</label>
         <input style={s.input} value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} />
         {msg && <p style={{ color: msg.startsWith('Erro') ? '#f44336' : '#4caf50', marginTop: 8, fontSize: 13 }}>{msg}</p>}
@@ -300,6 +309,7 @@ function CredsTab() {
                     <span style={cred.active ? s.badgeGreen : s.badgeRed}>{cred.active ? 'ATIVO' : 'INATIVO'}</span>
                   </div>
                   <span style={{ color: '#444', fontSize: 12 }}>👤 {cred.xc_username}</span>
+                  {cred.server_url && <span style={{ color: '#555', fontSize: 11, marginLeft: 8 }}>🌐 {cred.server_url}</span>}
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button style={{ ...s.btnSmall, backgroundColor: cred.active ? '#2a1515' : '#1b3a1b', color: cred.active ? '#f44336' : '#4caf50' }} onClick={() => toggle(cred.user_id)}>{cred.active ? 'Desativar' : 'Ativar'}</button>
