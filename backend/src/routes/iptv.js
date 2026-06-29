@@ -22,8 +22,14 @@ async function getUserCred(userId) {
 }
 
 function resolveServer(cred) {
-  const url = (cred && cred.server_url) ? cred.server_url : process.env.IPTV_SERVER_URL;
-  if (!url) throw new Error('IPTV_SERVER_URL não configurado');
+  let url;
+  if (cred?.server_url === 'SLOT_2') {
+    url = process.env.IPTV_SERVER_URL_2;
+    if (!url) throw new Error('IPTV_SERVER_URL_2 não configurado no servidor');
+  } else {
+    url = process.env.IPTV_SERVER_URL;
+    if (!url) throw new Error('IPTV_SERVER_URL não configurado no servidor');
+  }
   return url.replace(/\/$/, '');
 }
 

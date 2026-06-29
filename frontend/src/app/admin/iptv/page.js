@@ -211,9 +211,8 @@ function CredsTab() {
   const [users, setUsers]   = useState([]);
   const [loading, setLoading] = useState(true);
   const SERVERS = [
-    { label: 'Padrão (env IPTV_SERVER_URL)', value: '' },
-    { label: 'ph1.fun', value: 'http://ph1.fun' },
-    { label: 'MEGGA IPTV — c.mainbr.xyz', value: 'http://c.mainbr.xyz' },
+    { label: 'Servidor 1 — IPTV_SERVER_URL (ph1.fun)', value: '' },
+    { label: 'Servidor 2 — IPTV_SERVER_URL_2 (MEGGA IPTV)', value: 'SLOT_2' },
   ];
   const [form, setForm]     = useState({ user_id: '', xc_username: '', xc_password: '', notes: '', server_url: '' });
   const [saving, setSaving] = useState('');
@@ -309,7 +308,7 @@ function CredsTab() {
                     <span style={cred.active ? s.badgeGreen : s.badgeRed}>{cred.active ? 'ATIVO' : 'INATIVO'}</span>
                   </div>
                   <span style={{ color: '#444', fontSize: 12 }}>👤 {cred.xc_username}</span>
-                  {cred.server_url && <span style={{ color: '#555', fontSize: 11, marginLeft: 8 }}>🌐 {cred.server_url}</span>}
+                  <span style={{ color: '#555', fontSize: 11, marginLeft: 8 }}>🌐 {cred.server_url === 'SLOT_2' ? 'Servidor 2 (MEGGA IPTV)' : 'Servidor 1 (ph1.fun)'}</span>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button style={{ ...s.btnSmall, backgroundColor: cred.active ? '#2a1515' : '#1b3a1b', color: cred.active ? '#f44336' : '#4caf50' }} onClick={() => toggle(cred.user_id)}>{cred.active ? 'Desativar' : 'Ativar'}</button>
