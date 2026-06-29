@@ -390,6 +390,8 @@ export default function UploadPage() {
                         <option value="dubbing">Dublado</option>
                         <option value="subtitled">Legendado</option>
                         <option value="cinema">Cinema</option>
+                        <option value="color">Colorido</option>
+                        <option value="bw">Preto e Branco</option>
                         <option value="4k">4K</option>
                       </select>
                     )}

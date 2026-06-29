@@ -93,6 +93,17 @@ function EpForm({ ep, setEp, onFetchSubs }) {
           <input className={f.input} value={ep.file_cinema || ''} onChange={e => setEp('file_cinema', e.target.value)} placeholder="https://..." />
         </div>
       </div>
+      <div className={s.grid3eq}>
+        <div>
+          <label className={f.label}>Vídeo — Colorido</label>
+          <input className={f.input} value={ep.file_color || ''} onChange={e => setEp('file_color', e.target.value)} placeholder="https://..." />
+        </div>
+        <div>
+          <label className={f.label}>Vídeo — Preto e Branco</label>
+          <input className={f.input} value={ep.file_bw || ''} onChange={e => setEp('file_bw', e.target.value)} placeholder="https://..." />
+        </div>
+        <div />
+      </div>
 
       {onFetchSubs && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
