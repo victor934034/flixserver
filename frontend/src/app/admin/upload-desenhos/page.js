@@ -284,7 +284,7 @@ export default function UploadDesenhosPage() {
           season_number: selectedSeason.season_number,
           episode_number: ep.episode_number,
           title: ep.title,
-          description: ep.description || null,
+          synopsis: ep.description || null,
           thumbnail_url: ep.thumbnail_url || null,
           duration: ep.runtime ? ep.runtime * 60 : null,
           is_active: true,
