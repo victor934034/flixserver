@@ -15,22 +15,10 @@ function xcServerUrl() {
 async function getUserCred(userId) {
   const { data } = await supabase
     .from('iptv_credentials')
-    .select('xc_username, xc_password, active, server_url')
+    .select('xc_username, xc_password, active')
     .eq('user_id', userId)
     .single();
   return data;
-}
-
-function resolveServer(cred) {
-  let url;
-  if (cred?.server_url === 'SLOT_2') {
-    url = process.env.IPTV_SERVER_URL_2;
-    if (!url) throw new Error('IPTV_SERVER_URL_2 não configurado no servidor');
-  } else {
-    url = process.env.IPTV_SERVER_URL;
-    if (!url) throw new Error('IPTV_SERVER_URL não configurado no servidor');
-  }
-  return url.replace(/\/$/, '');
 }
 
 // GET /iptv/plans — planos IPTV ativos (público)
@@ -88,7 +76,7 @@ router.get('/categories', authMiddleware, async (req, res) => {
     const cred = await getUserCred(req.user.id);
     if (!cred || !cred.active) return res.status(403).json({ error: 'Sem acesso IPTV ativo' });
 
-    const server = resolveServer(cred);
+    const server = xcServerUrl();
     const url = `${server}/player_api.php?username=${encodeURIComponent(cred.xc_username)}&password=${encodeURIComponent(cred.xc_password)}&action=get_live_categories`;
 
     const { data } = await axios.get(url, { timeout: 10000 });
@@ -104,7 +92,7 @@ router.get('/streams', authMiddleware, async (req, res) => {
     const cred = await getUserCred(req.user.id);
     if (!cred || !cred.active) return res.status(403).json({ error: 'Sem acesso IPTV ativo' });
 
-    const server = resolveServer(cred);
+    const server = xcServerUrl();
     let url = `${server}/player_api.php?username=${encodeURIComponent(cred.xc_username)}&password=${encodeURIComponent(cred.xc_password)}&action=get_live_streams`;
     if (req.query.category_id) url += `&category_id=${encodeURIComponent(req.query.category_id)}`;
 
@@ -121,7 +109,7 @@ router.get('/stream-url/:streamId', authMiddleware, async (req, res) => {
     const cred = await getUserCred(req.user.id);
     if (!cred || !cred.active) return res.status(403).json({ error: 'Sem acesso IPTV ativo' });
 
-    const server = resolveServer(cred);
+    const server = xcServerUrl();
     const { streamId } = req.params;
     const url = `${server}/live/${encodeURIComponent(cred.xc_username)}/${encodeURIComponent(cred.xc_password)}/${streamId}.ts`;
 
