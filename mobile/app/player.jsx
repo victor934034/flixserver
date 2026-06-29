@@ -24,7 +24,7 @@ const TIMER_OPTS = [
   { label: '45 minutos', ms: 45 * 60000 },
   { label: '1 hora', ms: 60 * 60000 },
 ];
-const VER_LABELS = { dubbing: 'Dublado', subtitled: 'Legendado', cinema: 'Cinema / Original', '4k': '4K UHD' };
+const VER_LABELS = { dubbing: 'Dublado', subtitled: 'Legendado', cinema: 'Cinema / Original', '4k': '4K UHD', color: 'Colorido', bw: 'P&B' };
 const SUB_LABELS = { pt: 'Português 🇧🇷', en: 'English 🇺🇸', es: 'Español 🇪🇸' };
 const AUDIO_LANG = {
   por: 'Português 🇧🇷', pt: 'Português 🇧🇷',
@@ -39,6 +39,8 @@ const VER_AUDIO_PREF = {
   subtitled: ['eng', 'en'],
   cinema:    ['eng', 'en'],
   '4k':      ['eng', 'en'],
+  color:     ['por', 'pt'],
+  bw:        ['por', 'pt'],
 };
 function findTrackForVer(tracks, ver) {
   const prefs = VER_AUDIO_PREF[ver] || [];
@@ -422,13 +424,13 @@ export default function PlayerScreen() {
     clearTimeout(nextCountRef.current);
     setNextCountdown(null);
     saveProgress();
-    const url = nextEp.file_dubbing || nextEp.file_subtitled || nextEp.file_cinema;
+    const url = nextEp.file_dubbing || nextEp.file_subtitled || nextEp.file_cinema || nextEp.file_color || nextEp.file_bw;
     if (!url) return;
     const nextParams = {
       url, title: nextEp.title || `Episódio ${nextEp.episode_number}`,
       id: String(nextEp.id), type: 'episode',
       currentVersion: activeVer,
-      versions: JSON.stringify({ dubbing: nextEp.file_dubbing || null, subtitled: nextEp.file_subtitled || null, cinema: nextEp.file_cinema || null }),
+      versions: JSON.stringify({ dubbing: nextEp.file_dubbing || null, subtitled: nextEp.file_subtitled || null, cinema: nextEp.file_cinema || null, color: nextEp.file_color || null, bw: nextEp.file_bw || null }),
       subtitles: JSON.stringify({ pt: nextEp.subtitle_pt || null, en: nextEp.subtitle_en || null, es: nextEp.subtitle_es || null }),
     };
     if (seriesId) nextParams.seriesId = seriesId;
@@ -721,7 +723,9 @@ export default function PlayerScreen() {
             if (nextMovie.file_subtitled) versions.subtitled = nextMovie.file_subtitled;
             if (nextMovie.file_cinema) versions.cinema = nextMovie.file_cinema;
             if (nextMovie.file_4k) versions['4k'] = nextMovie.file_4k;
-            const firstUrl = nextMovie.file_dubbing || nextMovie.file_subtitled || nextMovie.file_cinema;
+            if (nextMovie.file_color) versions.color = nextMovie.file_color;
+            if (nextMovie.file_bw) versions.bw = nextMovie.file_bw;
+            const firstUrl = nextMovie.file_dubbing || nextMovie.file_subtitled || nextMovie.file_cinema || nextMovie.file_color || nextMovie.file_bw;
             if (!firstUrl) return;
             router.replace({
               pathname: '/player',
@@ -947,7 +951,7 @@ export default function PlayerScreen() {
                     keyExtractor={e => e.id}
                     style={{ maxHeight: 360 }}
                     renderItem={({ item: ep }) => {
-                      const epUrl = ep.file_dubbing || ep.file_subtitled || ep.file_cinema;
+                      const epUrl = ep.file_dubbing || ep.file_subtitled || ep.file_cinema || ep.file_color || ep.file_bw;
                       const isActive = ep.id === id;
                       return (
                         <TouchableOpacity
@@ -962,7 +966,7 @@ export default function PlayerScreen() {
                                 url: epUrl, id: ep.id, type: 'episode',
                                 title: ep.title || `Episódio ${ep.episode_number}`,
                                 seriesId: seriesId || undefined, currentVersion: activeVer,
-                                versions: JSON.stringify({ dubbing: ep.file_dubbing || null, subtitled: ep.file_subtitled || null, cinema: ep.file_cinema || null }),
+                                versions: JSON.stringify({ dubbing: ep.file_dubbing || null, subtitled: ep.file_subtitled || null, cinema: ep.file_cinema || null, color: ep.file_color || null, bw: ep.file_bw || null }),
                                 subtitles: JSON.stringify({ pt: ep.subtitle_pt || null, en: ep.subtitle_en || null, es: ep.subtitle_es || null }),
                                 introEnd: ep.intro_end ? String(ep.intro_end) : undefined,
                               },

@@ -29,8 +29,8 @@ function ContinueCard({ item }) {
     try {
       const episodeId = item.episode_id || item.content_id;
       const { data: ep } = await api.get(`/episodes/${episodeId}`);
-      const version = ep.file_dubbing ? 'dubbing' : ep.file_subtitled ? 'subtitled' : 'cinema';
-      const url = ep.file_dubbing || ep.file_subtitled || ep.file_cinema;
+      const version = ep.file_dubbing ? 'dubbing' : ep.file_subtitled ? 'subtitled' : ep.file_cinema ? 'cinema' : ep.file_color ? 'color' : 'bw';
+      const url = ep.file_dubbing || ep.file_subtitled || ep.file_cinema || ep.file_color || ep.file_bw;
       if (!url) { setPressing(false); return; }
       const seriesId = item.series_id || item.content_id;
       const playerParams = {
@@ -43,6 +43,8 @@ function ContinueCard({ item }) {
           dubbing: ep.file_dubbing || null,
           subtitled: ep.file_subtitled || null,
           cinema: ep.file_cinema || null,
+          color: ep.file_color || null,
+          bw: ep.file_bw || null,
         }),
         subtitles: JSON.stringify({
           pt: ep.subtitle_pt || null,

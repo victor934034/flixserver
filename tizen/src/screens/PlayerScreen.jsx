@@ -12,6 +12,8 @@ const TRACK_META = {
   dubbing:   { label: 'Dublado',   sub: 'Áudio em português' },
   subtitled: { label: 'Legendado', sub: 'Áudio original' },
   cinema:    { label: 'Cinema',    sub: 'Sem legenda' },
+  color:     { label: 'Colorido',  sub: 'Versão colorida' },
+  bw:        { label: 'P&B',       sub: 'Preto e branco' },
 };
 const SUB_META = { pt: 'Português', en: 'English', es: 'Español', off: 'Desativado' };
 
@@ -209,7 +211,7 @@ export default function PlayerScreen() {
     startAt                   = null,
   } = state || {};
 
-  const availTracks = ['dubbing','subtitled','cinema'].filter(k => !!tracks[k]);
+  const availTracks = ['dubbing','subtitled','cinema','color','bw'].filter(k => !!tracks[k]);
   const availSubs   = [].concat(['pt','en','es'].filter(k => !!subtitles[k]), ['off']);
   const initTrack   = availTracks.find(k => tracks[k] === initialUrl) || availTracks[0] || 'dubbing';
 
@@ -242,13 +244,13 @@ export default function PlayerScreen() {
     const idx = episodes.findIndex(e => e.id === currentEpId);
     if (idx < 0 || idx >= episodes.length - 1) return null;
     const next    = episodes[idx + 1];
-    const nextUrl = next.file_dubbing || next.file_subtitled || next.file_cinema;
+    const nextUrl = next.file_dubbing || next.file_subtitled || next.file_cinema || next.file_color || next.file_bw;
     if (!nextUrl) return null;
     const epLabel = 'T' + next.season_number + 'E' + String(next.episode_number).padStart(2,'0');
     return {
       url: nextUrl,
       title: seriesTitle + ' · ' + epLabel + (next.title ? ' · ' + next.title : ''),
-      tracks:    { dubbing: next.file_dubbing||null, subtitled: next.file_subtitled||null, cinema: next.file_cinema||null },
+      tracks:    { dubbing: next.file_dubbing||null, subtitled: next.file_subtitled||null, cinema: next.file_cinema||null, color: next.file_color||null, bw: next.file_bw||null },
       subtitles: { pt: next.subtitle_pt||null, en: next.subtitle_en||null, es: next.subtitle_es||null },
       skipIntroTo: null,
       seriesContext: Object.assign({}, seriesContext, { currentEpId: next.id }),
@@ -262,13 +264,13 @@ export default function PlayerScreen() {
     const idx = episodes.findIndex(e => e.id === currentEpId);
     if (idx <= 0) return null;
     const prev    = episodes[idx - 1];
-    const prevUrl = prev.file_dubbing || prev.file_subtitled || prev.file_cinema;
+    const prevUrl = prev.file_dubbing || prev.file_subtitled || prev.file_cinema || prev.file_color || prev.file_bw;
     if (!prevUrl) return null;
     const epLabel = 'T' + prev.season_number + 'E' + String(prev.episode_number).padStart(2,'0');
     return {
       url: prevUrl,
       title: seriesTitle + ' · ' + epLabel + (prev.title ? ' · ' + prev.title : ''),
-      tracks:    { dubbing: prev.file_dubbing||null, subtitled: prev.file_subtitled||null, cinema: prev.file_cinema||null },
+      tracks:    { dubbing: prev.file_dubbing||null, subtitled: prev.file_subtitled||null, cinema: prev.file_cinema||null, color: prev.file_color||null, bw: prev.file_bw||null },
       subtitles: { pt: prev.subtitle_pt||null, en: prev.subtitle_en||null, es: prev.subtitle_es||null },
       skipIntroTo: null,
       seriesContext: Object.assign({}, seriesContext, { currentEpId: prev.id }),

@@ -436,7 +436,9 @@ export default function UploadDesenhosPage() {
                 <select className={styles.versionSelect} value={version} onChange={e => setVersion(e.target.value)}>
                   <option value="dubbing">Dublado</option>
                   <option value="subtitled">Legendado</option>
-                  <option value="cinema">Cinema</option>
+                  <option value="cinema">Cinema / Original</option>
+                  <option value="color">Colorido</option>
+                  <option value="bw">Preto e Branco</option>
                   <option value="4k">4K</option>
                 </select>
 

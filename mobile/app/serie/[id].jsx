@@ -113,6 +113,8 @@ export default function SerieDetail() {
     file_dubbing: ep.file_dubbing || null,
     file_subtitled: ep.file_subtitled || null,
     file_cinema: ep.file_cinema || null,
+    file_color: ep.file_color || null,
+    file_bw: ep.file_bw || null,
     subtitle_pt: ep.subtitle_pt || null,
     subtitle_en: ep.subtitle_en || null,
     subtitle_es: ep.subtitle_es || null,
@@ -120,8 +122,8 @@ export default function SerieDetail() {
   });
 
   const handleEpDownload = (ep) => {
-    const version = ep.file_dubbing ? 'dubbing' : ep.file_subtitled ? 'subtitled' : 'cinema';
-    const url = ep.file_dubbing || ep.file_subtitled || ep.file_cinema;
+    const version = ep.file_dubbing ? 'dubbing' : ep.file_subtitled ? 'subtitled' : ep.file_cinema ? 'cinema' : ep.file_color ? 'color' : 'bw';
+    const url = ep.file_dubbing || ep.file_subtitled || ep.file_cinema || ep.file_color || ep.file_bw;
     if (!url) return;
     const st = getStatus(ep.id, version);
     const label = `T${ep.season_number}E${String(ep.episode_number).padStart(2, '0')}`;
@@ -149,8 +151,8 @@ export default function SerieDetail() {
   };
 
   const playEp = async (ep, preferredVersion, resumeSec, replace = false) => {
-    const version = preferredVersion || (ep.file_dubbing ? 'dubbing' : ep.file_subtitled ? 'subtitled' : 'cinema');
-    const remoteUrl = ep.file_dubbing || ep.file_subtitled || ep.file_cinema;
+    const version = preferredVersion || (ep.file_dubbing ? 'dubbing' : ep.file_subtitled ? 'subtitled' : ep.file_cinema ? 'cinema' : ep.file_color ? 'color' : 'bw');
+    const remoteUrl = ep.file_dubbing || ep.file_subtitled || ep.file_cinema || ep.file_color || ep.file_bw;
     if (!remoteUrl) return;
 
     // Parental check using series age rating
@@ -169,7 +171,7 @@ export default function SerieDetail() {
     );
     const idx = allSorted.findIndex(e => e.id === ep.id);
     const rawNext = idx >= 0 && idx + 1 < allSorted.length ? allSorted[idx + 1] : null;
-    const nextEp = rawNext && (rawNext.file_dubbing || rawNext.file_subtitled || rawNext.file_cinema) ? rawNext : null;
+    const nextEp = rawNext && (rawNext.file_dubbing || rawNext.file_subtitled || rawNext.file_cinema || rawNext.file_color || rawNext.file_bw) ? rawNext : null;
 
     const playerParams = {
       url,
@@ -181,6 +183,8 @@ export default function SerieDetail() {
         dubbing: ep.file_dubbing || null,
         subtitled: ep.file_subtitled || null,
         cinema: ep.file_cinema || null,
+        color: ep.file_color || null,
+        bw: ep.file_bw || null,
       }),
       subtitles: JSON.stringify({
         pt: ep.subtitle_pt || null,
@@ -301,8 +305,8 @@ export default function SerieDetail() {
         </Text>
 
         {currentEps.map(ep => {
-          const hasFile = ep.file_dubbing || ep.file_subtitled || ep.file_cinema;
-          const epVersion = ep.file_dubbing ? 'dubbing' : ep.file_subtitled ? 'subtitled' : 'cinema';
+          const hasFile = ep.file_dubbing || ep.file_subtitled || ep.file_cinema || ep.file_color || ep.file_bw;
+          const epVersion = ep.file_dubbing ? 'dubbing' : ep.file_subtitled ? 'subtitled' : ep.file_cinema ? 'cinema' : ep.file_color ? 'color' : 'bw';
           const dlSt = hasFile ? getStatus(ep.id, epVersion) : { state: 'none', progress: 0 };
           return (
             <View key={ep.id} style={styles.episodeWrap}>

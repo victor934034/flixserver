@@ -38,7 +38,7 @@ function Btn({ focused, danger, accent, children, onClick, style = {} }) {
 }
 
 function EpisodeItem({ ep, focused, onClick, epProgress }) {
-  const url = ep.file_dubbing || ep.file_subtitled || ep.file_cinema;
+  const url = ep.file_dubbing || ep.file_subtitled || ep.file_cinema || ep.file_color || ep.file_bw;
   if (!url) return null;
   const label = 'EP ' + String(ep.episode_number).padStart(2, '0');
   const pct = epProgress > 0 ? Math.min(epProgress * 100, 100) : 0;
@@ -244,11 +244,11 @@ export default function DetailScreen() {
 
   function playMovie(vk, resumeAt) {
     if (!detail) return;
-    const url = detail['file_' + vk] || detail.file_dubbing || detail.file_subtitled || detail.file_cinema;
+    const url = detail['file_' + vk] || detail.file_dubbing || detail.file_subtitled || detail.file_cinema || detail.file_color || detail.file_bw;
     if (!url) return;
     navigate('/player', { state: {
       url, title: detail.title || detail.name || '',
-      tracks: { dubbing: detail.file_dubbing || null, subtitled: detail.file_subtitled || null, cinema: detail.file_cinema || null },
+      tracks: { dubbing: detail.file_dubbing || null, subtitled: detail.file_subtitled || null, cinema: detail.file_cinema || null, color: detail.file_color || null, bw: detail.file_bw || null },
       subtitles: { pt: detail.subtitle_pt || null, en: detail.subtitle_en || null, es: detail.subtitle_es || null },
       contentMeta: { content_type: 'movie', content_id: detail.id },
       ...(resumeAt > 5 ? { startAt: resumeAt } : {}),
@@ -256,13 +256,13 @@ export default function DetailScreen() {
   }
 
   function playEpisode(ep, resumeAt) {
-    const url = ep.file_dubbing || ep.file_subtitled || ep.file_cinema;
+    const url = ep.file_dubbing || ep.file_subtitled || ep.file_cinema || ep.file_color || ep.file_bw;
     if (!url) return;
     const epLabel = 'T' + ep.season_number + 'E' + String(ep.episode_number).padStart(2, '0');
     navigate('/player', { state: {
       url,
       title: (detail ? (detail.title || detail.name || '') : '') + ' · ' + epLabel + (ep.title ? ' · ' + ep.title : ''),
-      tracks: { dubbing: ep.file_dubbing || null, subtitled: ep.file_subtitled || null, cinema: ep.file_cinema || null },
+      tracks: { dubbing: ep.file_dubbing || null, subtitled: ep.file_subtitled || null, cinema: ep.file_cinema || null, color: ep.file_color || null, bw: ep.file_bw || null },
       subtitles: { pt: ep.subtitle_pt || null, en: ep.subtitle_en || null, es: ep.subtitle_es || null },
       skipIntroTo: 90000,
       seriesContext: {
