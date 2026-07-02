@@ -135,6 +135,20 @@ app.get('/api/search', async (req, res) => {
       type === 'movie' || type === 'series' ? Promise.resolve({ data: [] }) : episodesQ,
     ]);
 
+    // Fallback fuzzy para séries: ignora ":", "·", traços extras no título
+    // Ex: "Chicago P.D Distrito 21" encontra "Chicago P.D.: Distrito 21"
+    let seriesData = seriesResult.data || [];
+    if (seriesData.length === 0 && titleQ.length >= 4 && type !== 'movie' && type !== 'episode') {
+      const fuzzy = '%' + titleQ.trim().split(/\s+/).filter(Boolean).join('%') + '%';
+      const { data: fuzzyData } = await supabase
+        .from('series')
+        .select('id, title, year_start, poster_url, rating, genres')
+        .ilike('title', fuzzy)
+        .eq('is_active', true)
+        .limit(lim);
+      if (fuzzyData && fuzzyData.length > 0) seriesData = fuzzyData;
+    }
+
     let episodes = (episodesResult.data || []).map(e => ({
       ...e, type: 'episode',
       poster_url: e.series?.poster_url || e.thumbnail_url,
@@ -143,7 +157,7 @@ app.get('/api/search', async (req, res) => {
 
     // Se detectou referência de episódio (3x1), busca o episódio específico nas séries encontradas
     if (epRef && type !== 'movie') {
-      const seriesIds = (seriesResult.data || []).map(s => s.id);
+      const seriesIds = seriesData.map(s => s.id);
       if (seriesIds.length > 0) {
         const { data: epData } = await supabase
           .from('episodes')
@@ -168,7 +182,7 @@ app.get('/api/search', async (req, res) => {
 
     res.json({
       movies: (moviesResult.data || []).map(m => ({ ...m, type: 'movie' })),
-      series: (seriesResult.data || []).map(s => ({ ...s, type: 'series' })),
+      series: seriesData.map(s => ({ ...s, type: 'series' })),
       episodes,
     });
   } catch (err) {
