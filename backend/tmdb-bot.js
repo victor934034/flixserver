@@ -46,6 +46,9 @@ function extractInfo(filename) {
       // Cut everything from S01E02 marker — only series title remains
       const markerIdx = name.search(/[Ss]\d{1,2}[Ee]\d{1,2}|[Tt]\d{1,2}[Ee]\d{1,2}|\d{1,2}x\d{2}/i);
       name = name.substring(0, markerIdx);
+      // Remove "EP" / "EP." / "Episodio" que fica logo antes do marcador
+      // Ex: "Chicago.P.D.Distrito.21.EP." → "Chicago.P.D.Distrito.21."
+      name = name.replace(/[\s._-]*\bep(?:is[oó]dio)?\b[\s._-]*$/i, '');
     }
   }
 
