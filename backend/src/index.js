@@ -98,7 +98,11 @@ function parseEpisodeRef(q) {
       return {
         season: parseInt(m[1], 10),
         episode: parseInt(m[2], 10),
-        titlePart: q.slice(0, m.index).replace(/\s+/g, ' ').trim(),
+        // Remove "EP" ou "EP." sobrando antes do número, e espaços extras
+        titlePart: q.slice(0, m.index)
+          .replace(/\bep\.?\s*$/i, '')
+          .replace(/\s+/g, ' ')
+          .trim(),
       };
     }
   }
@@ -114,9 +118,13 @@ app.get('/api/search', async (req, res) => {
   const { supabase } = require('./services/supabase');
   const lim = Number(limit);
 
+  // Normaliza query no estilo de filename: pontos viram espaços
+  // "Chicago.P.D.Distrito.21.EP.3x1" → "Chicago P D Distrito 21 EP 3x1"
+  const normalizedQ = q.trim().replace(/\./g, ' ').replace(/\s+/g, ' ').trim();
+
   // Detecta padrão "3x1" / "EP 3x1" / "S03E01" na query
-  const epRef = parseEpisodeRef(q.trim());
-  const titleQ = epRef && epRef.titlePart.length >= 2 ? epRef.titlePart : q.trim();
+  const epRef = parseEpisodeRef(normalizedQ);
+  const titleQ = epRef && epRef.titlePart.length >= 2 ? epRef.titlePart : normalizedQ;
   const search = `%${titleQ}%`;
 
   try {
@@ -130,7 +138,8 @@ app.get('/api/search', async (req, res) => {
     }
 
     const [moviesResult, seriesResult, episodesResult] = await Promise.all([
-      type === 'series' || type === 'episode' ? Promise.resolve({ data: [] }) : moviesQ,
+      // Se tem referência de episódio (3x1, S03E01…), não busca filmes
+      (type === 'series' || type === 'episode' || !!epRef) ? Promise.resolve({ data: [] }) : moviesQ,
       type === 'movie' || type === 'episode' ? Promise.resolve({ data: [] }) : seriesQ,
       type === 'movie' || type === 'series' ? Promise.resolve({ data: [] }) : episodesQ,
     ]);
