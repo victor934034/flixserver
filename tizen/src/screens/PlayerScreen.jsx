@@ -87,8 +87,7 @@ const IC = {
   ),
 };
 
-// ── Small icon control button (icon + label below) ────────────────────────────
-function CtrlBtn({ id, label, icon, focused, onClick, active, danger }) {
+function CtrlBtn({ id, label, icon, focused, onClick, active }) {
   return (
     <button
       onClick={onClick}
@@ -126,7 +125,6 @@ function CtrlBtn({ id, label, icon, focused, onClick, active, danger }) {
   );
 }
 
-// ── Big play/pause button ─────────────────────────────────────────────────────
 function PlayBtn({ paused, focused, onClick }) {
   return (
     <button
@@ -161,7 +159,6 @@ function PlayBtn({ paused, focused, onClick }) {
   );
 }
 
-// ── Panel option ──────────────────────────────────────────────────────────────
 function PanelOpt({ label, sub, active, focused, onClick }) {
   return (
     <button
@@ -181,9 +178,7 @@ function PanelOpt({ label, sub, active, focused, onClick }) {
         background: active ? ACCENT : 'transparent',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}>
-        {active && (
-          <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#fff' }} />
-        )}
+        {active && <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#fff' }} />}
       </div>
       <div>
         <div style={{ fontSize: 15, fontWeight: active ? 700 : 500, color: active ? '#fff' : 'rgba(255,255,255,0.7)' }}>
@@ -195,48 +190,69 @@ function PanelOpt({ label, sub, active, focused, onClick }) {
   );
 }
 
-// ── PlayerScreen ──────────────────────────────────────────────────────────────
 export default function PlayerScreen() {
   const navigate          = useNavigate();
   const { state }         = useLocation();
   const { activeProfile } = useAuth();
   const {
-    url:          initialUrl  = '',
-    title                     = '',
-    tracks                    = {},
-    subtitles                 = {},
-    skipIntroTo               = null,
-    seriesContext             = null,
-    contentMeta               = null,
-    startAt                   = null,
+    url:        initialUrl = '',
+    title                  = '',
+    tracks                 = {},
+    subtitles              = {},
+    skipIntroTo            = null,
+    seriesContext          = null,
+    contentMeta            = null,
+    startAt                = null,
   } = state || {};
 
   const availTracks = ['dubbing','subtitled','cinema','color','bw'].filter(k => !!tracks[k]);
   const availSubs   = [].concat(['pt','en','es'].filter(k => !!subtitles[k]), ['off']);
   const initTrack   = availTracks.find(k => tracks[k] === initialUrl) || availTracks[0] || 'dubbing';
 
-  const videoRef    = useRef(null);
-  const hideTimer   = useRef(null);
-  const switchPos   = useRef(startAt && startAt > 5 ? startAt : null);
-  const wasLoaded   = useRef(false);
-  const bufferingRef = useRef(false);
+  const videoRef      = useRef(null);
+  const hideTimer     = useRef(null);
+  const switchPos     = useRef(startAt && startAt > 5 ? startAt : null);
+  const wasLoaded     = useRef(false);
+  const bufferingRef  = useRef(false);
+  const lastTickRef   = useRef(0);        // throttle react state updates
+  const ctRef         = useRef(0);        // current time ref (no re-render)
+  const durRef        = useRef(0);        // duration ref
+
+  // DOM refs for direct updates (bypass React reconciler — critical for TV performance)
+  const playFillRef   = useRef(null);
+  const playThumbRef  = useRef(null);
+  const bufFillRef    = useRef(null);
+  const timeLeftRef   = useRef(null);
+  const timeDurRef    = useRef(null);
 
   const [trackKey,     setTrackKey]     = useState(initTrack);
   const [subKey,       setSubKey]       = useState('off');
-  const [panel,        setPanel]        = useState(null); // null|'audio'|'sub'|'config'
+  const [panel,        setPanel]        = useState(null);
   const [ctrlVisible,  setCtrlVisible]  = useState(true);
   const [loaded,       setLoaded]       = useState(false);
   const [buffering,    setBuffering]    = useState(false);
   const [error,        setError]        = useState(null);
-  const [currentTime,  setCurrentTime]  = useState(0);
+  const [currentTime,  setCurrentTime]  = useState(0); // 1Hz — only for skipIntro button
   const [duration,     setDuration]     = useState(0);
-  const [buffered,     setBuffered]     = useState(0);
   const [paused,       setPaused]       = useState(false);
-  const [focusedBtn,   setFocusedBtn]   = useState(2); // default: play button
+  const [focusedBtn,   setFocusedBtn]   = useState(2);
   const [focusedPanel, setFocusedPanel] = useState(0);
-  const currentUrl  = tracks[trackKey] || initialUrl;
-  const progress    = duration > 0 ? currentTime / duration : 0;
-  const bufProgress = duration > 0 ? buffered / duration : 0;
+
+  const currentUrl = tracks[trackKey] || initialUrl;
+
+  // Direct DOM update for progress — runs every frame without React re-render
+  function updateProgressDOM(ct, dur) {
+    if (!dur || !isFinite(dur)) return;
+    const pct = ct / dur * 100;
+    if (playFillRef.current)  playFillRef.current.style.width  = pct + '%';
+    if (playThumbRef.current) playThumbRef.current.style.left  = pct + '%';
+    if (timeLeftRef.current)  timeLeftRef.current.textContent  = fmt(ct);
+  }
+
+  function updateBufferDOM(buf, dur) {
+    if (!dur || !isFinite(dur) || !bufFillRef.current) return;
+    bufFillRef.current.style.width = (buf / dur * 100) + '%';
+  }
 
   const nextEp = useMemo(() => {
     if (!seriesContext) return null;
@@ -278,23 +294,22 @@ export default function PlayerScreen() {
     };
   }, [seriesContext, contentMeta]);
 
-  // Build button list (left group + right group)
   const leftBtns = useMemo(() => {
     const b = [];
-    if (prevEp) b.push({ id: 'prev',   label: 'Anterior',    icon: IC.prev });
-    b.push(      { id: 'back10', label: 'Voltar 10s',   icon: IC.back10 });
-    b.push(      { id: 'play',   label: null,            icon: null });  // placeholder for play button
-    b.push(      { id: 'fwd10',  label: 'Avançar 10s',  icon: IC.fwd10 });
-    if (nextEp) b.push({ id: 'next',   label: 'Próximo',     icon: IC.next });
+    if (prevEp) b.push({ id: 'prev',   label: 'Anterior',   icon: IC.prev });
+    b.push(      { id: 'back10', label: 'Voltar 10s',  icon: IC.back10 });
+    b.push(      { id: 'play',   label: null,           icon: null });
+    b.push(      { id: 'fwd10',  label: 'Avançar 10s', icon: IC.fwd10 });
+    if (nextEp) b.push({ id: 'next',   label: 'Próximo',    icon: IC.next });
     return b;
   }, [prevEp, nextEp]);
 
   const rightBtns = useMemo(() => {
     const b = [];
     const showSkip = skipIntroTo && currentTime > 8 && currentTime < skipIntroTo / 1000;
-    if (showSkip) b.push({ id: 'skip',   label: 'Pular Abertura', icon: IC.skip });
-    if (availTracks.length > 1) b.push({ id: 'audio', label: 'Áudio', icon: IC.audio });
-    if (availSubs.length > 1)   b.push({ id: 'cc',    label: 'CC',    icon: IC.cc   });
+    if (showSkip)              b.push({ id: 'skip',   label: 'Pular Abertura', icon: IC.skip });
+    if (availTracks.length > 1) b.push({ id: 'audio', label: 'Áudio',          icon: IC.audio });
+    if (availSubs.length > 1)   b.push({ id: 'cc',    label: 'CC',             icon: IC.cc });
     b.push({ id: 'config', label: 'Configurações', icon: IC.config });
     return b;
   }, [skipIntroTo, currentTime, availTracks.length, availSubs.length]);
@@ -302,11 +317,9 @@ export default function PlayerScreen() {
   const allBtns = useMemo(() => [...leftBtns, ...rightBtns], [leftBtns, rightBtns]);
 
   const panelOptions = useMemo(() => {
-    if (panel === 'audio') return availTracks.map(k => ({ key: k, label: TRACK_META[k]?.label, sub: TRACK_META[k]?.sub, active: k === trackKey }));
-    if (panel === 'sub')   return availSubs.map(k   => ({ key: k, label: SUB_META[k], active: k === subKey }));
-    if (panel === 'config') return [
-      { key: 'quality', label: 'Qualidade: Auto', sub: 'Ajuste automático de qualidade', active: true },
-    ];
+    if (panel === 'audio')  return availTracks.map(k => ({ key: k, label: TRACK_META[k]?.label, sub: TRACK_META[k]?.sub, active: k === trackKey }));
+    if (panel === 'sub')    return availSubs.map(k   => ({ key: k, label: SUB_META[k], active: k === subKey }));
+    if (panel === 'config') return [{ key: 'quality', label: 'Qualidade: Auto', sub: 'Ajuste automático de qualidade', active: true }];
     return [];
   }, [panel, availTracks, availSubs, trackKey, subKey]);
 
@@ -326,34 +339,45 @@ export default function PlayerScreen() {
     return () => clearTimeout(hideTimer.current);
   }, [paused, panel, loaded]);
 
+  // onTimeUpdate: update DOM directly every frame; update React state only 1x/sec
   function onTimeUpdate() {
     const v = videoRef.current;
     if (!v) return;
-    setCurrentTime(v.currentTime);
-    if (v.buffered.length > 0) setBuffered(v.buffered.end(v.buffered.length - 1));
+    const ct  = v.currentTime;
+    const dur = v.duration || durRef.current;
+    ctRef.current  = ct;
+    durRef.current = dur;
+
+    // Direct DOM — no React re-render, smooth on slow TV CPUs
+    updateProgressDOM(ct, dur);
+    if (v.buffered.length > 0) updateBufferDOM(v.buffered.end(v.buffered.length - 1), dur);
+
+    // Clear buffering when video is progressing
     if (bufferingRef.current) { bufferingRef.current = false; setBuffering(false); }
+
+    // React state update throttled to 1 Hz (only needed for skip-intro button visibility)
+    const now = Date.now();
+    if (now - lastTickRef.current >= 1000) {
+      lastTickRef.current = now;
+      setCurrentTime(ct);
+    }
   }
 
   const saveHistory = useCallback(() => {
     const v = videoRef.current;
     if (!v || !contentMeta || v.currentTime < 5) return;
-    const profileId = activeProfile && activeProfile.id;
     historyAPI.save({
       ...contentMeta,
       progress: Math.floor(v.currentTime),
       duration: Math.floor(v.duration) || 0,
-      profile_id: profileId || null,
+      profile_id: activeProfile ? activeProfile.id : null,
     }).catch(() => {});
   }, [contentMeta, activeProfile]);
 
-  // Save history every 30s while playing
   useEffect(() => {
     if (!contentMeta) return;
     const id = setInterval(saveHistory, 30000);
-    return () => {
-      clearInterval(id);
-      saveHistory(); // save on unmount/episode change
-    };
+    return () => { clearInterval(id); saveHistory(); };
   }, [saveHistory, contentMeta, currentUrl]);
 
   function onCanPlay() {
@@ -367,9 +391,22 @@ export default function PlayerScreen() {
     setLoaded(true);
     bufferingRef.current = false;
     setBuffering(false);
+    // Update duration in DOM
+    const dur = videoRef.current ? videoRef.current.duration || 0 : 0;
+    durRef.current = dur;
+    setDuration(dur);
+    if (timeDurRef.current) timeDurRef.current.textContent = fmt(dur);
   }
 
-  useEffect(() => { setLoaded(false); wasLoaded.current = false; }, [currentUrl]);
+  useEffect(() => {
+    setLoaded(false);
+    wasLoaded.current = false;
+    ctRef.current = 0;
+    // Reset DOM progress on track change
+    updateProgressDOM(0, 1);
+    if (bufFillRef.current) bufFillRef.current.style.width = '0%';
+    if (timeLeftRef.current) timeLeftRef.current.textContent = '0:00';
+  }, [currentUrl]);
 
   useEffect(() => {
     const v = videoRef.current;
@@ -395,31 +432,24 @@ export default function PlayerScreen() {
     } else if (btn.id === 'skip' && skipIntroTo) {
       if (v) v.currentTime = skipIntroTo / 1000;
     } else if (btn.id === 'audio') {
-      setPanel(p => p === 'audio' ? null : 'audio');
-      setFocusedPanel(0);
+      setPanel(p => p === 'audio' ? null : 'audio'); setFocusedPanel(0);
     } else if (btn.id === 'cc') {
-      setPanel(p => p === 'sub' ? null : 'sub');
-      setFocusedPanel(0);
+      setPanel(p => p === 'sub' ? null : 'sub'); setFocusedPanel(0);
     } else if (btn.id === 'config') {
-      setPanel(p => p === 'config' ? null : 'config');
-      setFocusedPanel(0);
+      setPanel(p => p === 'config' ? null : 'config'); setFocusedPanel(0);
     }
   }
 
   useKeyDown(e => {
     const k = e.keyCode;
-
     if (k === KEY.BACK || k === KEY.BACKSPACE) {
       e.preventDefault();
       if (panel) { setPanel(null); showControls(); return; }
       navigate(-1); return;
     }
-
     showControls();
     if (!paused) scheduleHide();
-
     const v = videoRef.current;
-
     if (panel) {
       if (k === KEY.UP)    { e.preventDefault(); setFocusedPanel(p => Math.max(0, p - 1)); }
       if (k === KEY.DOWN)  { e.preventDefault(); setFocusedPanel(p => Math.min(panelOptions.length - 1, p + 1)); }
@@ -427,33 +457,24 @@ export default function PlayerScreen() {
         const opt = panelOptions[focusedPanel];
         if (!opt) return;
         if (panel === 'audio') {
-          if (opt.key !== trackKey) { switchPos.current = currentTime; setTrackKey(opt.key); }
+          if (opt.key !== trackKey) { switchPos.current = ctRef.current; setTrackKey(opt.key); }
           setPanel(null);
         } else if (panel === 'sub') {
-          setSubKey(opt.key);
-          setPanel(null);
+          setSubKey(opt.key); setPanel(null);
         }
       }
       return;
     }
-
-    if (k === KEY.LEFT)  { e.preventDefault(); setFocusedBtn(b => Math.max(0, b - 1)); }
-    if (k === KEY.RIGHT) { e.preventDefault(); setFocusedBtn(b => Math.min(allBtns.length - 1, b + 1)); }
+    if (k === KEY.LEFT)    { e.preventDefault(); setFocusedBtn(b => Math.max(0, b - 1)); }
+    if (k === KEY.RIGHT)   { e.preventDefault(); setFocusedBtn(b => Math.min(allBtns.length - 1, b + 1)); }
     if (k === KEY.UP || k === KEY.DOWN) { e.preventDefault(); }
     if (k === KEY.REWIND)   { if (v) v.currentTime = Math.max(0, v.currentTime - SEEK_S); }
     if (k === KEY.FAST_FWD) { if (v) v.currentTime = Math.min(v.duration || 0, v.currentTime + SEEK_S); }
-    if (k === KEY.PLAY || k === KEY.PAUSE) {
-      if (v) { if (paused) v.play(); else v.pause(); }
-    }
-    if (k === KEY.ENTER) {
-      execBtn(allBtns[focusedBtn]);
-    }
+    if (k === KEY.PLAY || k === KEY.PAUSE) { if (v) { if (paused) v.play(); else v.pause(); } }
+    if (k === KEY.ENTER) { execBtn(allBtns[focusedBtn]); }
   }, [panel, focusedBtn, focusedPanel, panelOptions, paused, currentTime, skipIntroTo, nextEp, prevEp, trackKey, allBtns]);
 
   const subTracks = ['pt','en','es'].filter(k => !!subtitles[k]);
-
-  const playBtnIdx = leftBtns.findIndex(b => b.id === 'play');
-  const playBtnGlobalIdx = playBtnIdx; // play is in leftBtns which is first
 
   return (
     <div
@@ -464,16 +485,20 @@ export default function PlayerScreen() {
         ref={videoRef}
         src={currentUrl}
         autoPlay
+        playsInline
         preload="auto"
-        crossOrigin="anonymous"
         style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
         onTimeUpdate={onTimeUpdate}
-        onDurationChange={() => setDuration(videoRef.current ? videoRef.current.duration || 0 : 0)}
+        onDurationChange={() => {
+          const dur = videoRef.current ? videoRef.current.duration || 0 : 0;
+          durRef.current = dur;
+          setDuration(dur);
+          if (timeDurRef.current) timeDurRef.current.textContent = fmt(dur);
+        }}
         onCanPlay={onCanPlay}
         onPlay={() => { setPaused(false); bufferingRef.current = false; setBuffering(false); }}
         onPause={() => setPaused(true)}
         onWaiting={() => { if (loaded) { bufferingRef.current = true; setBuffering(true); } }}
-        onStalled={() => { if (loaded) { bufferingRef.current = true; setBuffering(true); } }}
         onPlaying={() => { bufferingRef.current = false; setBuffering(false); }}
         onError={() => setError('Não foi possível reproduzir o vídeo')}
         onEnded={() => { if (nextEp) navigate('/player', { state: nextEp, replace: true }); else navigate(-1); }}
@@ -483,7 +508,7 @@ export default function PlayerScreen() {
         ))}
       </video>
 
-      {/* Initial loading (before canplay) */}
+      {/* Initial loading */}
       {!error && !loaded && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 20, background: '#000' }}>
           <div style={{ width: 56, height: 56, border: '3px solid rgba(255,255,255,0.08)', borderTopColor: ACCENT, borderRadius: '50%', animation: 'spin 0.85s linear infinite' }} />
@@ -491,7 +516,7 @@ export default function PlayerScreen() {
         </div>
       )}
 
-      {/* Buffering overlay (after initial load, while stalled) */}
+      {/* Buffering overlay */}
       {!error && loaded && buffering && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
           <div style={{ width: 64, height: 64, border: '3px solid rgba(255,255,255,0.1)', borderTopColor: ACCENT, borderRadius: '50%', animation: 'spin 0.85s linear infinite' }} />
@@ -515,40 +540,26 @@ export default function PlayerScreen() {
         transition: 'opacity 0.4s ease',
         pointerEvents: ctrlVisible ? 'auto' : 'none',
       }}>
-        {/* Background gradients */}
         <div style={{
           position: 'absolute', inset: 0, pointerEvents: 'none',
           background: 'linear-gradient(to bottom, rgba(0,0,0,0.85) 0%, transparent 22%, transparent 60%, rgba(0,0,0,0.75) 82%, rgba(0,0,0,0.96) 100%)',
         }} />
 
-        {/* ── Top bar ──────────────────────────────────────────────────────── */}
-        <div style={{
-          position: 'absolute', top: 0, left: 0, right: 0,
-          padding: '28px 52px',
-          display: 'flex', alignItems: 'center', gap: 20,
-        }}>
+        {/* Top bar */}
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: '28px 52px', display: 'flex', alignItems: 'center', gap: 20 }}>
           <button
             onClick={() => navigate(-1)}
             style={{
               display: 'inline-flex', alignItems: 'center', gap: 10,
-              background: 'rgba(255,255,255,0.10)',
-              border: '1.5px solid rgba(255,255,255,0.15)',
-              borderRadius: 40, padding: '9px 20px',
-              color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer',
-              backdropFilter: 'blur(6px)',
-              transition: 'background 0.15s',
+              background: 'rgba(255,255,255,0.10)', border: '1.5px solid rgba(255,255,255,0.15)',
+              borderRadius: 40, padding: '9px 20px', color: '#fff', fontSize: 14, fontWeight: 700,
+              cursor: 'pointer', backdropFilter: 'blur(6px)', transition: 'background 0.15s',
             }}
           >
-            {IC.back}
-            Voltar
+            {IC.back} Voltar
           </button>
-
           <div style={{ flex: 1, overflow: 'hidden' }}>
-            <div style={{
-              fontSize: 18, fontWeight: 700, color: '#fff',
-              textShadow: '0 2px 8px rgba(0,0,0,0.9)',
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: '#fff', textShadow: '0 2px 8px rgba(0,0,0,0.9)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {title}
             </div>
             {seriesContext && seriesContext.currentEpId && (
@@ -561,55 +572,23 @@ export default function PlayerScreen() {
               </div>
             )}
           </div>
-
-          {/* Next ep indicator */}
           {nextEp && (
-            <div style={{
-              fontSize: 13, color: 'rgba(255,255,255,0.5)', fontWeight: 500,
-              background: 'rgba(255,255,255,0.08)', borderRadius: 6,
-              padding: '6px 14px', border: '1px solid rgba(255,255,255,0.10)',
-            }}>
+            <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.5)', fontWeight: 500, background: 'rgba(255,255,255,0.08)', borderRadius: 6, padding: '6px 14px', border: '1px solid rgba(255,255,255,0.10)' }}>
               Próximo ep. disponível
             </div>
           )}
         </div>
 
-        {/* ── Subtitle display ──────────────────────────────────────────────── */}
-        {subKey !== 'off' && (
-          <div style={{
-            position: 'absolute', bottom: 210, left: 0, right: 0,
-            textAlign: 'center', pointerEvents: 'none',
-          }}>
-            <div style={{
-              display: 'inline-block',
-              background: 'rgba(0,0,0,0.75)',
-              padding: '8px 20px', borderRadius: 6,
-              fontSize: 22, fontWeight: 600, color: '#fff',
-              textShadow: '0 2px 6px rgba(0,0,0,0.9)',
-              maxWidth: '80%',
-            }}>
-              {/* subtitles rendered by <track> element */}
-            </div>
-          </div>
-        )}
-
-        {/* ── Panel ────────────────────────────────────────────────────────── */}
+        {/* Panel */}
         {!!panel && (
           <div style={{
             position: 'absolute', bottom: 200, left: 52,
             minWidth: 300, maxWidth: 420,
-            background: 'rgba(12,12,14,0.97)',
-            borderRadius: 14, border: '1px solid rgba(255,255,255,0.09)',
-            padding: '12px 8px',
-            boxShadow: '0 -16px 48px rgba(0,0,0,0.8)',
-            animation: 'slideUp 0.2s ease',
-            zIndex: 10,
+            background: 'rgba(12,12,14,0.97)', borderRadius: 14,
+            border: '1px solid rgba(255,255,255,0.09)', padding: '12px 8px',
+            boxShadow: '0 -16px 48px rgba(0,0,0,0.8)', animation: 'slideUp 0.2s ease', zIndex: 10,
           }}>
-            <div style={{
-              fontSize: 11, fontWeight: 800, color: 'rgba(255,255,255,0.3)',
-              textTransform: 'uppercase', letterSpacing: 1.5,
-              padding: '4px 16px 10px',
-            }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: 1.5, padding: '4px 16px 10px' }}>
               {panel === 'audio' ? 'Idioma de Áudio' : panel === 'sub' ? 'Legenda' : 'Configurações'}
             </div>
             {panelOptions.map((opt, i) => (
@@ -620,7 +599,7 @@ export default function PlayerScreen() {
                 active={opt.active}
                 focused={focusedPanel === i}
                 onClick={() => {
-                  if (panel === 'audio') { if (opt.key !== trackKey) { switchPos.current = currentTime; setTrackKey(opt.key); } setPanel(null); }
+                  if (panel === 'audio') { if (opt.key !== trackKey) { switchPos.current = ctRef.current; setTrackKey(opt.key); } setPanel(null); }
                   else if (panel === 'sub') { setSubKey(opt.key); setPanel(null); }
                 }}
               />
@@ -628,16 +607,11 @@ export default function PlayerScreen() {
           </div>
         )}
 
-        {/* ── Bottom controls ───────────────────────────────────────────────── */}
-        <div style={{
-          position: 'absolute', bottom: 0, left: 0, right: 0,
-          padding: '0 52px 36px',
-        }}>
+        {/* Bottom controls */}
+        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '0 52px 36px' }}>
           {/* Progress bar */}
-          <div style={{
-            height: 6, background: 'rgba(255,255,255,0.18)',
-            borderRadius: 3, marginBottom: 24, position: 'relative', cursor: 'pointer',
-          }}
+          <div
+            style={{ height: 6, background: 'rgba(255,255,255,0.18)', borderRadius: 3, marginBottom: 24, position: 'relative', cursor: 'pointer' }}
             onClick={e => {
               const rect = e.currentTarget.getBoundingClientRect();
               const pct  = (e.clientX - rect.left) / rect.width;
@@ -646,41 +620,24 @@ export default function PlayerScreen() {
             }}
           >
             {/* Buffer fill */}
-            <div style={{
-              position: 'absolute', left: 0, top: 0, height: '100%',
-              width: (bufProgress * 100) + '%',
-              background: 'rgba(255,255,255,0.28)', borderRadius: 3,
-            }} />
+            <div ref={bufFillRef} style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: '0%', background: 'rgba(255,255,255,0.28)', borderRadius: 3 }} />
             {/* Play fill */}
-            <div style={{
-              position: 'absolute', left: 0, top: 0, height: '100%',
-              width: (progress * 100) + '%',
-              background: ACCENT, borderRadius: 3,
-            }} />
+            <div ref={playFillRef} style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: '0%', background: ACCENT, borderRadius: 3 }} />
             {/* Thumb */}
-            <div style={{
-              position: 'absolute', top: '50%',
-              width: 18, height: 18, borderRadius: '50%',
-              background: '#fff',
-              boxShadow: '0 0 10px rgba(255,255,255,0.5)',
-              transform: 'translate(-50%, -50%)',
-              left: (progress * 100) + '%',
-              transition: 'left 0.1s',
-            }} />
+            <div ref={playThumbRef} style={{ position: 'absolute', top: '50%', width: 18, height: 18, borderRadius: '50%', background: '#fff', boxShadow: '0 0 10px rgba(255,255,255,0.5)', transform: 'translate(-50%, -50%)', left: '0%' }} />
           </div>
 
           {/* Time + controls row */}
           <div style={{ display: 'flex', alignItems: 'flex-end' }}>
             {/* Time left */}
-            <div style={{ fontSize: 14, fontWeight: 700, color: 'rgba(255,255,255,0.85)', minWidth: 64, flexShrink: 0, paddingBottom: 6 }}>
-              {fmt(currentTime)}
+            <div ref={timeLeftRef} style={{ fontSize: 14, fontWeight: 700, color: 'rgba(255,255,255,0.85)', minWidth: 64, flexShrink: 0, paddingBottom: 6 }}>
+              0:00
             </div>
 
-            {/* Left button group */}
+            {/* Left buttons */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               {leftBtns.map((btn, i) => {
-                const globalIdx = i;
-                const focused   = focusedBtn === globalIdx;
+                const focused = focusedBtn === i;
                 if (btn.id === 'play') {
                   return (
                     <PlayBtn
@@ -691,23 +648,13 @@ export default function PlayerScreen() {
                     />
                   );
                 }
-                return (
-                  <CtrlBtn
-                    key={btn.id}
-                    id={btn.id}
-                    label={btn.label}
-                    icon={btn.icon}
-                    focused={focused}
-                    onClick={() => execBtn(btn)}
-                  />
-                );
+                return <CtrlBtn key={btn.id} id={btn.id} label={btn.label} icon={btn.icon} focused={focused} onClick={() => execBtn(btn)} />;
               })}
             </div>
 
-            {/* Spacer */}
             <div style={{ flex: 1 }} />
 
-            {/* Right button group */}
+            {/* Right buttons */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               {rightBtns.map((btn, i) => {
                 const globalIdx = leftBtns.length + i;
@@ -715,23 +662,13 @@ export default function PlayerScreen() {
                 const isActive  = (btn.id === 'audio' && panel === 'audio') ||
                                   (btn.id === 'cc'    && panel === 'sub')   ||
                                   (btn.id === 'config' && panel === 'config');
-                return (
-                  <CtrlBtn
-                    key={btn.id}
-                    id={btn.id}
-                    label={btn.label}
-                    icon={btn.icon}
-                    focused={focused}
-                    active={isActive}
-                    onClick={() => execBtn(btn)}
-                  />
-                );
+                return <CtrlBtn key={btn.id} id={btn.id} label={btn.label} icon={btn.icon} focused={focused} active={isActive} onClick={() => execBtn(btn)} />;
               })}
             </div>
 
-            {/* Time right */}
-            <div style={{ fontSize: 14, fontWeight: 700, color: 'rgba(255,255,255,0.5)', minWidth: 64, flexShrink: 0, textAlign: 'right', paddingBottom: 6 }}>
-              {fmt(duration)}
+            {/* Duration */}
+            <div ref={timeDurRef} style={{ fontSize: 14, fontWeight: 700, color: 'rgba(255,255,255,0.5)', minWidth: 64, flexShrink: 0, textAlign: 'right', paddingBottom: 6 }}>
+              0:00
             </div>
           </div>
         </div>
