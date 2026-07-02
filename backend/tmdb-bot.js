@@ -16,7 +16,7 @@ const supabase = createClient(
 function detectType(filename) {
   const seriePatterns = [
     /s\d{1,2}e\d{1,2}/i,
-    /\d{1,2}x\d{2}/i,
+    /\d{1,2}x\d{1,2}/i,
     /t\d{1,2}e\d{1,2}/i,
     /temporada[\s._]\d/i,
     /season[\s._]\d/i,
@@ -37,7 +37,7 @@ function extractInfo(filename) {
   if (type === 'series') {
     const match =
       name.match(/[Ss](\d{1,2})[Ee](\d{1,2})/) ||
-      name.match(/(\d{1,2})x(\d{2})/i) ||
+      name.match(/(\d{1,2})x(\d{1,2})/i) ||
       name.match(/[Tt](\d{1,2})[Ee](\d{1,2})/);
 
     if (match) {
