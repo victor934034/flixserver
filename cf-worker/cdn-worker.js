@@ -58,9 +58,17 @@ export default {
       reqHeaders.set('Range', request.headers.get('Range'));
     }
 
+    // Cache agressivo no edge da Cloudflare para vídeos e subtítulos
+    const isVideoPath = /\.(mp4|m4v|mkv|webm|mov|avi)$/i.test(pathname);
+    const edgeCacheTtl = isVideoPath ? 86400 : 3600;
+
     let b2Res;
     try {
-      b2Res = await fetch(b2Url, { headers: reqHeaders, method: request.method });
+      b2Res = await fetch(b2Url, {
+        headers: reqHeaders,
+        method: request.method,
+        cf: { cacheEverything: true, cacheTtl: edgeCacheTtl },
+      });
     } catch (e) {
       return new Response('Origin fetch failed: ' + e.message, { status: 502, headers: CORS_HEADERS });
     }
@@ -80,9 +88,9 @@ export default {
       if (v) resHeaders.set(h, v);
     }
 
-    // Cache agressivo para vídeos (1 hora), curto para outros
+    // Cache no cliente: vídeos 24h, outros 5min
     const isVideo = contentType.startsWith('video/');
-    resHeaders.set('Cache-Control', isVideo ? 'public, max-age=3600' : 'public, max-age=300');
+    resHeaders.set('Cache-Control', isVideo ? 'public, max-age=86400' : 'public, max-age=300');
 
     return new Response(b2Res.body, {
       status: b2Res.status,    // 200 ou 206 (partial content para range requests)

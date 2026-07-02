@@ -77,47 +77,53 @@ function ActionBtn({ label, sublabel, icon, onPress, primary, hasTVPreferredFocu
   );
 }
 
-// ─── Season selector  (< Temporada N >) ──────────────────────────────────────
-function SeasonArrowBtn({ icon, disabled, onPress }) {
-  const [foc, setFoc] = useState(false);
-  return (
-    <TVPressable
-      onPress={() => !disabled && onPress()}
-      onFocus={() => { setFoc(true); !disabled && onPress(); }}
-      onBlur={() => setFoc(false)}
-      style={[
-        s.seasonArrow,
-        foc && s.seasonArrowFoc,
-        disabled && s.seasonArrowOff,
-      ]}
-    >
-      <Ionicons
-        name={icon}
-        size={r(18)}
-        color={disabled ? '#2a2a2a' : foc ? '#fff' : '#888'}
-      />
-    </TVPressable>
-  );
-}
+// ─── Season dropdown (Netflix-style) ─────────────────────────────────────────
+function SeasonDropdown({ seasons, season, onSelect }) {
+  const [open, setOpen]         = useState(false);
+  const [focBtn, setFocBtn]     = useState(false);
+  const [focIdx, setFocIdx]     = useState(-1);
+  const [grabFirst, setGrabFirst] = useState(false);
 
-function SeasonSelector({ seasons, season, onSelect }) {
-  const idx = seasons.indexOf(season);
+  function choose(s) {
+    onSelect(s);
+    setOpen(false);
+    setFocBtn(true);
+  }
+
+  if (seasons.length <= 1) return null;
+
   return (
-    <View style={s.seasonSelector}>
-      <SeasonArrowBtn
-        icon="chevron-back"
-        disabled={idx <= 0}
-        onPress={() => onSelect(seasons[idx - 1])}
-      />
-      <View style={s.seasonCurrent}>
-        <Text style={s.seasonNum}>Temporada {season}</Text>
-        <Text style={s.seasonOf}>{idx + 1} de {seasons.length}</Text>
-      </View>
-      <SeasonArrowBtn
-        icon="chevron-forward"
-        disabled={idx >= seasons.length - 1}
-        onPress={() => onSelect(seasons[idx + 1])}
-      />
+    <View>
+      <TVPressable
+        onPress={() => { setOpen(o => !o); setGrabFirst(true); setFocIdx(0); }}
+        onFocus={() => setFocBtn(true)}
+        onBlur={() => setFocBtn(false)}
+        style={[s.seasonDropBtn, focBtn && s.seasonDropBtnFoc]}
+      >
+        <Text style={s.seasonDropTxt}>Temporada {season}</Text>
+        <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={r(14)} color="#fff" />
+      </TVPressable>
+
+      {open && (
+        <View style={s.seasonPanel}>
+          <Text style={s.seasonPanelTitle}>Temporadas</Text>
+          {seasons.map((sv, si) => (
+            <TVPressable
+              key={sv}
+              hasTVPreferredFocus={grabFirst && si === 0}
+              onFocus={() => { setFocIdx(si); if (grabFirst && si === 0) setGrabFirst(false); }}
+              onBlur={() => setFocIdx(i => i === si ? -1 : i)}
+              onPress={() => choose(sv)}
+              style={[s.seasonItem, focIdx === si && s.seasonItemFoc]}
+            >
+              <Text style={[s.seasonItemTxt, sv === season && s.seasonItemTxtActive]}>
+                Temporada {sv}
+              </Text>
+              {sv === season && <Ionicons name="checkmark" size={r(16)} color="#E50914" />}
+            </TVPressable>
+          ))}
+        </View>
+      )}
     </View>
   );
 }
@@ -389,7 +395,7 @@ export default function DetailScreen({ navigation, route }) {
               </View>
             )}
 
-            {/* Séries: Assistir e seletor de temporada empilhados */}
+            {/* Séries: botão Assistir */}
             {isSeries && !!firstEp && (
               <View style={s.seriesStack}>
                 <ActionBtn
@@ -401,9 +407,6 @@ export default function DetailScreen({ navigation, route }) {
                   nextFocusRight={firstEpHandle}
                   onPress={() => playEpisode(firstEp)}
                 />
-                {seasons.length > 1 && (
-                  <SeasonSelector seasons={seasons} season={season} onSelect={selectSeason} />
-                )}
               </View>
             )}
           </View>
@@ -414,9 +417,7 @@ export default function DetailScreen({ navigation, route }) {
           <View style={s.epPanel}>
             {/* Header */}
             <View style={s.epHeader}>
-              <Text style={s.epHeaderTitle}>
-                {seasons.length > 1 ? `Temporada ${season}` : 'Episódios'}
-              </Text>
+              <SeasonDropdown seasons={seasons} season={season} onSelect={selectSeason} />
               {!loading && (
                 <Text style={s.epHeaderCount}>{currentEps.length} ep.</Text>
               )}
@@ -547,30 +548,43 @@ const s = StyleSheet.create({
     gap: r(8),
   },
 
-  // Season selector
-  seasonSelector: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
-    borderRadius: r(10), paddingVertical: r(4), paddingHorizontal: r(4),
-    flexDirection: 'row', alignItems: 'center',
-    minWidth: r(130),
+  // Season dropdown
+  seasonDropBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: r(10),
+    paddingHorizontal: r(18), paddingVertical: r(10),
+    borderRadius: r(8), borderWidth: 2, borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
   },
-  seasonSelectorLabel: { display: 'none' },
-  seasonRow: { flex: 1, flexDirection: 'row', alignItems: 'center' },
-  seasonArrow: {
-    width: r(36), height: r(36),
-    justifyContent: 'center', alignItems: 'center',
-    borderRadius: r(8),
+  seasonDropBtnFoc: {
+    borderColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.14)',
+  },
+  seasonDropTxt: { fontSize: r(15), fontWeight: '800', color: '#fff' },
+  seasonPanel: {
+    position: 'absolute', top: r(52), left: 0, zIndex: 50,
+    minWidth: r(240),
+    backgroundColor: 'rgba(12,12,14,0.98)',
+    borderRadius: r(12), borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)',
+    paddingVertical: r(10),
+    shadowColor: '#000', shadowOpacity: 0.8, shadowRadius: r(20), elevation: 16,
+  },
+  seasonPanelTitle: {
+    fontSize: r(10), fontWeight: '800', color: 'rgba(255,255,255,0.3)',
+    textTransform: 'uppercase', letterSpacing: 1.5,
+    paddingHorizontal: r(18), paddingBottom: r(8),
+  },
+  seasonItem: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: r(18), paddingVertical: r(13),
+    borderRadius: r(8), marginHorizontal: r(6),
     borderWidth: 2, borderColor: 'transparent',
   },
-  seasonArrowFoc: {
-    borderColor: '#fff',
-    backgroundColor: 'rgba(255,255,255,0.12)',
+  seasonItemFoc: {
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    borderColor: 'rgba(255,255,255,0.5)',
   },
-  seasonArrowOff: { opacity: 0.2 },
-  seasonCurrent: { flex: 1, alignItems: 'center', paddingVertical: r(2) },
-  seasonNum: { fontSize: r(13), fontWeight: '800', color: '#fff' },
-  seasonOf: { fontSize: r(10), color: '#555', fontWeight: '600' },
+  seasonItemTxt: { fontSize: r(15), fontWeight: '500', color: 'rgba(255,255,255,0.65)' },
+  seasonItemTxtActive: { color: '#fff', fontWeight: '800' },
 
   // Episode panel
   epPanel: {

@@ -323,7 +323,7 @@ export default function DetailScreen() {
       if (k === KEY.RIGHT) { e.preventDefault(); setSecIdx(i => Math.min(actions.length - 1, i + 1)); }
       if (k === KEY.DOWN)  {
         e.preventDefault();
-        if (isSeries && seasons.length > 1) { setSection('seasons'); setSecIdx(season - 1); }
+        if (isSeries && seasons.length > 1) { setSection('seasons'); setSecIdx(-2); }
         else if (isSeries && currentEps.length > 0) { setSection('episodes'); setSecIdx(0); }
       }
       if (k === KEY.ENTER) { e.preventDefault(); activateAction(actions[secIdx]); }
@@ -331,11 +331,26 @@ export default function DetailScreen() {
     }
 
     if (section === 'seasons') {
-      if (k === KEY.LEFT)  { e.preventDefault(); setSecIdx(i => Math.max(0, i - 1)); }
-      if (k === KEY.RIGHT) { e.preventDefault(); setSecIdx(i => Math.min(seasons.length - 1, i + 1)); }
-      if (k === KEY.UP)    { e.preventDefault(); setSection('actions'); setSecIdx(0); }
-      if (k === KEY.DOWN)  { e.preventDefault(); if (currentEps.length > 0) { setSection('episodes'); setSecIdx(0); } }
-      if (k === KEY.ENTER) { e.preventDefault(); setSeason(seasons[secIdx]); }
+      // secIdx: -2 = botão fechado, -1 = dropdown aberto (navegando), 0+ = item do dropdown
+      if (secIdx === -2) {
+        // Foco no botão dropdown
+        if (k === KEY.UP)    { e.preventDefault(); setSection('actions'); setSecIdx(0); }
+        if (k === KEY.DOWN)  { e.preventDefault(); if (currentEps.length > 0) { setSection('episodes'); setSecIdx(0); } }
+        if (k === KEY.ENTER) { e.preventDefault(); setSecIdx(seasons.indexOf(season)); } // abre dropdown
+      } else {
+        // Dentro do dropdown
+        if (k === KEY.UP) {
+          e.preventDefault();
+          if (secIdx <= 0) setSecIdx(-2); // fecha e volta para o botão
+          else setSecIdx(i => i - 1);
+        }
+        if (k === KEY.DOWN)  { e.preventDefault(); setSecIdx(i => Math.min(seasons.length - 1, i + 1)); }
+        if (k === KEY.BACK || k === KEY.BACKSPACE) { e.preventDefault(); setSecIdx(-2); return; }
+        if (k === KEY.ENTER) {
+          e.preventDefault();
+          if (secIdx >= 0) { setSeason(seasons[secIdx]); setSecIdx(-2); }
+        }
+      }
       return;
     }
 
@@ -343,7 +358,7 @@ export default function DetailScreen() {
       if (k === KEY.UP) {
         e.preventDefault();
         if (secIdx > 0) setSecIdx(i => i - 1);
-        else if (seasons.length > 1) { setSection('seasons'); setSecIdx(season - 1); }
+        else if (seasons.length > 1) { setSection('seasons'); setSecIdx(-2); }
         else { setSection('actions'); setSecIdx(0); }
       }
       if (k === KEY.DOWN)  { e.preventDefault(); setSecIdx(i => Math.min(currentEps.length - 1, i + 1)); }
@@ -441,28 +456,70 @@ export default function DetailScreen() {
       {/* Bottom — episodes (series) */}
       {isSeries && (
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px 60px 40px', scrollbarWidth: 'none' }} ref={epScrollRef}>
-          {seasons.length > 1 && (
-            <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
-              {seasons.map((s, si) => {
-                const isFoc = section === 'seasons' && secIdx === si;
-                return (
-                  <div
-                    key={s}
-                    onClick={() => setSeason(s)}
-                    style={{
-                      padding: '8px 22px', borderRadius: 20, cursor: 'none',
-                      background: s === season ? '#E50914' : 'rgba(255,255,255,0.08)',
-                      border: '2px solid ' + (isFoc ? '#fff' : 'transparent'),
-                      fontSize: 14, fontWeight: 700, color: '#fff',
-                      transition: 'background 0.15s, border-color 0.15s',
-                    }}
-                  >
-                    Temporada {s}
+          {seasons.length > 1 && (() => {
+            const dropOpen = section === 'seasons' && secIdx === -1;
+            const btnFoc   = section === 'seasons' && secIdx === -2;
+            return (
+              <div style={{ position: 'relative', marginBottom: 20, display: 'inline-block' }}>
+                {/* Dropdown button */}
+                <div
+                  onClick={() => {
+                    if (section === 'seasons' && secIdx === -1) { setSection('seasons'); setSecIdx(-2); }
+                    else { setSection('seasons'); setSecIdx(-1); }
+                  }}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 10,
+                    padding: '10px 20px', borderRadius: 8, cursor: 'none',
+                    background: 'rgba(255,255,255,0.07)',
+                    border: '2px solid ' + (btnFoc ? '#fff' : 'rgba(255,255,255,0.15)'),
+                    fontSize: 15, fontWeight: 800, color: '#fff',
+                    transition: 'border-color 0.15s',
+                  }}
+                >
+                  Temporada {season}
+                  <span style={{ fontSize: 11, opacity: 0.6 }}>{dropOpen ? '▲' : '▼'}</span>
+                </div>
+
+                {/* Dropdown panel */}
+                {dropOpen && (
+                  <div style={{
+                    position: 'absolute', top: '110%', left: 0, zIndex: 50,
+                    minWidth: 220,
+                    background: 'rgba(12,12,14,0.98)',
+                    borderRadius: 12,
+                    border: '1px solid rgba(255,255,255,0.12)',
+                    padding: '10px 0',
+                    boxShadow: '0 8px 40px rgba(0,0,0,0.7)',
+                  }}>
+                    <div style={{ fontSize: 10, fontWeight: 800, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: 1.5, padding: '0 18px 8px' }}>
+                      Temporadas
+                    </div>
+                    {seasons.map((sv, si) => {
+                      const isFoc = section === 'seasons' && secIdx === si;
+                      return (
+                        <div
+                          key={sv}
+                          onClick={() => { setSeason(sv); setSection('seasons'); setSecIdx(-2); }}
+                          style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                            padding: '12px 18px', margin: '0 6px', borderRadius: 8, cursor: 'none',
+                            background: isFoc ? 'rgba(255,255,255,0.10)' : 'transparent',
+                            border: '2px solid ' + (isFoc ? 'rgba(255,255,255,0.5)' : 'transparent'),
+                            fontSize: 15, fontWeight: sv === season ? 800 : 500,
+                            color: sv === season ? '#fff' : 'rgba(255,255,255,0.65)',
+                            transition: 'background 0.12s',
+                          }}
+                        >
+                          Temporada {sv}
+                          {sv === season && <span style={{ color: '#E50914', fontSize: 16 }}>✓</span>}
+                        </div>
+                      );
+                    })}
                   </div>
-                );
-              })}
-            </div>
-          )}
+                )}
+              </div>
+            );
+          })()}
           {currentEps.length === 0 && (
             <div style={{ color: '#555', fontSize: 15, marginTop: 20 }}>Nenhum episódio encontrado.</div>
           )}

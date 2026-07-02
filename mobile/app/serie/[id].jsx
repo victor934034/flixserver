@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, Image, TouchableOpacity,
-  ActivityIndicator, useWindowDimensions, Alert,
+  ActivityIndicator, useWindowDimensions, Alert, Modal,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -26,6 +26,7 @@ export default function SerieDetail() {
   const [listLoading, setListLoading] = useState(false);
   const [likeData, setLikeData] = useState({ likes: 0, dislikes: 0, userVote: null });
   const [likeLoading, setLikeLoading] = useState(false);
+  const [seasonModal, setSeasonModal] = useState(false);
   const { getStatus, startDownload, cancelDownload, deleteDownload } = useDownloads();
   const { checkAccess } = useParental();
   const { activeProfile } = useProfile();
@@ -285,20 +286,40 @@ export default function SerieDetail() {
         )}
 
         {seasons.length > 0 && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.seasonsRow}>
-            {seasons.map(s => (
-              <TouchableOpacity
-                key={s}
-                style={[styles.seasonBtn, s === season && styles.seasonBtnActive]}
-                onPress={() => setSeason(s)}
-              >
-                <Text style={[styles.seasonText, s === season && styles.seasonTextActive]}>
-                  Temporada {s}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
+          <TouchableOpacity style={styles.seasonDropBtn} onPress={() => setSeasonModal(true)} activeOpacity={0.7}>
+            <Text style={styles.seasonDropTxt}>Temporada {season}</Text>
+            <Ionicons name="chevron-down" size={15} color="#fff" />
+          </TouchableOpacity>
         )}
+
+        <Modal
+          visible={seasonModal}
+          transparent
+          animationType="slide"
+          statusBarTranslucent
+          onRequestClose={() => setSeasonModal(false)}
+        >
+          <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setSeasonModal(false)}>
+            <View style={styles.modalSheet} onStartShouldSetResponder={() => true}>
+              <View style={styles.modalHandle} />
+              <Text style={styles.modalTitle}>Temporadas</Text>
+              {seasons.map(s => (
+                <TouchableOpacity
+                  key={s}
+                  style={styles.modalItem}
+                  activeOpacity={0.7}
+                  onPress={() => { setSeason(s); setSeasonModal(false); }}
+                >
+                  <Text style={[styles.modalItemTxt, s === season && styles.modalItemTxtActive]}>
+                    Temporada {s}
+                  </Text>
+                  {s === season && <Ionicons name="checkmark" size={20} color="#E50914" />}
+                </TouchableOpacity>
+              ))}
+              <View style={{ height: 28 }} />
+            </View>
+          </TouchableOpacity>
+        </Modal>
 
         <Text style={styles.sectionTitle}>
           {currentEps.length} episódio{currentEps.length !== 1 ? 's' : ''}
@@ -412,14 +433,39 @@ const styles = StyleSheet.create({
   tag: { color: '#b3b3b3', fontSize: 13 },
   rating: { color: '#ffa500', fontSize: 13, fontWeight: '600' },
   synopsis: { color: '#ccc', fontSize: 14, lineHeight: 22, marginBottom: 20 },
-  seasonsRow: { marginBottom: 16 },
-  seasonBtn: {
-    paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20,
-    borderWidth: 1, borderColor: '#2a2a2a', marginRight: 8,
+  seasonDropBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 16, paddingVertical: 10,
+    borderRadius: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    marginBottom: 16,
   },
-  seasonBtnActive: { backgroundColor: '#E50914', borderColor: '#E50914' },
-  seasonText: { color: '#b3b3b3', fontSize: 13 },
-  seasonTextActive: { color: '#fff', fontWeight: '700' },
+  seasonDropTxt: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  modalOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'flex-end',
+  },
+  modalSheet: {
+    backgroundColor: '#141414', borderTopLeftRadius: 16, borderTopRightRadius: 16,
+    paddingTop: 12, paddingHorizontal: 0,
+  },
+  modalHandle: {
+    width: 36, height: 4, borderRadius: 2, backgroundColor: '#333',
+    alignSelf: 'center', marginBottom: 16,
+  },
+  modalTitle: {
+    color: 'rgba(255,255,255,0.45)', fontSize: 12, fontWeight: '700',
+    textTransform: 'uppercase', letterSpacing: 1.5,
+    paddingHorizontal: 20, marginBottom: 8,
+  },
+  modalItem: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingVertical: 16,
+    borderBottomWidth: 1, borderBottomColor: '#1e1e1e',
+  },
+  modalItemTxt: { color: '#b3b3b3', fontSize: 16 },
+  modalItemTxtActive: { color: '#fff', fontWeight: '700' },
   sectionTitle: {
     color: '#555', fontSize: 11, marginBottom: 12,
     textTransform: 'uppercase', letterSpacing: 1,
