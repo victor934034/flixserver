@@ -26,6 +26,9 @@ export default function Configuracoes() {
   const [plansSaving, setPlansSaving] = useState(false);
   const [plansMsg, setPlansMsg] = useState('');
 
+  const [faststartMsg, setFaststartMsg] = useState('');
+  const [faststartRunning, setFaststartRunning] = useState(false);
+
   useEffect(() => {
     api.get('/settings').then(r => setSettings(r.data)).finally(() => setLoading(false));
     api.get('/payments/plans/all')
@@ -233,6 +236,47 @@ export default function Configuracoes() {
             </div>
           </div>
         )}
+      </section>
+
+      {/* ── MANUTENÇÃO ── */}
+      <section style={{ marginBottom: 40 }}>
+        <h3 style={{ color: '#fff', marginBottom: 16 }}>Manutenção</h3>
+        <div style={{ background: '#1a1a1a', borderRadius: 12, padding: 24, border: '1px solid #2a2a2a' }}>
+          <p style={{ color: '#fff', fontWeight: 600, margin: '0 0 4px' }}>Corrigir faststart de MP4s</p>
+          <p style={{ color: '#888', fontSize: 13, margin: '0 0 16px' }}>
+            Aplica <code style={{ background: '#111', padding: '1px 5px', borderRadius: 4 }}>-movflags +faststart</code> em todos os arquivos .mp4 do banco —
+            move o moov atom para o início do arquivo para que o vídeo comece a reproduzir instantaneamente.
+            O processo roda em background no servidor; acompanhe os logs do EasePanel.
+          </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+            <button
+              disabled={faststartRunning}
+              onClick={async () => {
+                setFaststartRunning(true);
+                setFaststartMsg('');
+                try {
+                  const r = await api.post('/upload/batch-fix-faststart');
+                  setFaststartMsg(`✓ ${r.data.message}`);
+                } catch (e) {
+                  setFaststartMsg('Erro: ' + (e.response?.data?.error || e.message));
+                } finally {
+                  setFaststartRunning(false);
+                }
+              }}
+              style={{
+                padding: '10px 24px', borderRadius: 8, background: faststartRunning ? '#333' : '#1565c0',
+                color: '#fff', border: 'none', fontWeight: 700, fontSize: 14,
+                cursor: faststartRunning ? 'not-allowed' : 'pointer',
+              }}>
+              {faststartRunning ? 'Iniciando...' : 'Corrigir todos os MP4s'}
+            </button>
+            {faststartMsg && (
+              <span style={{ color: faststartMsg.startsWith('Erro') ? '#ff6b6b' : '#4caf50', fontSize: 13 }}>
+                {faststartMsg}
+              </span>
+            )}
+          </div>
+        </div>
       </section>
 
       {/* ── NOTIFICAÇÕES ── */}

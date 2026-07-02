@@ -84,6 +84,21 @@ function needsRemux(info) {
   return heAac || info.channels > 2;
 }
 
+async function applyFaststart(inputPath, outputPath) {
+  try {
+    await execFileAsync('ffmpeg', [
+      '-i', inputPath,
+      '-c', 'copy',
+      '-movflags', '+faststart',
+      '-y', outputPath,
+    ], { maxBuffer: 10 * 1024 * 1024, timeout: 7_200_000 });
+    return true;
+  } catch (e) {
+    console.error('[faststart] ffmpeg falhou:', e.message?.slice(0, 200));
+    return false;
+  }
+}
+
 async function remuxToWebAac(input, outputPath) {
   const out = outputPath || input.replace(/(\.[^.]+)$/, '_fixed$1');
   const isUrl = /^https?:\/\//i.test(input);
@@ -119,6 +134,7 @@ router.post('/video', upload.single('file'), async (req, res) => {
   const ext = path.extname(req.file.originalname) || '.tmp';
   const tmpInput = path.join(os.tmpdir(), `fh_in_${Date.now()}${ext}`);
   let tmpOutput = null;
+  let tmpFaststart = null;
 
   try {
     fs.writeFileSync(tmpInput, req.file.buffer);
@@ -141,13 +157,27 @@ router.post('/video', upload.single('file'), async (req, res) => {
       }
     }
 
+    // Aplica faststart em MP4 (move moov atom para o início — início de reprodução instantâneo)
+    const isMp4 = /\.mp4$/i.test(filename);
+    if (isMp4) {
+      const src = tmpOutput || tmpInput;
+      const faststartPath = path.join(os.tmpdir(), `fh_fs_${Date.now()}.mp4`);
+      const ok = await applyFaststart(src, faststartPath);
+      if (ok) {
+        tmpFaststart = faststartPath;
+        buffer = fs.readFileSync(faststartPath);
+        console.log('[upload/video] faststart aplicado');
+      }
+    }
+
     const result = await uploadFile(buffer, filename, req.file.mimetype);
-    res.json({ ...result, remuxed: !!tmpOutput, audioInfo });
+    res.json({ ...result, remuxed: !!tmpOutput, faststartApplied: isMp4, audioInfo });
   } catch (err) {
     res.status(500).json({ error: err.message });
   } finally {
     try { fs.unlinkSync(tmpInput); } catch {}
     try { if (tmpOutput) fs.unlinkSync(tmpOutput); } catch {}
+    try { if (tmpFaststart) fs.unlinkSync(tmpFaststart); } catch {}
   }
 });
 
@@ -451,6 +481,114 @@ function convertSrtToVtt(srt) {
     .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2')
     .trim();
 }
+
+// Corrige faststart de um MP4 já no B2 (baixa, processa, re-envia com mesmo nome)
+router.post('/fix-faststart', async (req, res) => {
+  const { cdnUrl, movieId, movieType, field } = req.body;
+  if (!cdnUrl) return res.status(400).json({ error: 'cdnUrl é obrigatório' });
+  if (!/\.mp4$/i.test(cdnUrl)) return res.json({ skipped: true, reason: 'Não é MP4' });
+
+  let tmpOutput = null;
+  try {
+    const origName = decodeURIComponent(path.basename(new URL(cdnUrl).pathname));
+    const { url: b2Url, token: b2Token } = await getDirectDownloadInfo(origName);
+    const b2AuthHdr = `Authorization: ${b2Token}\r\nUser-Agent: ${UA}\r\n`;
+
+    tmpOutput = path.join(os.tmpdir(), `fh_fs_${Date.now()}.mp4`);
+    console.log(`[fix-faststart] processando ${origName}`);
+
+    try {
+      await execFileAsync('ffmpeg', [
+        '-headers', b2AuthHdr,
+        '-i', b2Url,
+        '-c', 'copy',
+        '-movflags', '+faststart',
+        '-y', tmpOutput,
+      ], { maxBuffer: 10 * 1024 * 1024, timeout: 7_200_000 });
+    } catch (e) {
+      throw new Error('ffmpeg falhou: ' + e.message?.slice(0, 200));
+    }
+
+    const { uploadFileFromPath } = require('../services/backblaze');
+    const result = await uploadFileFromPath(tmpOutput, origName, 'video/mp4');
+
+    if (movieId && field) {
+      const { supabase } = require('../services/supabase');
+      const table = movieType === 'series' ? 'episodes' : 'movies';
+      await supabase.from(table).update({ [field]: result.cdnUrl }).eq('id', movieId);
+    }
+
+    res.json({ ok: true, cdnUrl: result.cdnUrl });
+  } catch (err) {
+    console.error('[fix-faststart]', err.message);
+    res.status(500).json({ error: err.message });
+  } finally {
+    try { if (tmpOutput) fs.unlinkSync(tmpOutput); } catch {}
+  }
+});
+
+// Corrige faststart em lote para todos os MP4s do banco (roda em background)
+router.post('/batch-fix-faststart', async (_req, res) => {
+  const { supabase } = require('../services/supabase');
+  const { uploadFileFromPath } = require('../services/backblaze');
+
+  const VIDEO_FIELDS = ['file_dubbing', 'file_subtitled', 'file_cinema', 'file_color', 'file_bw', 'file_4k'];
+
+  // Coleta todos os MP4s de episódios e filmes
+  const collect = async (table, extraFields = []) => {
+    const fields = ['id', ...VIDEO_FIELDS.filter((_, i) => i < (table === 'episodes' ? 6 : 5)), ...extraFields];
+    const { data } = await supabase.from(table).select(fields.join(', ')).limit(5000);
+    const items = [];
+    for (const row of data || []) {
+      for (const f of VIDEO_FIELDS) {
+        if (row[f] && /\.mp4$/i.test(row[f])) {
+          items.push({ table, id: row.id, field: f, cdnUrl: row[f] });
+        }
+      }
+    }
+    return items;
+  };
+
+  let allItems = [];
+  try {
+    const [eps, movs] = await Promise.all([collect('episodes'), collect('movies')]);
+    allItems = [...eps, ...movs];
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+
+  res.json({ ok: true, total: allItems.length, message: `Iniciando correção de ${allItems.length} arquivo(s) MP4 em background. Acompanhe os logs do servidor.` });
+
+  // Processa em background, um de cada vez para não sobrecarregar
+  (async () => {
+    let done = 0, errors = 0;
+    for (const item of allItems) {
+      let tmpOut = null;
+      try {
+        const origName = decodeURIComponent(path.basename(new URL(item.cdnUrl).pathname));
+        const { url: b2Url, token: b2Token } = await getDirectDownloadInfo(origName);
+        const b2AuthHdr = `Authorization: ${b2Token}\r\nUser-Agent: ${UA}\r\n`;
+        tmpOut = path.join(os.tmpdir(), `fh_bfs_${Date.now()}.mp4`);
+
+        await execFileAsync('ffmpeg', [
+          '-headers', b2AuthHdr, '-i', b2Url,
+          '-c', 'copy', '-movflags', '+faststart',
+          '-y', tmpOut,
+        ], { maxBuffer: 10 * 1024 * 1024, timeout: 7_200_000 });
+
+        await uploadFileFromPath(tmpOut, origName, 'video/mp4');
+        done++;
+        console.log(`[batch-faststart] ${done}/${allItems.length} OK: ${origName}`);
+      } catch (e) {
+        errors++;
+        console.error(`[batch-faststart] ERRO (${item.table}#${item.id} ${item.field}):`, e.message?.slice(0, 150));
+      } finally {
+        try { if (tmpOut) fs.unlinkSync(tmpOut); } catch {}
+      }
+    }
+    console.log(`[batch-faststart] Concluído: ${done} corrigidos, ${errors} erros`);
+  })();
+});
 
 // Upload de avatar de perfil — imagem JPG/PNG, armazenada em avatars/
 router.post('/avatar', upload.single('file'), async (req, res) => {
