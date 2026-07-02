@@ -86,6 +86,25 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Detecta referência de episódio no final da query (ex: "3x1", "EP 3x1", "S03E01", "T3E1")
+function parseEpisodeRef(q) {
+  const patterns = [
+    /\b(?:ep(?:is[oó]dio)?\s*)?(\d+)\s*[xX]\s*(\d+)\b/i, // 3x1, EP 3x1, EP3x1
+    /\b[sStT](\d+)\s*[eExX]\s*(\d+)\b/,                   // S03E01, T3E1, S3x1
+  ];
+  for (const re of patterns) {
+    const m = q.match(re);
+    if (m) {
+      return {
+        season: parseInt(m[1], 10),
+        episode: parseInt(m[2], 10),
+        titlePart: q.slice(0, m.index).replace(/\s+/g, ' ').trim(),
+      };
+    }
+  }
+  return null;
+}
+
 app.get('/api/search', async (req, res) => {
   const { q, type, genre, limit = 20 } = req.query;
   if (!q || q.trim().length < 2) {
@@ -93,8 +112,12 @@ app.get('/api/search', async (req, res) => {
   }
 
   const { supabase } = require('./services/supabase');
-  const search = `%${q}%`;
   const lim = Number(limit);
+
+  // Detecta padrão "3x1" / "EP 3x1" / "S03E01" na query
+  const epRef = parseEpisodeRef(q.trim());
+  const titleQ = epRef && epRef.titlePart.length >= 2 ? epRef.titlePart : q.trim();
+  const search = `%${titleQ}%`;
 
   try {
     let moviesQ = supabase.from('movies').select('id, title, year, poster_url, rating, genres').ilike('title', search).eq('is_active', true).limit(lim);
@@ -112,15 +135,41 @@ app.get('/api/search', async (req, res) => {
       type === 'movie' || type === 'series' ? Promise.resolve({ data: [] }) : episodesQ,
     ]);
 
+    let episodes = (episodesResult.data || []).map(e => ({
+      ...e, type: 'episode',
+      poster_url: e.series?.poster_url || e.thumbnail_url,
+      seriesTitle: e.series?.title,
+    }));
+
+    // Se detectou referência de episódio (3x1), busca o episódio específico nas séries encontradas
+    if (epRef && type !== 'movie') {
+      const seriesIds = (seriesResult.data || []).map(s => s.id);
+      if (seriesIds.length > 0) {
+        const { data: epData } = await supabase
+          .from('episodes')
+          .select('id, title, season_number, episode_number, thumbnail_url, series_id, series:series_id(id, title, poster_url)')
+          .in('series_id', seriesIds)
+          .eq('season_number', epRef.season)
+          .eq('episode_number', epRef.episode)
+          .limit(5);
+
+        if (epData && epData.length > 0) {
+          const pinned = epData.map(e => ({
+            ...e, type: 'episode',
+            poster_url: e.series?.poster_url || e.thumbnail_url,
+            seriesTitle: e.series?.title,
+          }));
+          // Coloca os episódios específicos no topo, sem duplicar
+          const existingIds = new Set(episodes.map(e => e.id));
+          episodes = [...pinned, ...episodes.filter(e => !existingIds.has(e.id))];
+        }
+      }
+    }
+
     res.json({
       movies: (moviesResult.data || []).map(m => ({ ...m, type: 'movie' })),
       series: (seriesResult.data || []).map(s => ({ ...s, type: 'series' })),
-      episodes: (episodesResult.data || []).map(e => ({
-        ...e,
-        type: 'episode',
-        poster_url: e.series?.poster_url || e.thumbnail_url,
-        seriesTitle: e.series?.title,
-      })),
+      episodes,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
