@@ -25,8 +25,6 @@ function Btn({ focused, danger, accent, children, onClick, style = {} }) {
           ? (danger ? '#c0392b' : accent ? '#fff' : 'rgba(255,255,255,0.22)')
           : (accent ? '#E50914' : danger ? 'rgba(229,9,20,0.15)' : 'rgba(255,255,255,0.10)'),
         border: '2px solid ' + (focused ? '#fff' : 'transparent'),
-        transform: focused ? 'scale(1.05)' : 'scale(1)',
-        transition: 'all 0.15s ease',
         color: focused && accent ? '#000' : '#fff',
         fontWeight: 700, fontSize: 15,
         ...style,
@@ -50,7 +48,7 @@ function EpisodeItem({ ep, focused, onClick, epProgress }) {
         padding: '14px 20px', borderRadius: 12, marginBottom: 8,
         background: focused ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.04)',
         border: '2px solid ' + (focused ? '#fff' : 'transparent'),
-        cursor: 'none', transition: 'background 0.15s, border-color 0.15s',
+        cursor: 'none',
       }}
     >
       <div style={{ width: 140, height: 78, borderRadius: 8, overflow: 'hidden', flexShrink: 0, background: '#1a1a1a', position: 'relative' }}>
@@ -457,15 +455,17 @@ export default function DetailScreen() {
       {isSeries && (
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px 60px 40px', scrollbarWidth: 'none' }} ref={epScrollRef}>
           {seasons.length > 1 && (() => {
-            const dropOpen = section === 'seasons' && secIdx === -1;
-            const btnFoc   = section === 'seasons' && secIdx === -2;
+            // secIdx === -2 → botão com foco (dropdown fechado)
+            // secIdx >= 0  → dropdown aberto, item focado
+            const dropOpen = section === 'seasons' && secIdx >= 0;
+            const btnFoc   = section === 'seasons';
             return (
               <div style={{ position: 'relative', marginBottom: 20, display: 'inline-block' }}>
                 {/* Dropdown button */}
                 <div
                   onClick={() => {
-                    if (section === 'seasons' && secIdx === -1) { setSection('seasons'); setSecIdx(-2); }
-                    else { setSection('seasons'); setSecIdx(-1); }
+                    if (dropOpen) { setSection('seasons'); setSecIdx(-2); }
+                    else { setSection('seasons'); setSecIdx(Math.max(0, seasons.indexOf(season))); }
                   }}
                   style={{
                     display: 'inline-flex', alignItems: 'center', gap: 10,
@@ -473,7 +473,6 @@ export default function DetailScreen() {
                     background: 'rgba(255,255,255,0.07)',
                     border: '2px solid ' + (btnFoc ? '#fff' : 'rgba(255,255,255,0.15)'),
                     fontSize: 15, fontWeight: 800, color: '#fff',
-                    transition: 'border-color 0.15s',
                   }}
                 >
                   Temporada {season}
@@ -495,7 +494,7 @@ export default function DetailScreen() {
                       Temporadas
                     </div>
                     {seasons.map((sv, si) => {
-                      const isFoc = section === 'seasons' && secIdx === si;
+                      const isFoc = secIdx === si;
                       return (
                         <div
                           key={sv}
@@ -507,7 +506,6 @@ export default function DetailScreen() {
                             border: '2px solid ' + (isFoc ? 'rgba(255,255,255,0.5)' : 'transparent'),
                             fontSize: 15, fontWeight: sv === season ? 800 : 500,
                             color: sv === season ? '#fff' : 'rgba(255,255,255,0.65)',
-                            transition: 'background 0.12s',
                           }}
                         >
                           Temporada {sv}

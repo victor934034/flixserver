@@ -36,7 +36,7 @@ function smoothScroll(el, prop, target, rafRef) {
 }
 
 // ── Portrait card (172×208) ───────────────────────────────────────────────────
-function PortraitCard({ item, focused, hovered, onClick, onEnter, onLeave }) {
+const PortraitCard = React.memo(function PortraitCard({ item, focused, hovered, onClick, onEnter, onLeave }) {
   const img   = item.poster_url || item.backdrop_url || item.thumbnail_url;
   const title = item.title || item.name || item.episode_title || '';
   const isHighlit = focused || hovered;
@@ -56,7 +56,6 @@ function PortraitCard({ item, focused, hovered, onClick, onEnter, onLeave }) {
         width: PORT_W, height: PORT_H, position: 'relative',
         borderRadius: 8, background: '#0a0a0a', overflow: 'hidden',
         boxShadow: isHighlit ? 'inset 0 0 0 3px #fff' : 'none',
-        transition: 'box-shadow 0.18s',
       }}>
         {img ? (
           <img
@@ -117,16 +116,15 @@ function PortraitCard({ item, focused, hovered, onClick, onEnter, onLeave }) {
         lineHeight: 1.35,
         width: PORT_W,
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        transition: 'color 0.18s ease, font-weight 0.18s ease',
       }}>
         {title}
       </div>
     </div>
   );
-}
+});
 
 // ── Landscape card (306×128) for "Continue Assistindo" ──────────────────────
-function LandscapeCard({ item, focused, hovered, onClick, onEnter, onLeave }) {
+const LandscapeCard = React.memo(function LandscapeCard({ item, focused, hovered, onClick, onEnter, onLeave }) {
   const img   = item.backdrop_url || item.thumbnail_url || item.poster_url;
   const title = item.title || item.name || item.episode_title || '';
   const pct   = item.progress > 0 && item.duration > 0
@@ -147,7 +145,6 @@ function LandscapeCard({ item, focused, hovered, onClick, onEnter, onLeave }) {
         width: LAND_W, height: LAND_H, position: 'relative',
         borderRadius: 8, overflow: 'hidden',
         boxShadow: isHighlit ? 'inset 0 0 0 3px #fff' : 'none',
-        transition: 'box-shadow 0.18s',
       }}>
         {img ? (
           <img
@@ -189,7 +186,6 @@ function LandscapeCard({ item, focused, hovered, onClick, onEnter, onLeave }) {
             <div style={{
               height: '100%', width: pct + '%',
               background: ACCENT, borderRadius: '0 0 0 8px',
-              transition: 'width 0.3s',
             }} />
           </div>
         )}
@@ -221,13 +217,12 @@ function LandscapeCard({ item, focused, hovered, onClick, onEnter, onLeave }) {
         marginTop: 8, fontSize: 12, fontWeight: isHighlit ? 700 : 400,
         color: isHighlit ? '#fff' : 'rgba(255,255,255,0.45)',
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        transition: 'color 0.18s ease',
       }}>
         {pct > 0 ? pct + '% assistido' : ''}
       </div>
     </div>
   );
-}
+});
 
 // ── Card Row ──────────────────────────────────────────────────────────────────
 function CardRow({ data, colFocus, isActive, isLandscape, onSelect }) {
@@ -348,7 +343,6 @@ function HeroBanner({ item, focusedBtn, onWatch, onDetail }) {
       <div style={{
         position: 'absolute', bottom: 68, left: PAD_L,
         maxWidth: 660,
-        animation: 'fadein 0.5s ease',
       }}>
         {/* Badges row */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
@@ -424,8 +418,6 @@ function HeroBanner({ item, focusedBtn, onWatch, onDetail }) {
               fontSize: 17, fontWeight: 800, cursor: 'pointer',
               outline: focusedBtn === 0 ? '3px solid rgba(255,255,255,0.7)' : 'none',
               outlineOffset: '3px',
-              transform: focusedBtn === 0 ? 'scale(1.04)' : 'scale(1)',
-              transition: 'transform 0.18s, outline 0.18s',
               boxShadow: 'none',
             }}
           >
@@ -448,8 +440,6 @@ function HeroBanner({ item, focusedBtn, onWatch, onDetail }) {
               fontSize: 17, fontWeight: 700, cursor: 'pointer',
               outline: focusedBtn === 1 ? '3px solid rgba(255,255,255,0.7)' : 'none',
               outlineOffset: '3px',
-              transform: focusedBtn === 1 ? 'scale(1.04)' : 'scale(1)',
-              transition: 'transform 0.18s, border-color 0.18s',
               boxShadow: 'none',
             }}
           >
@@ -575,7 +565,6 @@ function SearchPanel({ onSelect, onBack }) {
               border: '2px solid ' + (query ? ACCENT : 'rgba(255,255,255,0.12)'),
               borderRadius: 10, color: '#fff', fontSize: 20, outline: 'none',
               fontFamily: 'inherit', fontWeight: 500,
-              transition: 'border-color 0.2s',
             }}
           />
         </div>
@@ -609,7 +598,6 @@ function SearchPanel({ onSelect, onBack }) {
                     borderRadius: 10, overflow: 'hidden', cursor: 'pointer',
                     background: isFoc ? 'rgba(255,255,255,0.09)' : 'transparent',
                     border: '2px solid ' + (isFoc ? '#fff' : 'rgba(255,255,255,0.06)'),
-                    transition: 'background 0.15s, border-color 0.15s',
                   }}
                 >
                   {img && (
@@ -651,7 +639,6 @@ function SectionLabel({ title, isActive, isHistory }) {
       <span style={{
         fontSize: 20, fontWeight: 700,
         color: isActive ? '#fff' : 'rgba(255,255,255,0.55)',
-        transition: 'color 0.18s ease',
         letterSpacing: 0.3,
       }}>
         {title}
