@@ -24,11 +24,26 @@ async function generateHLS(origName) {
   const cleanBase = path.posix.basename(origName).replace(/\.[^.]+$/, '');
   const tmpDir    = path.join(os.tmpdir(), `hls_${Date.now()}`);
 
+  let tmpSrc = null;
   try {
     fs.mkdirSync(tmpDir, { recursive: true });
 
-    // CDN URL é público — baixa direto sem auth (mais simples e confiável)
-    const srcUrl = `${process.env.CDN_BASE_URL}/${encodeURIComponent(path.posix.basename(origName))}`;
+    // Baixa o arquivo via B2 com auth para evitar bloqueio do CDN Worker
+    const { url: b2Url, token: b2Token } = await getDirectDownloadInfo(origName);
+    tmpSrc = path.join(tmpDir, 'src' + path.extname(origName));
+    await new Promise((resolve, reject) => {
+      const https = require('https');
+      const http  = require('http');
+      const urlObj = new URL(b2Url);
+      const lib = urlObj.protocol === 'https:' ? https : http;
+      const file = fs.createWriteStream(tmpSrc);
+      lib.get(b2Url, { headers: { Authorization: b2Token } }, res => {
+        if (res.statusCode !== 200) return reject(new Error(`B2 download ${res.statusCode}: ${origName}`));
+        res.pipe(file);
+        file.on('finish', () => { file.close(); resolve(); });
+        file.on('error', reject);
+      }).on('error', reject);
+    });
 
     const playlistTmp = path.join(tmpDir, 'pl.m3u8');
     const segPattern  = path.join(tmpDir, 'seg_%04d.ts');
@@ -36,7 +51,7 @@ async function generateHLS(origName) {
     // Stream copy para HLS (rápido, sem perda de qualidade)
     try {
       await execFileAsync(ffmpegPath, [
-        '-i', srcUrl,
+        '-i', tmpSrc,
         '-c:v', 'copy', '-c:a', 'copy',
         '-hls_time', '4',
         '-hls_playlist_type', 'vod',
@@ -47,11 +62,11 @@ async function generateHLS(origName) {
     } catch (e1) {
       // Fallback para transcode quando stream copy falha (ex: MKV com codec incompatível)
       console.warn(`[hls] stream copy falhou, transcoding ${origName}: ${e1.message.slice(0, 80)}`);
-      fs.readdirSync(tmpDir).filter(f => f !== 'pl.m3u8').forEach(f => {
+      fs.readdirSync(tmpDir).filter(f => /^seg_\d{4}\.ts$|^pl\.m3u8$/.test(f)).forEach(f => {
         try { fs.unlinkSync(path.join(tmpDir, f)); } catch {}
       });
       await execFileAsync(ffmpegPath, [
-        '-i', srcUrl,
+        '-i', tmpSrc,
         '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
         '-c:a', 'aac', '-b:a', '128k',
         '-hls_time', '4',
@@ -703,14 +718,33 @@ router.post('/batch-fix-faststart', async (_req, res) => {
       try {
         const origName = path.posix.basename(decodeURIComponent(new URL(item.cdnUrl).pathname));
         job.lastFile = origName.slice(-60);
+
+        // Baixa via B2 com auth para evitar bloqueio do CDN Worker
+        const { url: b2Url, token: b2Token } = await getDirectDownloadInfo(origName);
+        const tmpIn  = path.join(os.tmpdir(), `fh_bfs_in_${Date.now()}.mp4`);
         tmpOut = path.join(os.tmpdir(), `fh_bfs_${Date.now()}.mp4`);
 
+        await new Promise((resolve, reject) => {
+          const https = require('https');
+          const http  = require('http');
+          const urlObj = new URL(b2Url);
+          const lib = urlObj.protocol === 'https:' ? https : http;
+          const file = fs.createWriteStream(tmpIn);
+          lib.get(b2Url, { headers: { Authorization: b2Token } }, res => {
+            if (res.statusCode !== 200) return reject(new Error(`B2 ${res.statusCode}: ${origName}`));
+            res.pipe(file);
+            file.on('finish', () => { file.close(); resolve(); });
+            file.on('error', reject);
+          }).on('error', reject);
+        });
+
         await execFileAsync(ffmpegPath, [
-          '-i', item.cdnUrl,
+          '-i', tmpIn,
           '-c', 'copy', '-movflags', '+faststart',
           '-y', tmpOut,
         ], { maxBuffer: 10 * 1024 * 1024, timeout: 7_200_000 });
 
+        try { fs.unlinkSync(tmpIn); } catch {}
         await uploadFileFromPath(tmpOut, origName, 'video/mp4');
         job.done++;
         console.log(`[batch-faststart] ${job.done}/${job.total} OK: ${origName}`);
