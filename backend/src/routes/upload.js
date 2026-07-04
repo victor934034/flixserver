@@ -656,17 +656,19 @@ router.post('/batch-fix-faststart', async (_req, res) => {
   const { supabase } = require('../services/supabase');
   const { uploadFileFromPath } = require('../services/backblaze');
 
-  const VIDEO_FIELDS = ['file_dubbing', 'file_subtitled', 'file_cinema', 'file_color', 'file_bw', 'file_4k'];
+  const MOVIE_FIELDS   = ['file_dubbing', 'file_subtitled', 'file_cinema', 'file_4k'];
+  const EPISODE_FIELDS = ['file_dubbing', 'file_subtitled', 'file_cinema'];
 
   const collect = async (table) => {
+    const fields = table === 'movies' ? MOVIE_FIELDS : EPISODE_FIELDS;
     const { data, error } = await supabase
       .from(table)
-      .select(['id', ...VIDEO_FIELDS].join(', '))
+      .select(['id', ...fields].join(', '))
       .limit(5000);
     if (error) throw new Error(`Supabase ${table}: ${error.message}`);
     const items = [];
     for (const row of data || []) {
-      for (const f of VIDEO_FIELDS) {
+      for (const f of fields) {
         if (row[f] && /\.mp4$/i.test(row[f])) {
           items.push({ table, id: row.id, field: f, cdnUrl: row[f] });
         }
@@ -753,14 +755,16 @@ router.post('/generate-hls', async (req, res) => {
 // Gera HLS em batch para todos os vídeos do banco
 router.post('/batch-generate-hls', async (_req, res) => {
   const { supabase }    = require('../services/supabase');
-  const VIDEO_FIELDS    = ['file_dubbing', 'file_subtitled', 'file_cinema', 'file_color', 'file_bw', 'file_4k'];
+  const MOVIE_FIELDS   = ['file_dubbing', 'file_subtitled', 'file_cinema', 'file_4k'];
+  const EPISODE_FIELDS = ['file_dubbing', 'file_subtitled', 'file_cinema'];
 
   const collect = async (table) => {
-    const { data, error } = await supabase.from(table).select(['id', ...VIDEO_FIELDS].join(', ')).limit(5000);
+    const fields = table === 'movies' ? MOVIE_FIELDS : EPISODE_FIELDS;
+    const { data, error } = await supabase.from(table).select(['id', ...fields].join(', ')).limit(5000);
     if (error) throw new Error(`Supabase ${table}: ${error.message}`);
     const items = [], seen = new Set();
     for (const row of data || []) {
-      for (const f of VIDEO_FIELDS) {
+      for (const f of fields) {
         const url = row[f];
         if (url && !seen.has(url)) { seen.add(url); items.push({ cdnUrl: url }); }
       }
