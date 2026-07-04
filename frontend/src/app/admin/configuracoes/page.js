@@ -272,7 +272,7 @@ export default function Configuracoes() {
                       return;
                     }
                     const { jobId } = r.data;
-                    setFaststartProgress({ total: r.data.total, done: 0, errors: 0, running: true, lastFile: '' });
+                    setFaststartProgress({ total: r.data.total, done: 0, errors: 0, running: true, lastFile: '', skipped: r.data.skipped || 0 });
                     faststartPollRef.current = setInterval(async () => {
                       try {
                         const s = await api.get(`/upload/batch-status?jobId=${jobId}`);
@@ -280,10 +280,11 @@ export default function Configuracoes() {
                         if (!s.data.running) {
                           clearInterval(faststartPollRef.current);
                           setFaststartRunning(false);
+                          const sk = s.data.skipped ? ` (${s.data.skipped} já prontos)` : '';
                           setFaststartMsg(
                             s.data.errors === 0
-                              ? `✓ ${s.data.done} arquivo(s) corrigido(s) com sucesso.`
-                              : `${s.data.done} corrigido(s), ${s.data.errors} erro(s)${s.data.lastError ? ': ' + s.data.lastError : ' — veja os logs do servidor.'}`
+                              ? `✓ ${s.data.done} arquivo(s) corrigido(s)${sk}.`
+                              : `${s.data.done} corrigido(s), ${s.data.errors} erro(s)${sk}${s.data.lastError ? ': ' + s.data.lastError : ' — veja os logs.'}`
                           );
                         }
                       } catch {

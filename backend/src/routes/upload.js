@@ -684,6 +684,19 @@ router.post('/fix-faststart', async (req, res) => {
   }
 });
 
+// Arquivo de progresso persistente — sobrevive a reinícios do servidor
+const FASTSTART_PROGRESS_FILE = path.join(__dirname, '../../data/faststart_done.json');
+function loadFaststartDone() {
+  try { return new Set(JSON.parse(fs.readFileSync(FASTSTART_PROGRESS_FILE, 'utf8'))); }
+  catch { return new Set(); }
+}
+function saveFaststartDone(doneSet) {
+  try {
+    fs.mkdirSync(path.dirname(FASTSTART_PROGRESS_FILE), { recursive: true });
+    fs.writeFileSync(FASTSTART_PROGRESS_FILE, JSON.stringify([...doneSet]));
+  } catch {}
+}
+
 // Corrige faststart em lote para todos os MP4s do banco (roda em background)
 router.post('/batch-fix-faststart', async (_req, res) => {
   const { supabase } = require('../services/supabase');
@@ -722,23 +735,36 @@ router.post('/batch-fix-faststart', async (_req, res) => {
     return res.json({ ok: true, jobId: null, total: 0, message: 'Nenhum arquivo MP4 encontrado.' });
   }
 
-  const jobId = `fs_${Date.now()}`;
-  batchJobs.set(jobId, { total: allItems.length, done: 0, errors: 0, running: true, lastFile: '', lastError: '' });
+  // Filtra os que já foram processados em rodadas anteriores
+  const doneSet  = loadFaststartDone();
+  const pending  = allItems.filter(i => !doneSet.has(i.cdnUrl));
+  const skipped  = allItems.length - pending.length;
 
-  res.json({ ok: true, jobId, total: allItems.length, message: `Iniciando correção de ${allItems.length} arquivo(s) MP4.` });
+  if (pending.length === 0) {
+    return res.json({ ok: true, jobId: null, total: 0, message: `Todos os ${allItems.length} arquivos já foram corrigidos.` });
+  }
+
+  const jobId = `fs_${Date.now()}`;
+  batchJobs.set(jobId, {
+    total: pending.length, done: 0, errors: 0, running: true,
+    lastFile: '', lastError: '',
+    skipped,          // quantos foram pulados por já estarem prontos
+  });
+
+  res.json({ ok: true, jobId, total: pending.length, skipped, message: `Corrigindo ${pending.length} arquivo(s) MP4 (${skipped} já prontos).` });
 
   // Processa em background, um de cada vez para não sobrecarregar o servidor
   (async () => {
     const job = batchJobs.get(jobId);
-    for (const item of allItems) {
-      let tmpOut = null;
+    for (const item of pending) {
+      let tmpIn = null, tmpOut = null;
       try {
         const origName = path.posix.basename(decodeURIComponent(new URL(item.cdnUrl).pathname));
         job.lastFile = origName.slice(-60);
 
         // Baixa via B2 com auth para evitar bloqueio do CDN Worker
         const { url: b2Url, token: b2Token } = await getDirectDownloadInfo(origName);
-        const tmpIn  = path.join(os.tmpdir(), `fh_bfs_in_${Date.now()}.mp4`);
+        tmpIn  = path.join(os.tmpdir(), `fh_bfs_in_${Date.now()}.mp4`);
         tmpOut = path.join(os.tmpdir(), `fh_bfs_${Date.now()}.mp4`);
 
         await downloadB2File(b2Url, b2Token, tmpIn);
@@ -749,15 +775,17 @@ router.post('/batch-fix-faststart', async (_req, res) => {
           '-y', tmpOut,
         ], { maxBuffer: 10 * 1024 * 1024, timeout: 7_200_000 });
 
-        try { fs.unlinkSync(tmpIn); } catch {}
         await uploadFileFromPath(tmpOut, origName, 'video/mp4');
         job.done++;
+        doneSet.add(item.cdnUrl);
+        saveFaststartDone(doneSet);    // persiste no disco — sobrevive a reinício
         console.log(`[batch-faststart] ${job.done}/${job.total} OK: ${origName}`);
       } catch (e) {
         job.errors++;
         job.lastError = e.message?.slice(0, 200) || 'erro desconhecido';
         console.error(`[batch-faststart] ERRO (${item.table}#${item.id} ${item.field}):`, e.message?.slice(0, 150));
       } finally {
+        try { if (tmpIn)  fs.unlinkSync(tmpIn);  } catch {}
         try { if (tmpOut) fs.unlinkSync(tmpOut); } catch {}
       }
     }
