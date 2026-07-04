@@ -27,8 +27,8 @@ async function generateHLS(origName) {
   try {
     fs.mkdirSync(tmpDir, { recursive: true });
 
-    const { url: b2Url, token: b2Token } = await getDirectDownloadInfo(origName);
-    const b2AuthHdr = `Authorization: ${b2Token}\r\nUser-Agent: ${UA}\r\n`;
+    // CDN URL é público — baixa direto sem auth (mais simples e confiável)
+    const srcUrl = `${process.env.CDN_BASE_URL}/${encodeURIComponent(path.posix.basename(origName))}`;
 
     const playlistTmp = path.join(tmpDir, 'pl.m3u8');
     const segPattern  = path.join(tmpDir, 'seg_%04d.ts');
@@ -36,7 +36,7 @@ async function generateHLS(origName) {
     // Stream copy para HLS (rápido, sem perda de qualidade)
     try {
       await execFileAsync(ffmpegPath, [
-        '-headers', b2AuthHdr, '-i', b2Url,
+        '-i', srcUrl,
         '-c:v', 'copy', '-c:a', 'copy',
         '-hls_time', '4',
         '-hls_playlist_type', 'vod',
@@ -51,7 +51,7 @@ async function generateHLS(origName) {
         try { fs.unlinkSync(path.join(tmpDir, f)); } catch {}
       });
       await execFileAsync(ffmpegPath, [
-        '-headers', b2AuthHdr, '-i', b2Url,
+        '-i', srcUrl,
         '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
         '-c:a', 'aac', '-b:a', '128k',
         '-hls_time', '4',
@@ -703,13 +703,10 @@ router.post('/batch-fix-faststart', async (_req, res) => {
       try {
         const origName = path.posix.basename(decodeURIComponent(new URL(item.cdnUrl).pathname));
         job.lastFile = origName.slice(-60);
-
-        const { url: b2Url, token: b2Token } = await getDirectDownloadInfo(origName);
-        const b2AuthHdr = `Authorization: ${b2Token}\r\nUser-Agent: ${UA}\r\n`;
         tmpOut = path.join(os.tmpdir(), `fh_bfs_${Date.now()}.mp4`);
 
         await execFileAsync(ffmpegPath, [
-          '-headers', b2AuthHdr, '-i', b2Url,
+          '-i', item.cdnUrl,
           '-c', 'copy', '-movflags', '+faststart',
           '-y', tmpOut,
         ], { maxBuffer: 10 * 1024 * 1024, timeout: 7_200_000 });
