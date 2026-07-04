@@ -1,5 +1,7 @@
 const axios = require('axios');
 
+const B2_API_TIMEOUT = 30_000; // 30s para chamadas de API do B2 (não upload de dados)
+
 // Remove acentos/cedilha e troca espacos por ponto
 function sanitizeFilename(name) {
   const slash = name.lastIndexOf('/');
@@ -28,7 +30,7 @@ async function authorize() {
 
   const { data } = await axios.get(
     'https://api.backblazeb2.com/b2api/v2/b2_authorize_account',
-    { headers: { Authorization: `Basic ${credentials}` } }
+    { headers: { Authorization: `Basic ${credentials}` }, timeout: B2_API_TIMEOUT }
   );
 
   authCache = data;
@@ -41,7 +43,7 @@ async function getUploadUrl() {
   const { data } = await axios.post(
     `${auth.apiUrl}/b2api/v2/b2_get_upload_url`,
     { bucketId: process.env.BACKBLAZE_BUCKET_ID },
-    { headers: { Authorization: auth.authorizationToken } }
+    { headers: { Authorization: auth.authorizationToken }, timeout: B2_API_TIMEOUT }
   );
   return data;
 }
@@ -95,7 +97,7 @@ async function listFiles(prefix = '', limit = 1000) {
     const { data } = await axios.post(
       `${auth.apiUrl}/b2api/v2/b2_list_file_names`,
       body,
-      { headers: { Authorization: auth.authorizationToken } }
+      { headers: { Authorization: auth.authorizationToken }, timeout: B2_API_TIMEOUT }
     );
 
     allFiles.push(...data.files.filter(f => VIDEO_EXTENSIONS.test(f.fileName)));
@@ -111,7 +113,7 @@ async function startLargeFile(filename, contentType) {
   const { data } = await axios.post(
     `${auth.apiUrl}/b2api/v2/b2_start_large_file`,
     { bucketId: process.env.BACKBLAZE_BUCKET_ID, fileName: encodeURIComponent(clean), contentType: contentType || 'video/mp4' },
-    { headers: { Authorization: auth.authorizationToken } }
+    { headers: { Authorization: auth.authorizationToken }, timeout: B2_API_TIMEOUT }
   );
   return { ...data, sanitizedFileName: clean };
 }
@@ -121,7 +123,7 @@ async function getUploadPartUrl(fileId) {
   const { data } = await axios.post(
     `${auth.apiUrl}/b2api/v2/b2_get_upload_part_url`,
     { fileId },
-    { headers: { Authorization: auth.authorizationToken } }
+    { headers: { Authorization: auth.authorizationToken }, timeout: B2_API_TIMEOUT }
   );
   return data;
 }
@@ -134,7 +136,7 @@ async function listParts(fileId) {
     const { data } = await axios.post(
       `${auth.apiUrl}/b2api/v2/b2_list_parts`,
       { fileId, maxPartCount: 1000, startPartNumber },
-      { headers: { Authorization: auth.authorizationToken } }
+      { headers: { Authorization: auth.authorizationToken }, timeout: B2_API_TIMEOUT }
     );
     allParts.push(...data.parts);
     if (!data.nextPartNumber) break;
@@ -148,7 +150,7 @@ async function finishLargeFile(fileId, partSha1Array) {
   const { data } = await axios.post(
     `${auth.apiUrl}/b2api/v2/b2_finish_large_file`,
     { fileId, partSha1Array },
-    { headers: { Authorization: auth.authorizationToken } }
+    { headers: { Authorization: auth.authorizationToken }, timeout: B2_API_TIMEOUT }
   );
   return data;
 }
@@ -170,7 +172,7 @@ async function setupCors() {
           maxAgeSeconds: 3600,
         }],
       },
-      { headers: { Authorization: auth.authorizationToken } }
+      { headers: { Authorization: auth.authorizationToken }, timeout: B2_API_TIMEOUT }
     );
     console.log('[B2] CORS rules configured for browser uploads');
   } catch (err) {
@@ -198,7 +200,7 @@ async function uploadFileFromPath(filePath, filename, contentType = 'video/mp4')
   const startRes = await axios.post(
     `${auth.apiUrl}/b2api/v2/b2_start_large_file`,
     { bucketId: process.env.BACKBLAZE_BUCKET_ID, fileName: encodeURIComponent(filename), contentType },
-    { headers: { Authorization: auth.authorizationToken } }
+    { headers: { Authorization: auth.authorizationToken }, timeout: B2_API_TIMEOUT }
   );
   const fileId = startRes.data.fileId;
 
@@ -218,7 +220,7 @@ async function uploadFileFromPath(filePath, filename, contentType = 'video/mp4')
       const partUrlRes = await axios.post(
         `${auth.apiUrl}/b2api/v2/b2_get_upload_part_url`,
         { fileId },
-        { headers: { Authorization: auth.authorizationToken } }
+        { headers: { Authorization: auth.authorizationToken }, timeout: B2_API_TIMEOUT }
       );
 
       await axios.post(partUrlRes.data.uploadUrl, chunk, {
@@ -242,7 +244,7 @@ async function uploadFileFromPath(filePath, filename, contentType = 'video/mp4')
   await axios.post(
     `${auth.apiUrl}/b2api/v2/b2_finish_large_file`,
     { fileId, partSha1Array },
-    { headers: { Authorization: auth.authorizationToken } }
+    { headers: { Authorization: auth.authorizationToken }, timeout: B2_API_TIMEOUT }
   );
 
   return {
@@ -262,7 +264,7 @@ async function getDirectDownloadInfo(filename) {
     const { data } = await axios.post(
       `${auth.apiUrl}/b2api/v2/b2_list_buckets`,
       { accountId: auth.accountId, bucketId: process.env.BACKBLAZE_BUCKET_ID },
-      { headers: { Authorization: auth.authorizationToken } }
+      { headers: { Authorization: auth.authorizationToken }, timeout: B2_API_TIMEOUT }
     );
     bucketNameCache = data.buckets?.[0]?.bucketName;
   }
