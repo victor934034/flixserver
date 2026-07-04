@@ -291,8 +291,21 @@ export default function UploadDesenhosPage() {
           [`file_${version}`]: cdnUrl,
         };
 
-        await api.post('/admin/episodes', epData);
+        const { data: saveResult } = await api.post('/admin/episodes', epData);
         updateEp(ep.episode_number, { status: 'done', progress: 100, cdnUrl, error: null });
+
+        // MP4 sem faststart → moov atom no final → abertura lenta (6-10s)
+        // Otimiza em background sem travar o upload dos próximos episódios
+        if (/\.mp4$/i.test(ep.file.name) && saveResult?.id) {
+          api.post('/upload/fix-faststart', {
+            cdnUrl,
+            movieId: saveResult.id,
+            movieType: 'series',
+            field: `file_${version}`,
+          }, { timeout: 600_000 }).catch(e =>
+            console.warn(`[faststart] ep ${ep.episode_number}:`, e.message)
+          );
+        }
         delete abortRefs.current[ep.episode_number];
       } catch (err) {
         if (err.message === 'paused') {

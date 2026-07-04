@@ -4,9 +4,11 @@ import { KEY, useKeyDown } from '../hooks/useNav.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { historyAPI } from '../api/index.js';
 
-const SEEK_S  = 10;
-const HIDE_MS = 5000;
-const ACCENT  = '#c91c2c';
+const SEEK_S             = 10;
+const HIDE_MS            = 5000;
+const ACCENT             = '#c91c2c';
+const INITIAL_BUFFER_S   = 2;  // segundos de buffer antes do primeiro play
+const MID_BUFFER_S       = 12; // segundos de buffer para retomar após stall mid-playback
 
 const TRACK_META = {
   dubbing:   { label: 'Dublado',   sub: 'Áudio em português' },
@@ -106,8 +108,6 @@ function CtrlBtn({ id, label, icon, focused, onClick, active }) {
         background: focused
           ? 'rgba(255,255,255,0.18)'
           : active ? 'rgba(201,28,44,0.2)' : 'transparent',
-        transform: focused ? 'scale(1.12)' : 'scale(1)',
-        transition: 'all 0.16s cubic-bezier(.4,0,.2,1)',
         color: active && !focused ? ACCENT : 'rgba(255,255,255,0.88)',
         boxShadow: focused ? '0 0 18px rgba(255,255,255,0.25)' : 'none',
       }}>
@@ -117,7 +117,6 @@ function CtrlBtn({ id, label, icon, focused, onClick, active }) {
         fontSize: 12, fontWeight: 600,
         color: focused ? '#fff' : 'rgba(255,255,255,0.45)',
         whiteSpace: 'nowrap', letterSpacing: 0.3,
-        transition: 'color 0.16s',
       }}>
         {label}
       </span>
@@ -141,9 +140,6 @@ function PlayBtn({ paused, focused, onClick }) {
         boxShadow: focused
           ? '0 0 0 6px rgba(255,255,255,0.28), 0 0 40px rgba(255,255,255,0.35), 0 8px 32px rgba(0,0,0,0.6)'
           : '0 4px 24px rgba(0,0,0,0.6)',
-        animation: focused ? 'pulseRing 1.4s ease-out infinite' : 'none',
-        transform: focused ? 'scale(1.06)' : 'scale(1)',
-        transition: 'transform 0.16s, box-shadow 0.16s, background 0.16s',
         flexShrink: 0,
       }}>
         {paused ? IC.play : IC.pause}
@@ -151,7 +147,7 @@ function PlayBtn({ paused, focused, onClick }) {
       <span style={{
         fontSize: 13, fontWeight: 700,
         color: focused ? '#fff' : 'rgba(255,255,255,0.5)',
-        letterSpacing: 0.3, transition: 'color 0.16s',
+        letterSpacing: 0.3,
       }}>
         {paused ? 'Reproduzir' : 'Pausar'}
       </span>
@@ -169,7 +165,6 @@ function PanelOpt({ label, sub, active, focused, onClick }) {
         outline: 'none', width: '100%', textAlign: 'left',
         background: focused ? 'rgba(255,255,255,0.10)' : 'transparent',
         border: focused ? '2px solid rgba(255,255,255,0.6)' : '2px solid transparent',
-        transition: 'all 0.15s',
       }}
     >
       <div style={{
@@ -213,10 +208,14 @@ export default function PlayerScreen() {
   const hideTimer     = useRef(null);
   const switchPos     = useRef(startAt && startAt > 5 ? startAt : null);
   const wasLoaded     = useRef(false);
-  const bufferingRef  = useRef(false);
-  const lastTickRef   = useRef(0);        // throttle react state updates
-  const ctRef         = useRef(0);        // current time ref (no re-render)
-  const durRef        = useRef(0);        // duration ref
+  const bufferingRef     = useRef(false);
+  const forcedPauseRef   = useRef(false);  // true quando pausamos manualmente para encher buffer
+  const stallTimerRef    = useRef(null);
+  const initialPlayedRef = useRef(false);  // true após o primeiro v.play()
+  const initPlayTimerRef = useRef(null);   // fallback timer para iniciar mesmo sem buffer ideal
+  const lastTickRef      = useRef(0);      // throttle react state updates
+  const ctRef            = useRef(0);      // current time ref (no re-render)
+  const durRef           = useRef(0);      // duration ref
 
   // DOM refs for direct updates (bypass React reconciler — critical for TV performance)
   const playFillRef   = useRef(null);
@@ -230,6 +229,7 @@ export default function PlayerScreen() {
   const [panel,        setPanel]        = useState(null);
   const [ctrlVisible,  setCtrlVisible]  = useState(true);
   const [loaded,       setLoaded]       = useState(false);
+  const [started,      setStarted]      = useState(false); // true após o primeiro frame renderizado
   const [buffering,    setBuffering]    = useState(false);
   const [error,        setError]        = useState(null);
   const [currentTime,  setCurrentTime]  = useState(0); // 1Hz — only for skipIntro button
@@ -239,6 +239,38 @@ export default function PlayerScreen() {
   const [focusedPanel, setFocusedPanel] = useState(0);
 
   const currentUrl = tracks[trackKey] || initialUrl;
+
+  // Inicia o primeiro play quando há INITIAL_BUFFER_S disponível (ou no timeout)
+  const startInitialPlay = useCallback(() => {
+    const v = videoRef.current;
+    if (!v || initialPlayedRef.current) return;
+    initialPlayedRef.current = true;
+    clearTimeout(initPlayTimerRef.current);
+    v.play().catch(() => {});
+  }, []);
+
+  // Poll buffered.end até MID_BUFFER_S estar disponível, então retoma após stall
+  const checkBuffer = useCallback(() => {
+    clearTimeout(stallTimerRef.current);
+    const v = videoRef.current;
+    if (!v || !forcedPauseRef.current) return;
+    const ct = v.currentTime;
+    let ahead = 0;
+    for (let i = 0; i < v.buffered.length; i++) {
+      if (v.buffered.start(i) <= ct + 0.5 && v.buffered.end(i) > ct) {
+        ahead = v.buffered.end(i) - ct;
+        break;
+      }
+    }
+    if (ahead >= MID_BUFFER_S) {
+      forcedPauseRef.current = false;
+      bufferingRef.current = false;
+      setBuffering(false);
+      v.play().catch(() => {});
+    } else {
+      stallTimerRef.current = setTimeout(checkBuffer, 500);
+    }
+  }, []);
 
   // Direct DOM update for progress — runs every frame without React re-render
   function updateProgressDOM(ct, dur) {
@@ -252,6 +284,21 @@ export default function PlayerScreen() {
   function updateBufferDOM(buf, dur) {
     if (!dur || !isFinite(dur) || !bufFillRef.current) return;
     bufFillRef.current.style.width = (buf / dur * 100) + '%';
+  }
+
+  // Verifica buffer disponível a cada evento progress e inicia quando pronto
+  function onProgress() {
+    const v = videoRef.current;
+    if (!v || initialPlayedRef.current || !loaded) return;
+    const ct = v.currentTime;
+    let ahead = 0;
+    for (let i = 0; i < v.buffered.length; i++) {
+      if (v.buffered.start(i) <= ct + 0.5 && v.buffered.end(i) > ct) {
+        ahead = v.buffered.end(i) - ct;
+        break;
+      }
+    }
+    if (ahead >= INITIAL_BUFFER_S) startInitialPlay();
   }
 
   const nextEp = useMemo(() => {
@@ -391,21 +438,30 @@ export default function PlayerScreen() {
     setLoaded(true);
     bufferingRef.current = false;
     setBuffering(false);
-    // Update duration in DOM
     const dur = videoRef.current ? videoRef.current.duration || 0 : 0;
     durRef.current = dur;
     setDuration(dur);
     if (timeDurRef.current) timeDurRef.current.textContent = fmt(dur);
+    // Fallback: se onProgress não acumular INITIAL_BUFFER_S em 25s, inicia mesmo assim
+    initPlayTimerRef.current = setTimeout(startInitialPlay, 25000);
   }
 
   useEffect(() => {
     setLoaded(false);
+    setStarted(false);
+    initialPlayedRef.current = false;
+    clearTimeout(initPlayTimerRef.current);
     wasLoaded.current = false;
     ctRef.current = 0;
-    // Reset DOM progress on track change
+    forcedPauseRef.current = false;
+    clearTimeout(stallTimerRef.current);
     updateProgressDOM(0, 1);
     if (bufFillRef.current) bufFillRef.current.style.width = '0%';
     if (timeLeftRef.current) timeLeftRef.current.textContent = '0:00';
+    return () => {
+      clearTimeout(stallTimerRef.current);
+      clearTimeout(initPlayTimerRef.current);
+    };
   }, [currentUrl]);
 
   useEffect(() => {
@@ -484,11 +540,12 @@ export default function PlayerScreen() {
       <video
         ref={videoRef}
         src={currentUrl}
-        autoPlay
         playsInline
         preload="auto"
         style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
         onTimeUpdate={onTimeUpdate}
+        onProgress={onProgress}
+        onCanPlayThrough={() => startInitialPlay()}
         onDurationChange={() => {
           const dur = videoRef.current ? videoRef.current.duration || 0 : 0;
           durRef.current = dur;
@@ -496,10 +553,20 @@ export default function PlayerScreen() {
           if (timeDurRef.current) timeDurRef.current.textContent = fmt(dur);
         }}
         onCanPlay={onCanPlay}
-        onPlay={() => { setPaused(false); bufferingRef.current = false; setBuffering(false); }}
-        onPause={() => setPaused(true)}
-        onWaiting={() => { if (loaded) { bufferingRef.current = true; setBuffering(true); } }}
-        onPlaying={() => { bufferingRef.current = false; setBuffering(false); }}
+        onPlay={() => { setStarted(true); setPaused(false); bufferingRef.current = false; setBuffering(false); }}
+        onPause={() => { if (!forcedPauseRef.current) setPaused(true); }}
+        onWaiting={() => {
+          if (!loaded || !started) return; // durante pré-buffer inicial, não interfere
+          bufferingRef.current = true;
+          setBuffering(true);
+          const v = videoRef.current;
+          if (v && !v.paused) {
+            forcedPauseRef.current = true;
+            v.pause();
+          }
+          stallTimerRef.current = setTimeout(checkBuffer, 300);
+        }}
+        onPlaying={() => { forcedPauseRef.current = false; bufferingRef.current = false; setBuffering(false); }}
         onError={() => setError('Não foi possível reproduzir o vídeo')}
         onEnded={() => { if (nextEp) navigate('/player', { state: nextEp, replace: true }); else navigate(-1); }}
       >
@@ -508,16 +575,18 @@ export default function PlayerScreen() {
         ))}
       </video>
 
-      {/* Initial loading */}
-      {!error && !loaded && (
+      {/* Initial loading — mostra enquanto pré-bufferiza (até onPlay disparar) */}
+      {!error && !started && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 20, background: '#000' }}>
           <div style={{ width: 56, height: 56, border: '3px solid rgba(255,255,255,0.08)', borderTopColor: ACCENT, borderRadius: '50%', animation: 'spin 0.85s linear infinite' }} />
-          <div style={{ fontSize: 16, color: 'rgba(255,255,255,0.4)', fontWeight: 600, letterSpacing: 1 }}>Abrindo vídeo…</div>
+          <div style={{ fontSize: 16, color: 'rgba(255,255,255,0.4)', fontWeight: 600, letterSpacing: 1 }}>
+            {loaded ? 'Carregando…' : 'Abrindo vídeo…'}
+          </div>
         </div>
       )}
 
-      {/* Buffering overlay */}
-      {!error && loaded && buffering && (
+      {/* Buffering overlay — mid-play stall */}
+      {!error && started && buffering && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
           <div style={{ width: 64, height: 64, border: '3px solid rgba(255,255,255,0.1)', borderTopColor: ACCENT, borderRadius: '50%', animation: 'spin 0.85s linear infinite' }} />
         </div>
@@ -537,7 +606,6 @@ export default function PlayerScreen() {
       <div style={{
         position: 'absolute', inset: 0,
         opacity: ctrlVisible ? 1 : 0,
-        transition: 'opacity 0.4s ease',
         pointerEvents: ctrlVisible ? 'auto' : 'none',
       }}>
         <div style={{
@@ -553,7 +621,7 @@ export default function PlayerScreen() {
               display: 'inline-flex', alignItems: 'center', gap: 10,
               background: 'rgba(255,255,255,0.10)', border: '1.5px solid rgba(255,255,255,0.15)',
               borderRadius: 40, padding: '9px 20px', color: '#fff', fontSize: 14, fontWeight: 700,
-              cursor: 'pointer', backdropFilter: 'blur(6px)', transition: 'background 0.15s',
+              cursor: 'pointer',
             }}
           >
             {IC.back} Voltar
@@ -586,7 +654,7 @@ export default function PlayerScreen() {
             minWidth: 300, maxWidth: 420,
             background: 'rgba(12,12,14,0.97)', borderRadius: 14,
             border: '1px solid rgba(255,255,255,0.09)', padding: '12px 8px',
-            boxShadow: '0 -16px 48px rgba(0,0,0,0.8)', animation: 'slideUp 0.2s ease', zIndex: 10,
+            boxShadow: '0 -16px 48px rgba(0,0,0,0.8)', zIndex: 10,
           }}>
             <div style={{ fontSize: 11, fontWeight: 800, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: 1.5, padding: '4px 16px 10px' }}>
               {panel === 'audio' ? 'Idioma de Áudio' : panel === 'sub' ? 'Legenda' : 'Configurações'}
