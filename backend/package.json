@@ -10,6 +10,7 @@
     "seed:plans": "node scripts/seed-plans.js"
   },
   "dependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@supabase/supabase-js": "^2.43.0",
     "axios": "^1.7.2",
     "cors": "^2.8.5",

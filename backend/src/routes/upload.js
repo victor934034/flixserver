@@ -5,6 +5,7 @@ const { promisify } = require('util');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 const { uploadFile, getDirectDownloadInfo, getUploadUrl, sanitizeFilename } = require('../services/backblaze');
 const { adminMiddleware } = require('../middleware/admin');
 
@@ -34,7 +35,7 @@ async function generateHLS(origName) {
 
     // Stream copy para HLS (rápido, sem perda de qualidade)
     try {
-      await execFileAsync('ffmpeg', [
+      await execFileAsync(ffmpegPath, [
         '-headers', b2AuthHdr, '-i', b2Url,
         '-c:v', 'copy', '-c:a', 'copy',
         '-hls_time', '4',
@@ -49,7 +50,7 @@ async function generateHLS(origName) {
       fs.readdirSync(tmpDir).filter(f => f !== 'pl.m3u8').forEach(f => {
         try { fs.unlinkSync(path.join(tmpDir, f)); } catch {}
       });
-      await execFileAsync('ffmpeg', [
+      await execFileAsync(ffmpegPath, [
         '-headers', b2AuthHdr, '-i', b2Url,
         '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
         '-c:a', 'aac', '-b:a', '128k',
@@ -204,7 +205,7 @@ function needsRemux(info) {
 
 async function applyFaststart(inputPath, outputPath) {
   try {
-    await execFileAsync('ffmpeg', [
+    await execFileAsync(ffmpegPath, [
       '-i', inputPath,
       '-c', 'copy',
       '-movflags', '+faststart',
@@ -230,7 +231,7 @@ async function remuxToWebAac(input, outputPath) {
     '-y', out,
   ];
   try {
-    await execFileAsync('ffmpeg', args, { maxBuffer: 10 * 1024 * 1024, timeout: 7_200_000 });
+    await execFileAsync(ffmpegPath, args, { maxBuffer: 10 * 1024 * 1024, timeout: 7_200_000 });
     return out;
   } catch (e) {
     console.error('[ffmpeg] remux falhou:', e.message?.slice(0, 300));
@@ -497,7 +498,7 @@ router.post('/fix-audio', async (req, res) => {
     ];
 
     try {
-      await execFileAsync('ffmpeg', ffArgs, { maxBuffer: 10 * 1024 * 1024, timeout: 7_200_000 });
+      await execFileAsync(ffmpegPath, ffArgs, { maxBuffer: 10 * 1024 * 1024, timeout: 7_200_000 });
     } catch (ffErr) {
       console.error('[fix-audio] ffmpeg falhou:', ffErr.message?.slice(0, 300));
       throw new Error('ffmpeg falhou ao remuxar. Verifique os logs do servidor.');
@@ -622,7 +623,7 @@ router.post('/fix-faststart', async (req, res) => {
     console.log(`[fix-faststart] processando ${origName}`);
 
     try {
-      await execFileAsync('ffmpeg', [
+      await execFileAsync(ffmpegPath, [
         '-headers', b2AuthHdr,
         '-i', b2Url,
         '-c', 'copy',
@@ -707,7 +708,7 @@ router.post('/batch-fix-faststart', async (_req, res) => {
         const b2AuthHdr = `Authorization: ${b2Token}\r\nUser-Agent: ${UA}\r\n`;
         tmpOut = path.join(os.tmpdir(), `fh_bfs_${Date.now()}.mp4`);
 
-        await execFileAsync('ffmpeg', [
+        await execFileAsync(ffmpegPath, [
           '-headers', b2AuthHdr, '-i', b2Url,
           '-c', 'copy', '-movflags', '+faststart',
           '-y', tmpOut,
