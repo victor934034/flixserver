@@ -261,7 +261,11 @@ router.get('/series/:id/episodes', async (req, res) => {
 
 router.post('/episodes', async (req, res) => {
   try {
-    const { data, error } = await supabase.from('episodes').insert(req.body).select().single();
+    const { data, error } = await supabase
+      .from('episodes')
+      .upsert(req.body, { onConflict: 'series_id,season_number,episode_number', ignoreDuplicates: false })
+      .select()
+      .single();
     if (error) throw error;
     if (data.is_active && data.series_id) {
       const { data: serie } = await supabase.from('series').select('title').eq('id', data.series_id).single();
