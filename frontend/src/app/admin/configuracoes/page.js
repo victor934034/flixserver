@@ -283,7 +283,7 @@ export default function Configuracoes() {
                           setFaststartMsg(
                             s.data.errors === 0
                               ? `✓ ${s.data.done} arquivo(s) corrigido(s) com sucesso.`
-                              : `✓ ${s.data.done} corrigido(s), ${s.data.errors} erro(s) — veja os logs do servidor.`
+                              : `${s.data.done} corrigido(s), ${s.data.errors} erro(s)${s.data.lastError ? ': ' + s.data.lastError : ' — veja os logs do servidor.'}`
                           );
                         }
                       } catch {
@@ -386,7 +386,7 @@ export default function Configuracoes() {
                           setHlsMsg(
                             s.data.errors === 0
                               ? `✓ ${s.data.done} vídeo(s) convertido(s) para HLS.`
-                              : `✓ ${s.data.done} convertido(s), ${s.data.errors} erro(s) — veja os logs.`
+                              : `${s.data.done} convertido(s), ${s.data.errors} erro(s)${s.data.lastError ? ': ' + s.data.lastError : ' — veja os logs.'}`
                           );
                         }
                       } catch {

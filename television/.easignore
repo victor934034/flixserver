@@ -1,7 +1,2 @@
-android/.gradle
-android/.kotlin
-android/build
-android/app/build
-android/app/.cxx
-android/local.properties
+android
 node_modules
