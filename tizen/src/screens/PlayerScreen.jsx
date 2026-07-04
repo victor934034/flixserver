@@ -10,6 +10,12 @@ const ACCENT             = '#c91c2c';
 const INITIAL_BUFFER_S   = 2;  // segundos de buffer antes do primeiro play
 const MID_BUFFER_S       = 12; // segundos de buffer para retomar após stall mid-playback
 
+// Deriva URL HLS (.m3u8) de qualquer URL de vídeo — abre em < 1s
+function toHlsUrl(url) {
+  if (!url) return url;
+  return url.replace(/\.(mp4|mkv|avi|mov|m4v|webm|ts|wmv)$/i, '.m3u8');
+}
+
 const TRACK_META = {
   dubbing:   { label: 'Dublado',   sub: 'Áudio em português' },
   subtitled: { label: 'Legendado', sub: 'Áudio original' },
@@ -238,7 +244,9 @@ export default function PlayerScreen() {
   const [focusedBtn,   setFocusedBtn]   = useState(2);
   const [focusedPanel, setFocusedPanel] = useState(0);
 
-  const currentUrl = tracks[trackKey] || initialUrl;
+  const currentUrl    = tracks[trackKey] || initialUrl;
+  const hlsFailedRef  = useRef(false);
+  const [videoSrc, setVideoSrc] = useState(() => toHlsUrl(currentUrl));
 
   // Inicia o primeiro play quando há INITIAL_BUFFER_S disponível (ou no timeout)
   const startInitialPlay = useCallback(() => {
@@ -446,9 +454,10 @@ export default function PlayerScreen() {
     initPlayTimerRef.current = setTimeout(startInitialPlay, 25000);
   }
 
-  useEffect(() => {
+  function resetPlayerState() {
     setLoaded(false);
     setStarted(false);
+    setBuffering(false);
     initialPlayedRef.current = false;
     clearTimeout(initPlayTimerRef.current);
     wasLoaded.current = false;
@@ -458,11 +467,27 @@ export default function PlayerScreen() {
     updateProgressDOM(0, 1);
     if (bufFillRef.current) bufFillRef.current.style.width = '0%';
     if (timeLeftRef.current) timeLeftRef.current.textContent = '0:00';
+  }
+
+  useEffect(() => {
+    hlsFailedRef.current = false;
+    setVideoSrc(toHlsUrl(currentUrl)); // tenta HLS primeiro
+    resetPlayerState();
     return () => {
       clearTimeout(stallTimerRef.current);
       clearTimeout(initPlayTimerRef.current);
     };
   }, [currentUrl]);
+
+  // HLS indisponível: volta para URL direta sem bloquear o usuário
+  function onVideoError() {
+    if (!hlsFailedRef.current && videoSrc !== currentUrl) {
+      console.warn('[player] HLS não encontrado, usando URL direto:', currentUrl);
+      hlsFailedRef.current = true;
+      resetPlayerState();
+      setVideoSrc(currentUrl);
+    }
+  }
 
   useEffect(() => {
     const v = videoRef.current;
@@ -539,7 +564,7 @@ export default function PlayerScreen() {
     >
       <video
         ref={videoRef}
-        src={currentUrl}
+        src={videoSrc}
         playsInline
         preload="auto"
         style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
@@ -553,6 +578,7 @@ export default function PlayerScreen() {
           if (timeDurRef.current) timeDurRef.current.textContent = fmt(dur);
         }}
         onCanPlay={onCanPlay}
+        onError={onVideoError}
         onPlay={() => { setStarted(true); setPaused(false); bufferingRef.current = false; setBuffering(false); }}
         onPause={() => { if (!forcedPauseRef.current) setPaused(true); }}
         onWaiting={() => {

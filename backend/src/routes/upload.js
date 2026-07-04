@@ -5,11 +5,126 @@ const { promisify } = require('util');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { uploadFile, getDirectDownloadInfo } = require('../services/backblaze');
+const { uploadFile, getDirectDownloadInfo, getUploadUrl, sanitizeFilename } = require('../services/backblaze');
 const { adminMiddleware } = require('../middleware/admin');
 
 // Rastreamento de jobs batch em memória (reseta ao reiniciar, mas é suficiente)
 const batchJobs = new Map();
+
+// ── Geração de HLS (M3U8 + segmentos .ts) ────────────────────────────────────
+// Converte qualquer vídeo do B2 em HLS — o player começa a tocar em < 1s
+// porque só precisa baixar o primeiro segmento (4s ≈ 500KB) antes de iniciar.
+
+async function generateHLS(origName) {
+  const crypto = require('crypto');
+  const axios  = require('axios');
+
+  // baseName sem extensão e sem caminho (ex: "My.Movie.mp4" → "My.Movie")
+  const cleanBase = path.posix.basename(origName).replace(/\.[^.]+$/, '');
+  const tmpDir    = path.join(os.tmpdir(), `hls_${Date.now()}`);
+
+  try {
+    fs.mkdirSync(tmpDir, { recursive: true });
+
+    const { url: b2Url, token: b2Token } = await getDirectDownloadInfo(origName);
+    const b2AuthHdr = `Authorization: ${b2Token}\r\nUser-Agent: ${UA}\r\n`;
+
+    const playlistTmp = path.join(tmpDir, 'pl.m3u8');
+    const segPattern  = path.join(tmpDir, 'seg_%04d.ts');
+
+    // Stream copy para HLS (rápido, sem perda de qualidade)
+    try {
+      await execFileAsync('ffmpeg', [
+        '-headers', b2AuthHdr, '-i', b2Url,
+        '-c:v', 'copy', '-c:a', 'copy',
+        '-hls_time', '4',
+        '-hls_playlist_type', 'vod',
+        '-hls_flags', 'independent_segments',
+        '-hls_segment_filename', segPattern,
+        playlistTmp,
+      ], { maxBuffer: 10 * 1024 * 1024, timeout: 7_200_000 });
+    } catch (e1) {
+      // Fallback para transcode quando stream copy falha (ex: MKV com codec incompatível)
+      console.warn(`[hls] stream copy falhou, transcoding ${origName}: ${e1.message.slice(0, 80)}`);
+      fs.readdirSync(tmpDir).filter(f => f !== 'pl.m3u8').forEach(f => {
+        try { fs.unlinkSync(path.join(tmpDir, f)); } catch {}
+      });
+      await execFileAsync('ffmpeg', [
+        '-headers', b2AuthHdr, '-i', b2Url,
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
+        '-c:a', 'aac', '-b:a', '128k',
+        '-hls_time', '4',
+        '-hls_playlist_type', 'vod',
+        '-hls_flags', 'independent_segments',
+        '-hls_segment_filename', segPattern,
+        playlistTmp,
+      ], { maxBuffer: 10 * 1024 * 1024, timeout: 7_200_000 });
+    }
+
+    // Ordena e faz upload dos segmentos .ts
+    const segments = fs.readdirSync(tmpDir).filter(f => /^seg_\d{4}\.ts$/.test(f)).sort();
+    let uploadData  = await getUploadUrl();
+
+    for (let i = 0; i < segments.length; i++) {
+      const seg  = segments[i];
+      const b2Name = sanitizeFilename(`${cleanBase}.${seg}`); // ex: "My.Movie.seg_0000.ts"
+      const buf  = fs.readFileSync(path.join(tmpDir, seg));
+      const sha1 = crypto.createHash('sha1').update(buf).digest('hex');
+
+      const doUpload = async (ud) => axios.post(ud.uploadUrl, buf, {
+        headers: {
+          Authorization:      ud.authorizationToken,
+          'X-Bz-File-Name':   encodeURIComponent(b2Name),
+          'Content-Type':     'video/mp2t',
+          'Content-Length':   buf.length,
+          'X-Bz-Content-Sha1': sha1,
+        },
+        maxContentLength: Infinity, maxBodyLength: Infinity,
+      });
+
+      try {
+        await doUpload(uploadData);
+      } catch {
+        uploadData = await getUploadUrl();
+        await doUpload(uploadData);
+      }
+
+      if ((i + 1) % 20 === 0) console.log(`[hls] ${cleanBase}: ${i + 1}/${segments.length} segs`);
+    }
+
+    // Corrige playlist: troca "seg_0000.ts" pelos nomes que usamos no B2
+    const rawPlaylist   = fs.readFileSync(playlistTmp, 'utf8');
+    const fixedPlaylist = rawPlaylist.replace(/^(seg_\d{4}\.ts)$/gm,
+      (_, s) => sanitizeFilename(`${cleanBase}.${s}`)
+    );
+
+    // Faz upload da playlist como "My.Movie.m3u8"
+    const playlistB2Name = sanitizeFilename(`${cleanBase}.m3u8`);
+    const plBuf          = Buffer.from(fixedPlaylist, 'utf8');
+    const plSha1         = crypto.createHash('sha1').update(plBuf).digest('hex');
+
+    const doPlUpload = async (ud) => axios.post(ud.uploadUrl, plBuf, {
+      headers: {
+        Authorization:      ud.authorizationToken,
+        'X-Bz-File-Name':   encodeURIComponent(playlistB2Name),
+        'Content-Type':     'application/x-mpegURL',
+        'Content-Length':   plBuf.length,
+        'X-Bz-Content-Sha1': plSha1,
+      },
+      maxContentLength: Infinity, maxBodyLength: Infinity,
+    });
+
+    try { await doPlUpload(uploadData); }
+    catch { uploadData = await getUploadUrl(); await doPlUpload(uploadData); }
+
+    const hlsUrl = `${process.env.CDN_BASE_URL}/${encodeURIComponent(playlistB2Name)}`;
+    console.log(`[hls] OK: ${origName} → ${segments.length} segs`);
+    return hlsUrl;
+
+  } finally {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+  }
+}
 
 const execFileAsync = promisify(execFile);
 
@@ -175,6 +290,9 @@ router.post('/video', upload.single('file'), async (req, res) => {
 
     const result = await uploadFile(buffer, filename, req.file.mimetype);
     res.json({ ...result, remuxed: !!tmpOutput, faststartApplied: isMp4, audioInfo });
+
+    // Gera HLS em background (abre em < 1s em qualquer dispositivo)
+    generateHLS(result.fileName).catch(e => console.warn('[hls-auto]', result.fileName, e.message?.slice(0, 80)));
   } catch (err) {
     res.status(500).json({ error: err.message });
   } finally {
@@ -302,6 +420,9 @@ router.post('/finish-large', async (req, res) => {
 
     await finishLargeFile(fileId, sha1Array);
     const cdnUrl = `${process.env.CDN_BASE_URL}/${filename}`;
+
+    // Gera HLS em background (abre em < 1s em qualquer dispositivo)
+    generateHLS(filename).catch(e => console.warn('[hls-auto]', filename, e.message?.slice(0, 80)));
 
     // Push notification para todos os usuários (fire-and-forget)
     const { sendPushToAll } = require('../services/notifications');
@@ -614,6 +735,70 @@ router.get('/batch-status', (req, res) => {
   const job = batchJobs.get(jobId);
   if (!job) return res.status(404).json({ error: 'Job não encontrado (servidor reiniciado?)' });
   res.json(job);
+});
+
+// Gera HLS para um único vídeo
+router.post('/generate-hls', async (req, res) => {
+  const { cdnUrl } = req.body;
+  if (!cdnUrl) return res.status(400).json({ error: 'cdnUrl obrigatório' });
+  try {
+    const origName = decodeURIComponent(new URL(cdnUrl).pathname.replace(/^\//, ''));
+    const hlsUrl   = await generateHLS(origName);
+    res.json({ ok: true, hlsUrl });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Gera HLS em batch para todos os vídeos do banco
+router.post('/batch-generate-hls', async (_req, res) => {
+  const { supabase }    = require('../services/supabase');
+  const VIDEO_FIELDS    = ['file_dubbing', 'file_subtitled', 'file_cinema', 'file_color', 'file_bw', 'file_4k'];
+
+  const collect = async (table) => {
+    const { data, error } = await supabase.from(table).select(['id', ...VIDEO_FIELDS].join(', ')).limit(5000);
+    if (error) throw new Error(`Supabase ${table}: ${error.message}`);
+    const items = [], seen = new Set();
+    for (const row of data || []) {
+      for (const f of VIDEO_FIELDS) {
+        const url = row[f];
+        if (url && !seen.has(url)) { seen.add(url); items.push({ cdnUrl: url }); }
+      }
+    }
+    return items;
+  };
+
+  let allItems = [];
+  try {
+    const [eps, movs] = await Promise.all([collect('episodes'), collect('movies')]);
+    allItems = [...eps, ...movs];
+  } catch (e) {
+    return res.status(500).json({ error: 'Erro ao coletar: ' + e.message });
+  }
+
+  if (allItems.length === 0)
+    return res.json({ ok: true, jobId: null, total: 0, message: 'Nenhum vídeo encontrado.' });
+
+  const jobId = `hls_${Date.now()}`;
+  batchJobs.set(jobId, { total: allItems.length, done: 0, errors: 0, running: true, lastFile: '' });
+  res.json({ ok: true, jobId, total: allItems.length, message: `Gerando HLS para ${allItems.length} vídeo(s).` });
+
+  (async () => {
+    const job = batchJobs.get(jobId);
+    for (const item of allItems) {
+      try {
+        const origName = decodeURIComponent(new URL(item.cdnUrl).pathname.replace(/^\//, ''));
+        job.lastFile   = origName.slice(-60);
+        await generateHLS(origName);
+        job.done++;
+      } catch (e) {
+        job.errors++;
+        console.error('[batch-hls] ERRO:', e.message?.slice(0, 150));
+      }
+    }
+    job.running = false;
+    console.log(`[batch-hls] Concluído: ${job.done} ok, ${job.errors} erros`);
+  })();
 });
 
 // Upload de avatar de perfil — imagem JPG/PNG, armazenada em avatars/

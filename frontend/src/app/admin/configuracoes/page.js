@@ -28,8 +28,13 @@ export default function Configuracoes() {
 
   const [faststartMsg, setFaststartMsg] = useState('');
   const [faststartRunning, setFaststartRunning] = useState(false);
-  const [faststartProgress, setFaststartProgress] = useState(null); // { total, done, errors, running, lastFile }
+  const [faststartProgress, setFaststartProgress] = useState(null);
   const faststartPollRef = useRef(null);
+
+  const [hlsMsg, setHlsMsg] = useState('');
+  const [hlsRunning, setHlsRunning] = useState(false);
+  const [hlsProgress, setHlsProgress] = useState(null);
+  const hlsPollRef = useRef(null);
 
   useEffect(() => {
     api.get('/settings').then(r => setSettings(r.data)).finally(() => setLoading(false));
@@ -330,6 +335,104 @@ export default function Configuracoes() {
                 {faststartProgress.lastFile && (
                   <p style={{ color: '#555', fontSize: 11, margin: '6px 0 0', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {faststartProgress.lastFile}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* ── HLS (abertura em < 1s) ── */}
+      <section style={{ marginBottom: 40 }}>
+        <h3 style={{ color: '#fff', marginBottom: 16 }}>HLS — Abertura instantânea</h3>
+        <div style={{ background: '#1a1a1a', borderRadius: 12, padding: 24, border: '1px solid #2a2a2a' }}>
+          <p style={{ color: '#fff', fontWeight: 600, margin: '0 0 4px' }}>Gerar HLS para todos os vídeos</p>
+          <p style={{ color: '#888', fontSize: 13, margin: '0 0 16px' }}>
+            Converte cada vídeo em formato HLS (M3U8 + segmentos .ts). O player começa a reproduzir em{' '}
+            <strong style={{ color: '#fff' }}>&lt; 1 segundo</strong> porque só precisa baixar o primeiro segmento (4s ≈ 500KB).
+            Roda em background — pode demorar horas para bibliotecas grandes.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+              <button
+                disabled={hlsRunning}
+                onClick={async () => {
+                  setHlsRunning(true);
+                  setHlsMsg('');
+                  setHlsProgress(null);
+                  clearInterval(hlsPollRef.current);
+                  try {
+                    const r = await api.post('/upload/batch-generate-hls', {}, { timeout: 30000 });
+                    if (!r.data.jobId) {
+                      setHlsMsg(r.data.message || '✓ Nenhum vídeo encontrado.');
+                      setHlsRunning(false);
+                      return;
+                    }
+                    const { jobId } = r.data;
+                    setHlsProgress({ total: r.data.total, done: 0, errors: 0, running: true, lastFile: '' });
+                    hlsPollRef.current = setInterval(async () => {
+                      try {
+                        const s = await api.get(`/upload/batch-status?jobId=${jobId}`);
+                        setHlsProgress(s.data);
+                        if (!s.data.running) {
+                          clearInterval(hlsPollRef.current);
+                          setHlsRunning(false);
+                          setHlsMsg(
+                            s.data.errors === 0
+                              ? `✓ ${s.data.done} vídeo(s) convertido(s) para HLS.`
+                              : `✓ ${s.data.done} convertido(s), ${s.data.errors} erro(s) — veja os logs.`
+                          );
+                        }
+                      } catch {
+                        clearInterval(hlsPollRef.current);
+                        setHlsRunning(false);
+                        setHlsMsg('Erro ao verificar progresso.');
+                      }
+                    }, 5000);
+                  } catch (e) {
+                    setHlsMsg('Erro: ' + (e.response?.data?.error || e.message));
+                    setHlsRunning(false);
+                  }
+                }}
+                style={{
+                  padding: '10px 24px', borderRadius: 8,
+                  background: hlsRunning ? '#333' : '#1b5e20',
+                  color: '#fff', border: 'none', fontWeight: 700, fontSize: 14,
+                  cursor: hlsRunning ? 'not-allowed' : 'pointer',
+                }}>
+                {hlsRunning ? 'Gerando HLS...' : '⚡ Gerar HLS para todos'}
+              </button>
+              {hlsMsg && (
+                <span style={{ color: hlsMsg.startsWith('Erro') ? '#ff6b6b' : '#4caf50', fontSize: 13 }}>
+                  {hlsMsg}
+                </span>
+              )}
+            </div>
+
+            {hlsProgress && hlsProgress.running && (
+              <div style={{ background: '#111', borderRadius: 8, padding: '12px 16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <span style={{ color: '#fff', fontSize: 13, fontWeight: 600 }}>
+                    {hlsProgress.done} / {hlsProgress.total} vídeos
+                    {hlsProgress.errors > 0 && (
+                      <span style={{ color: '#ff6b6b', marginLeft: 8 }}>({hlsProgress.errors} erros)</span>
+                    )}
+                  </span>
+                  <span style={{ color: '#888', fontSize: 12 }}>
+                    {Math.round((hlsProgress.done / hlsProgress.total) * 100)}%
+                  </span>
+                </div>
+                <div style={{ background: '#222', borderRadius: 4, height: 6, overflow: 'hidden' }}>
+                  <div style={{
+                    height: '100%', borderRadius: 4, background: '#1b5e20',
+                    width: `${Math.round((hlsProgress.done / hlsProgress.total) * 100)}%`,
+                    transition: 'width 0.5s ease',
+                  }} />
+                </div>
+                {hlsProgress.lastFile && (
+                  <p style={{ color: '#555', fontSize: 11, margin: '6px 0 0', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {hlsProgress.lastFile}
                   </p>
                 )}
               </div>
