@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import api from '../../../lib/api';
 import styles from '../filmes/novo/page.module.css';
 
@@ -28,6 +28,8 @@ export default function Configuracoes() {
 
   const [faststartMsg, setFaststartMsg] = useState('');
   const [faststartRunning, setFaststartRunning] = useState(false);
+  const [faststartProgress, setFaststartProgress] = useState(null); // { total, done, errors, running, lastFile }
+  const faststartPollRef = useRef(null);
 
   useEffect(() => {
     api.get('/settings').then(r => setSettings(r.data)).finally(() => setLoading(false));
@@ -248,32 +250,89 @@ export default function Configuracoes() {
             move o moov atom para o início do arquivo para que o vídeo comece a reproduzir instantaneamente.
             O processo roda em background no servidor; acompanhe os logs do EasePanel.
           </p>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-            <button
-              disabled={faststartRunning}
-              onClick={async () => {
-                setFaststartRunning(true);
-                setFaststartMsg('');
-                try {
-                  const r = await api.post('/upload/batch-fix-faststart');
-                  setFaststartMsg(`✓ ${r.data.message}`);
-                } catch (e) {
-                  setFaststartMsg('Erro: ' + (e.response?.data?.error || e.message));
-                } finally {
-                  setFaststartRunning(false);
-                }
-              }}
-              style={{
-                padding: '10px 24px', borderRadius: 8, background: faststartRunning ? '#333' : '#1565c0',
-                color: '#fff', border: 'none', fontWeight: 700, fontSize: 14,
-                cursor: faststartRunning ? 'not-allowed' : 'pointer',
-              }}>
-              {faststartRunning ? 'Iniciando...' : 'Corrigir todos os MP4s'}
-            </button>
-            {faststartMsg && (
-              <span style={{ color: faststartMsg.startsWith('Erro') ? '#ff6b6b' : '#4caf50', fontSize: 13 }}>
-                {faststartMsg}
-              </span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+              <button
+                disabled={faststartRunning}
+                onClick={async () => {
+                  setFaststartRunning(true);
+                  setFaststartMsg('');
+                  setFaststartProgress(null);
+                  clearInterval(faststartPollRef.current);
+                  try {
+                    const r = await api.post('/upload/batch-fix-faststart', {}, { timeout: 30000 });
+                    if (!r.data.jobId) {
+                      setFaststartMsg(r.data.message || '✓ Nenhum MP4 para corrigir.');
+                      setFaststartRunning(false);
+                      return;
+                    }
+                    const { jobId } = r.data;
+                    setFaststartProgress({ total: r.data.total, done: 0, errors: 0, running: true, lastFile: '' });
+                    faststartPollRef.current = setInterval(async () => {
+                      try {
+                        const s = await api.get(`/upload/batch-status?jobId=${jobId}`);
+                        setFaststartProgress(s.data);
+                        if (!s.data.running) {
+                          clearInterval(faststartPollRef.current);
+                          setFaststartRunning(false);
+                          setFaststartMsg(
+                            s.data.errors === 0
+                              ? `✓ ${s.data.done} arquivo(s) corrigido(s) com sucesso.`
+                              : `✓ ${s.data.done} corrigido(s), ${s.data.errors} erro(s) — veja os logs do servidor.`
+                          );
+                        }
+                      } catch {
+                        clearInterval(faststartPollRef.current);
+                        setFaststartRunning(false);
+                        setFaststartMsg('Erro ao verificar progresso. Veja os logs do servidor.');
+                      }
+                    }, 3000);
+                  } catch (e) {
+                    setFaststartMsg('Erro: ' + (e.response?.data?.error || e.message));
+                    setFaststartRunning(false);
+                  }
+                }}
+                style={{
+                  padding: '10px 24px', borderRadius: 8,
+                  background: faststartRunning ? '#333' : '#1565c0',
+                  color: '#fff', border: 'none', fontWeight: 700, fontSize: 14,
+                  cursor: faststartRunning ? 'not-allowed' : 'pointer',
+                }}>
+                {faststartRunning ? 'Processando...' : 'Corrigir todos os MP4s'}
+              </button>
+              {faststartMsg && (
+                <span style={{ color: faststartMsg.startsWith('Erro') ? '#ff6b6b' : '#4caf50', fontSize: 13 }}>
+                  {faststartMsg}
+                </span>
+              )}
+            </div>
+
+            {faststartProgress && faststartProgress.running && (
+              <div style={{ background: '#111', borderRadius: 8, padding: '12px 16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <span style={{ color: '#fff', fontSize: 13, fontWeight: 600 }}>
+                    {faststartProgress.done} / {faststartProgress.total} arquivos
+                    {faststartProgress.errors > 0 && (
+                      <span style={{ color: '#ff6b6b', marginLeft: 8 }}>({faststartProgress.errors} erros)</span>
+                    )}
+                  </span>
+                  <span style={{ color: '#888', fontSize: 12 }}>
+                    {Math.round((faststartProgress.done / faststartProgress.total) * 100)}%
+                  </span>
+                </div>
+                <div style={{ background: '#222', borderRadius: 4, height: 6, overflow: 'hidden' }}>
+                  <div style={{
+                    height: '100%', borderRadius: 4, background: '#1565c0',
+                    width: `${Math.round((faststartProgress.done / faststartProgress.total) * 100)}%`,
+                    transition: 'width 0.5s ease',
+                  }} />
+                </div>
+                {faststartProgress.lastFile && (
+                  <p style={{ color: '#555', fontSize: 11, margin: '6px 0 0', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {faststartProgress.lastFile}
+                  </p>
+                )}
+              </div>
             )}
           </div>
         </div>

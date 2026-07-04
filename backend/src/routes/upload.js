@@ -8,6 +8,9 @@ const os = require('os');
 const { uploadFile, getDirectDownloadInfo } = require('../services/backblaze');
 const { adminMiddleware } = require('../middleware/admin');
 
+// Rastreamento de jobs batch em memória (reseta ao reiniciar, mas é suficiente)
+const batchJobs = new Map();
+
 const execFileAsync = promisify(execFile);
 
 // ─── FFmpeg helpers ──────────────────────────────────────────────────────────
@@ -534,10 +537,12 @@ router.post('/batch-fix-faststart', async (_req, res) => {
 
   const VIDEO_FIELDS = ['file_dubbing', 'file_subtitled', 'file_cinema', 'file_color', 'file_bw', 'file_4k'];
 
-  // Coleta todos os MP4s de episódios e filmes
-  const collect = async (table, extraFields = []) => {
-    const fields = ['id', ...VIDEO_FIELDS.filter((_, i) => i < (table === 'episodes' ? 6 : 5)), ...extraFields];
-    const { data } = await supabase.from(table).select(fields.join(', ')).limit(5000);
+  const collect = async (table) => {
+    const { data, error } = await supabase
+      .from(table)
+      .select(['id', ...VIDEO_FIELDS].join(', '))
+      .limit(5000);
+    if (error) throw new Error(`Supabase ${table}: ${error.message}`);
     const items = [];
     for (const row of data || []) {
       for (const f of VIDEO_FIELDS) {
@@ -554,18 +559,29 @@ router.post('/batch-fix-faststart', async (_req, res) => {
     const [eps, movs] = await Promise.all([collect('episodes'), collect('movies')]);
     allItems = [...eps, ...movs];
   } catch (e) {
-    return res.status(500).json({ error: e.message });
+    return res.status(500).json({ error: 'Erro ao coletar itens: ' + e.message });
   }
 
-  res.json({ ok: true, total: allItems.length, message: `Iniciando correção de ${allItems.length} arquivo(s) MP4 em background. Acompanhe os logs do servidor.` });
+  if (allItems.length === 0) {
+    return res.json({ ok: true, jobId: null, total: 0, message: 'Nenhum arquivo MP4 encontrado.' });
+  }
 
-  // Processa em background, um de cada vez para não sobrecarregar
+  const jobId = `fs_${Date.now()}`;
+  batchJobs.set(jobId, { total: allItems.length, done: 0, errors: 0, running: true, lastFile: '' });
+
+  res.json({ ok: true, jobId, total: allItems.length, message: `Iniciando correção de ${allItems.length} arquivo(s) MP4.` });
+
+  // Processa em background, um de cada vez para não sobrecarregar o servidor
   (async () => {
-    let done = 0, errors = 0;
+    const job = batchJobs.get(jobId);
     for (const item of allItems) {
       let tmpOut = null;
       try {
-        const origName = decodeURIComponent(path.basename(new URL(item.cdnUrl).pathname));
+        // Usa o path completo da URL (não só o basename) para preservar subpastas no B2
+        const urlPath = new URL(item.cdnUrl).pathname;
+        const origName = decodeURIComponent(urlPath.replace(/^\//, ''));
+        job.lastFile = origName.slice(-60);
+
         const { url: b2Url, token: b2Token } = await getDirectDownloadInfo(origName);
         const b2AuthHdr = `Authorization: ${b2Token}\r\nUser-Agent: ${UA}\r\n`;
         tmpOut = path.join(os.tmpdir(), `fh_bfs_${Date.now()}.mp4`);
@@ -577,17 +593,27 @@ router.post('/batch-fix-faststart', async (_req, res) => {
         ], { maxBuffer: 10 * 1024 * 1024, timeout: 7_200_000 });
 
         await uploadFileFromPath(tmpOut, origName, 'video/mp4');
-        done++;
-        console.log(`[batch-faststart] ${done}/${allItems.length} OK: ${origName}`);
+        job.done++;
+        console.log(`[batch-faststart] ${job.done}/${job.total} OK: ${origName}`);
       } catch (e) {
-        errors++;
+        job.errors++;
         console.error(`[batch-faststart] ERRO (${item.table}#${item.id} ${item.field}):`, e.message?.slice(0, 150));
       } finally {
         try { if (tmpOut) fs.unlinkSync(tmpOut); } catch {}
       }
     }
-    console.log(`[batch-faststart] Concluído: ${done} corrigidos, ${errors} erros`);
+    job.running = false;
+    console.log(`[batch-faststart] Concluído: ${job.done} corrigidos, ${job.errors} erros`);
   })();
+});
+
+// Polling de progresso do batch
+router.get('/batch-status', (req, res) => {
+  const { jobId } = req.query;
+  if (!jobId) return res.status(400).json({ error: 'jobId obrigatório' });
+  const job = batchJobs.get(jobId);
+  if (!job) return res.status(404).json({ error: 'Job não encontrado (servidor reiniciado?)' });
+  res.json(job);
 });
 
 // Upload de avatar de perfil — imagem JPG/PNG, armazenada em avatars/
