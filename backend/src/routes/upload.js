@@ -690,7 +690,7 @@ router.post('/batch-fix-faststart', async (_req, res) => {
   }
 
   const jobId = `fs_${Date.now()}`;
-  batchJobs.set(jobId, { total: allItems.length, done: 0, errors: 0, running: true, lastFile: '' });
+  batchJobs.set(jobId, { total: allItems.length, done: 0, errors: 0, running: true, lastFile: '', lastError: '' });
 
   res.json({ ok: true, jobId, total: allItems.length, message: `Iniciando correção de ${allItems.length} arquivo(s) MP4.` });
 
@@ -700,9 +700,7 @@ router.post('/batch-fix-faststart', async (_req, res) => {
     for (const item of allItems) {
       let tmpOut = null;
       try {
-        // Usa o path completo da URL (não só o basename) para preservar subpastas no B2
-        const urlPath = new URL(item.cdnUrl).pathname;
-        const origName = decodeURIComponent(urlPath.replace(/^\//, ''));
+        const origName = path.posix.basename(decodeURIComponent(new URL(item.cdnUrl).pathname));
         job.lastFile = origName.slice(-60);
 
         const { url: b2Url, token: b2Token } = await getDirectDownloadInfo(origName);
@@ -720,6 +718,7 @@ router.post('/batch-fix-faststart', async (_req, res) => {
         console.log(`[batch-faststart] ${job.done}/${job.total} OK: ${origName}`);
       } catch (e) {
         job.errors++;
+        job.lastError = e.message?.slice(0, 200) || 'erro desconhecido';
         console.error(`[batch-faststart] ERRO (${item.table}#${item.id} ${item.field}):`, e.message?.slice(0, 150));
       } finally {
         try { if (tmpOut) fs.unlinkSync(tmpOut); } catch {}
@@ -784,20 +783,22 @@ router.post('/batch-generate-hls', async (_req, res) => {
     return res.json({ ok: true, jobId: null, total: 0, message: 'Nenhum vídeo encontrado.' });
 
   const jobId = `hls_${Date.now()}`;
-  batchJobs.set(jobId, { total: allItems.length, done: 0, errors: 0, running: true, lastFile: '' });
+  batchJobs.set(jobId, { total: allItems.length, done: 0, errors: 0, running: true, lastFile: '', lastError: '' });
   res.json({ ok: true, jobId, total: allItems.length, message: `Gerando HLS para ${allItems.length} vídeo(s).` });
 
   (async () => {
     const job = batchJobs.get(jobId);
     for (const item of allItems) {
       try {
-        const origName = decodeURIComponent(new URL(item.cdnUrl).pathname.replace(/^\//, ''));
+        // Usa só o basename para evitar incluir prefixo de bucket CDN no nome B2
+        const origName = path.posix.basename(decodeURIComponent(new URL(item.cdnUrl).pathname));
         job.lastFile   = origName.slice(-60);
         await generateHLS(origName);
         job.done++;
       } catch (e) {
         job.errors++;
-        console.error('[batch-hls] ERRO:', e.message?.slice(0, 150));
+        job.lastError = e.message?.slice(0, 200) || 'erro desconhecido';
+        console.error('[batch-hls] ERRO:', item.cdnUrl, e.message?.slice(0, 150));
       }
     }
     job.running = false;

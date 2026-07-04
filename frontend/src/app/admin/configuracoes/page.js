@@ -337,6 +337,11 @@ export default function Configuracoes() {
                     {faststartProgress.lastFile}
                   </p>
                 )}
+                {faststartProgress.lastError && (
+                  <p style={{ color: '#ff6b6b', fontSize: 11, margin: '4px 0 0', fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                    Último erro: {faststartProgress.lastError}
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -433,6 +438,11 @@ export default function Configuracoes() {
                 {hlsProgress.lastFile && (
                   <p style={{ color: '#555', fontSize: 11, margin: '6px 0 0', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {hlsProgress.lastFile}
+                  </p>
+                )}
+                {hlsProgress.lastError && (
+                  <p style={{ color: '#ff6b6b', fontSize: 11, margin: '4px 0 0', fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                    Último erro: {hlsProgress.lastError}
                   </p>
                 )}
               </div>
