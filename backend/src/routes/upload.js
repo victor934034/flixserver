@@ -16,6 +16,35 @@ const batchJobs = new Map();
 // Converte qualquer vídeo do B2 em HLS — o player começa a tocar em < 1s
 // porque só precisa baixar o primeiro segmento (4s ≈ 500KB) antes de iniciar.
 
+// Baixa um arquivo do B2 para disco com retry em caso de socket hang up
+async function downloadB2File(url, token, destPath, retries = 3) {
+  const axios = require('axios');
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const res = await axios.get(url, {
+        headers: { Authorization: token },
+        responseType: 'stream',
+        timeout: 0,
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity,
+      });
+      await new Promise((resolve, reject) => {
+        const file = fs.createWriteStream(destPath);
+        res.data.pipe(file);
+        file.on('finish', () => { file.close(); resolve(); });
+        file.on('error', reject);
+        res.data.on('error', reject);
+      });
+      return;
+    } catch (e) {
+      if (attempt === retries) throw e;
+      console.warn(`[b2-download] tentativa ${attempt} falhou (${e.message}), retrying...`);
+      try { fs.unlinkSync(destPath); } catch {}
+      await new Promise(r => setTimeout(r, 2000 * attempt));
+    }
+  }
+}
+
 async function generateHLS(origName) {
   const crypto = require('crypto');
   const axios  = require('axios');
@@ -31,19 +60,7 @@ async function generateHLS(origName) {
     // Baixa o arquivo via B2 com auth para evitar bloqueio do CDN Worker
     const { url: b2Url, token: b2Token } = await getDirectDownloadInfo(origName);
     tmpSrc = path.join(tmpDir, 'src' + path.extname(origName));
-    await new Promise((resolve, reject) => {
-      const https = require('https');
-      const http  = require('http');
-      const urlObj = new URL(b2Url);
-      const lib = urlObj.protocol === 'https:' ? https : http;
-      const file = fs.createWriteStream(tmpSrc);
-      lib.get(b2Url, { headers: { Authorization: b2Token } }, res => {
-        if (res.statusCode !== 200) return reject(new Error(`B2 download ${res.statusCode}: ${origName}`));
-        res.pipe(file);
-        file.on('finish', () => { file.close(); resolve(); });
-        file.on('error', reject);
-      }).on('error', reject);
-    });
+    await downloadB2File(b2Url, b2Token, tmpSrc);
 
     const playlistTmp = path.join(tmpDir, 'pl.m3u8');
     const segPattern  = path.join(tmpDir, 'seg_%04d.ts');
@@ -724,19 +741,7 @@ router.post('/batch-fix-faststart', async (_req, res) => {
         const tmpIn  = path.join(os.tmpdir(), `fh_bfs_in_${Date.now()}.mp4`);
         tmpOut = path.join(os.tmpdir(), `fh_bfs_${Date.now()}.mp4`);
 
-        await new Promise((resolve, reject) => {
-          const https = require('https');
-          const http  = require('http');
-          const urlObj = new URL(b2Url);
-          const lib = urlObj.protocol === 'https:' ? https : http;
-          const file = fs.createWriteStream(tmpIn);
-          lib.get(b2Url, { headers: { Authorization: b2Token } }, res => {
-            if (res.statusCode !== 200) return reject(new Error(`B2 ${res.statusCode}: ${origName}`));
-            res.pipe(file);
-            file.on('finish', () => { file.close(); resolve(); });
-            file.on('error', reject);
-          }).on('error', reject);
-        });
+        await downloadB2File(b2Url, b2Token, tmpIn);
 
         await execFileAsync(ffmpegPath, [
           '-i', tmpIn,
