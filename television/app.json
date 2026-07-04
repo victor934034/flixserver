@@ -2,6 +2,7 @@
   "expo": {
     "name": "FlixHome TV",
     "slug": "flixhome-tv",
+    "owner": "victor57898",
     "version": "1.0.0",
     "orientation": "landscape",
     "userInterfaceStyle": "dark",
@@ -12,12 +13,18 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#0a0a0a"
-      }
+      },
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ]
     },
-    "plugins": ["expo-av"],
+    "plugins": [
+      "expo-av"
+    ],
     "extra": {
       "eas": {
-        "projectId": ""
+        "projectId": "49f6f626-8cdc-4441-a183-e7459ae23dc8"
       }
     }
   }
