@@ -269,9 +269,10 @@ async function getDirectDownloadInfo(filename) {
     bucketNameCache = data.buckets?.[0]?.bucketName;
   }
 
-  // A URL direta do B2 precisa do token de autorização no cabeçalho
+  // Inclui o token como query param — FFmpeg acessa sem precisar de header customizado
+  const base = `${auth.downloadUrl}/file/${bucketNameCache}/${encodeURIComponent(filename)}`;
   return {
-    url: `${auth.downloadUrl}/file/${bucketNameCache}/${encodeURIComponent(filename)}`,
+    url: `${base}?Authorization=${encodeURIComponent(auth.authorizationToken)}`,
     token: auth.authorizationToken,
   };
 }

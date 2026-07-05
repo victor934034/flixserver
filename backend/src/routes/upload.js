@@ -53,14 +53,11 @@ async function generateHLS(origName) {
   const cleanBase = path.posix.basename(origName).replace(/\.[^.]+$/, '');
   const tmpDir    = path.join(os.tmpdir(), `hls_${Date.now()}`);
 
-  let tmpSrc = null;
   try {
     fs.mkdirSync(tmpDir, { recursive: true });
 
-    // Baixa o arquivo via B2 com auth para evitar bloqueio do CDN Worker
-    const { url: b2Url, token: b2Token } = await getDirectDownloadInfo(origName);
-    tmpSrc = path.join(tmpDir, 'src' + path.extname(origName));
-    await downloadB2File(b2Url, b2Token, tmpSrc);
+    // URL do B2 já inclui ?Authorization=TOKEN — FFmpeg acessa sem header extra
+    const { url: b2AuthUrl } = await getDirectDownloadInfo(origName);
 
     const playlistTmp = path.join(tmpDir, 'pl.m3u8');
     const segPattern  = path.join(tmpDir, 'seg_%04d.ts');
@@ -68,7 +65,7 @@ async function generateHLS(origName) {
     // Stream copy para HLS (rápido, sem perda de qualidade)
     try {
       await execFileAsync(ffmpegPath, [
-        '-i', tmpSrc,
+        '-i', b2AuthUrl,
         '-c:v', 'copy', '-c:a', 'copy',
         '-hls_time', '4',
         '-hls_playlist_type', 'vod',
@@ -83,7 +80,7 @@ async function generateHLS(origName) {
         try { fs.unlinkSync(path.join(tmpDir, f)); } catch {}
       });
       await execFileAsync(ffmpegPath, [
-        '-i', tmpSrc,
+        '-i', b2AuthUrl,
         '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
         '-c:a', 'aac', '-b:a', '128k',
         '-hls_time', '4',
@@ -757,20 +754,17 @@ router.post('/batch-fix-faststart', async (_req, res) => {
   (async () => {
     const job = batchJobs.get(jobId);
     for (const item of pending) {
-      let tmpIn = null, tmpOut = null;
+      let tmpOut = null;
       try {
         const origName = path.posix.basename(decodeURIComponent(new URL(item.cdnUrl).pathname));
         job.lastFile = origName.slice(-60);
 
-        // Baixa via B2 com auth para evitar bloqueio do CDN Worker
-        const { url: b2Url, token: b2Token } = await getDirectDownloadInfo(origName);
-        tmpIn  = path.join(os.tmpdir(), `fh_bfs_in_${Date.now()}.mp4`);
+        // URL do B2 com ?Authorization=TOKEN — FFmpeg acessa diretamente sem header
+        const { url: b2AuthUrl } = await getDirectDownloadInfo(origName);
         tmpOut = path.join(os.tmpdir(), `fh_bfs_${Date.now()}.mp4`);
 
-        await downloadB2File(b2Url, b2Token, tmpIn);
-
         await execFileAsync(ffmpegPath, [
-          '-i', tmpIn,
+          '-i', b2AuthUrl,
           '-c', 'copy', '-movflags', '+faststart',
           '-y', tmpOut,
         ], { maxBuffer: 10 * 1024 * 1024, timeout: 7_200_000 });
@@ -785,7 +779,6 @@ router.post('/batch-fix-faststart', async (_req, res) => {
         job.lastError = e.message?.slice(0, 200) || 'erro desconhecido';
         console.error(`[batch-faststart] ERRO (${item.table}#${item.id} ${item.field}):`, e.message?.slice(0, 150));
       } finally {
-        try { if (tmpIn)  fs.unlinkSync(tmpIn);  } catch {}
         try { if (tmpOut) fs.unlinkSync(tmpOut); } catch {}
       }
     }
