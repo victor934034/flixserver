@@ -32,27 +32,67 @@ async function sendPushToAll(supabase, title, body, data = {}) {
   }
 }
 
-// Envia para usuários cuja assinatura expira nos próximos `days` dias
-async function sendExpiryWarnings(supabase, days = 3) {
+// Avisa usuários cuja assinatura (app ou IPTV) expira em ~3 dias ou ~1 dia.
+// Deve ser chamado a cada 12h — a janela de ±12h garante que cada usuário
+// receba no máximo 1 aviso por marco (3 dias antes, 1 dia antes).
+async function sendExpiryWarnings(supabase) {
   const now = new Date();
-  const soon = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
-  try {
-    const { data: users } = await supabase
-      .from('users')
-      .select('push_token, name, plan_expires_at')
-      .not('push_token', 'is', null)
-      .not('plan_expires_at', 'is', null)
-      .lte('plan_expires_at', soon.toISOString())
-      .gte('plan_expires_at', now.toISOString());
+  const HALF_DAY = 12 * 60 * 60 * 1000;
+  const WARN_AT_DAYS = [3, 1];
 
-    for (const u of users || []) {
-      const exp = new Date(u.plan_expires_at);
-      const diff = Math.ceil((exp - now) / (1000 * 60 * 60 * 24));
-      const msg = diff <= 1 ? 'Sua assinatura expira hoje!' : `Sua assinatura expira em ${diff} dias.`;
-      await sendPush([u.push_token], '⚠️ Assinatura FlixHome', msg, { screen: 'subscription' });
+  for (const days of WARN_AT_DAYS) {
+    const winStart = new Date(now.getTime() + days * 24 * 60 * 60 * 1000 - HALF_DAY);
+    const winEnd   = new Date(now.getTime() + days * 24 * 60 * 60 * 1000 + HALF_DAY);
+    const label    = days === 1 ? 'hoje' : `em ${days} dias`;
+
+    // ── Assinatura do app ─────────────────────────────────────────────────────
+    try {
+      const { data: users } = await supabase
+        .from('users')
+        .select('push_token')
+        .not('push_token', 'is', null)
+        .not('plan_expires_at', 'is', null)
+        .gte('plan_expires_at', winStart.toISOString())
+        .lte('plan_expires_at', winEnd.toISOString());
+
+      for (const u of users || []) {
+        await sendPush(
+          [u.push_token],
+          '⚠️ Assinatura FlixHome',
+          `Sua assinatura expira ${label}. Renove para continuar assistindo!`,
+          { screen: 'subscription' }
+        );
+      }
+      if (users?.length) console.log(`[push] app expiry (${days}d): ${users.length} avisos`);
+    } catch (e) {
+      console.error('[push] app expiry check erro:', e.message);
     }
-  } catch (e) {
-    console.error('[push] sendExpiryWarnings erro:', e.message);
+
+    // ── Assinatura IPTV ───────────────────────────────────────────────────────
+    try {
+      const { data: users } = await supabase
+        .from('users')
+        .select('push_token')
+        .not('push_token', 'is', null)
+        .not('iptv_expires_at', 'is', null)
+        .gte('iptv_expires_at', winStart.toISOString())
+        .lte('iptv_expires_at', winEnd.toISOString());
+
+      for (const u of users || []) {
+        await sendPush(
+          [u.push_token],
+          '📺 IPTV FlixHome',
+          `Sua assinatura IPTV expira ${label}. Renove para continuar assistindo!`,
+          { screen: 'iptv' }
+        );
+      }
+      if (users?.length) console.log(`[push] iptv expiry (${days}d): ${users.length} avisos`);
+    } catch (e) {
+      // iptv_expires_at pode não existir ainda na tabela — não logar como erro crítico
+      if (!e.message?.includes('column')) {
+        console.error('[push] iptv expiry check erro:', e.message);
+      }
+    }
   }
 }
 

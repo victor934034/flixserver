@@ -670,6 +670,15 @@ router.get('/iptv/orders', async (req, res) => {
 
 router.patch('/iptv/orders/:id/activate', async (req, res) => {
   try {
+    // Busca pedido para pegar user_id e plan_id
+    const { data: order, error: orderErr } = await supabase
+      .from('iptv_orders')
+      .select('user_id, plan_id')
+      .eq('id', req.params.id)
+      .single();
+    if (orderErr) throw orderErr;
+
+    // Marca como ativado
     const { data, error } = await supabase
       .from('iptv_orders')
       .update({ status: 'activated' })
@@ -677,6 +686,41 @@ router.patch('/iptv/orders/:id/activate', async (req, res) => {
       .select()
       .single();
     if (error) throw error;
+
+    // Salva data de expiração IPTV no usuário e manda push
+    if (order?.plan_id && order?.user_id) {
+      const { data: plan } = await supabase
+        .from('iptv_plans')
+        .select('duration_months, name')
+        .eq('id', order.plan_id)
+        .single();
+
+      if (plan?.duration_months) {
+        const iptvExpiresAt = new Date();
+        iptvExpiresAt.setMonth(iptvExpiresAt.getMonth() + Number(plan.duration_months));
+
+        await supabase
+          .from('users')
+          .update({ iptv_expires_at: iptvExpiresAt.toISOString() })
+          .eq('id', order.user_id);
+
+        const { data: user } = await supabase
+          .from('users').select('push_token').eq('id', order.user_id).single();
+
+        if (user?.push_token) {
+          const { sendPush } = require('../services/notifications');
+          const label = plan.duration_months === 1 ? '1 mês' : `${plan.duration_months} meses`;
+          sendPush(
+            [user.push_token],
+            '📺 IPTV Ativado!',
+            `Sua assinatura IPTV de ${label} está ativa. Bom entretenimento!`,
+            { screen: 'iptv' }
+          ).catch(() => {});
+        }
+        console.log(`[iptv] pedido ${req.params.id} ativado — expira ${iptvExpiresAt.toLocaleDateString('pt-BR')}`);
+      }
+    }
+
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
