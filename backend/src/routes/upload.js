@@ -688,16 +688,26 @@ router.post('/fix-faststart', async (req, res) => {
   }
 });
 
-// Arquivo de progresso persistente — sobrevive a reinícios do servidor
-const FASTSTART_PROGRESS_FILE = path.join(__dirname, '../../data/faststart_done.json');
-function loadFaststartDone() {
-  try { return new Set(JSON.parse(fs.readFileSync(FASTSTART_PROGRESS_FILE, 'utf8'))); }
-  catch { return new Set(); }
-}
-function saveFaststartDone(doneSet) {
+// Progresso persistente no Supabase (system_settings) — sobrevive a deploys/reinícios
+const FASTSTART_SETTING_KEY = 'faststart_done_urls';
+async function loadFaststartDone(supabase) {
   try {
-    fs.mkdirSync(path.dirname(FASTSTART_PROGRESS_FILE), { recursive: true });
-    fs.writeFileSync(FASTSTART_PROGRESS_FILE, JSON.stringify([...doneSet]));
+    const { data } = await supabase
+      .from('system_settings')
+      .select('value')
+      .eq('key', FASTSTART_SETTING_KEY)
+      .single();
+    if (data?.value) return new Set(JSON.parse(data.value));
+  } catch {}
+  return new Set();
+}
+async function saveFaststartDone(supabase, doneSet) {
+  try {
+    await supabase.from('system_settings').upsert({
+      key: FASTSTART_SETTING_KEY,
+      value: JSON.stringify([...doneSet]),
+      updated_at: new Date().toISOString(),
+    });
   } catch {}
 }
 
@@ -739,10 +749,10 @@ router.post('/batch-fix-faststart', async (_req, res) => {
     return res.json({ ok: true, jobId: null, total: 0, message: 'Nenhum arquivo MP4 encontrado.' });
   }
 
-  // Filtra os que já foram processados em rodadas anteriores
-  const doneSet  = loadFaststartDone();
-  const pending  = allItems.filter(i => !doneSet.has(i.cdnUrl));
-  const skipped  = allItems.length - pending.length;
+  // Filtra os que já foram processados em rodadas anteriores (persiste no Supabase)
+  const doneSet = await loadFaststartDone(supabase);
+  const pending = allItems.filter(i => !doneSet.has(i.cdnUrl));
+  const skipped = allItems.length - pending.length;
 
   if (pending.length === 0) {
     return res.json({ ok: true, jobId: null, total: 0, message: `Todos os ${allItems.length} arquivos já foram corrigidos.` });
@@ -787,7 +797,7 @@ router.post('/batch-fix-faststart', async (_req, res) => {
         await uploadFileFromPath(tmpOut, origName, 'video/mp4');
         job.done++;
         doneSet.add(item.cdnUrl);
-        saveFaststartDone(doneSet);
+        saveFaststartDone(supabase, doneSet).catch(() => {}); // fire-and-forget, persiste no Supabase
         console.log(`[batch-faststart] ${job.done}/${job.total} OK: ${origName}`);
       } catch (e) {
         job.errors++;
