@@ -17,17 +17,24 @@ const batchJobs = new Map();
 // porque só precisa baixar o primeiro segmento (4s ≈ 500KB) antes de iniciar.
 
 // Baixa um arquivo do B2 para disco com retry em caso de socket hang up
-async function downloadB2File(url, token, destPath, retries = 3) {
+// token é opcional — se a URL já inclui ?Authorization=TOKEN, passa null
+async function downloadB2File(url, token, destPath, retries = 5) {
   const axios = require('axios');
+  const https = require('https');
+  const agent = new https.Agent({ keepAlive: true });
+
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      const res = await axios.get(url, {
-        headers: { Authorization: token },
+      const config = {
         responseType: 'stream',
         timeout: 0,
         maxContentLength: Infinity,
         maxBodyLength: Infinity,
-      });
+        httpsAgent: agent,
+      };
+      if (token) config.headers = { Authorization: token };
+
+      const res = await axios.get(url, config);
       await new Promise((resolve, reject) => {
         const file = fs.createWriteStream(destPath);
         res.data.pipe(file);
@@ -38,7 +45,7 @@ async function downloadB2File(url, token, destPath, retries = 3) {
       return;
     } catch (e) {
       if (attempt === retries) throw e;
-      console.warn(`[b2-download] tentativa ${attempt} falhou (${e.message}), retrying...`);
+      console.warn(`[b2-download] tentativa ${attempt} falhou (${e.message}), retry em ${2 * attempt}s...`);
       try { fs.unlinkSync(destPath); } catch {}
       await new Promise(r => setTimeout(r, 2000 * attempt));
     }
@@ -754,17 +761,25 @@ router.post('/batch-fix-faststart', async (_req, res) => {
   (async () => {
     const job = batchJobs.get(jobId);
     for (const item of pending) {
+      let tmpIn  = null;
       let tmpOut = null;
       try {
         const origName = path.posix.basename(decodeURIComponent(new URL(item.cdnUrl).pathname));
         job.lastFile = origName.slice(-60);
 
-        // URL do B2 com ?Authorization=TOKEN — FFmpeg acessa diretamente sem header
+        // URL do B2 com token já embutido — axios baixa sem header extra
         const { url: b2AuthUrl } = await getDirectDownloadInfo(origName);
-        tmpOut = path.join(os.tmpdir(), `fh_bfs_${Date.now()}.mp4`);
+        const ts = Date.now();
+        tmpIn  = path.join(os.tmpdir(), `fh_bfs_in_${ts}.mp4`);
+        tmpOut = path.join(os.tmpdir(), `fh_bfs_${ts}.mp4`);
 
+        // Baixa para disco primeiro — FFmpeg bundled pode não suportar HTTPS
+        console.log(`[batch-faststart] baixando ${origName}...`);
+        await downloadB2File(b2AuthUrl, null, tmpIn, 5);
+
+        // Remux local: move moov atom para início (faststart)
         await execFileAsync(ffmpegPath, [
-          '-i', b2AuthUrl,
+          '-i', tmpIn,
           '-c', 'copy', '-movflags', '+faststart',
           '-y', tmpOut,
         ], { maxBuffer: 10 * 1024 * 1024, timeout: 7_200_000 });
@@ -772,13 +787,14 @@ router.post('/batch-fix-faststart', async (_req, res) => {
         await uploadFileFromPath(tmpOut, origName, 'video/mp4');
         job.done++;
         doneSet.add(item.cdnUrl);
-        saveFaststartDone(doneSet);    // persiste no disco — sobrevive a reinício
+        saveFaststartDone(doneSet);
         console.log(`[batch-faststart] ${job.done}/${job.total} OK: ${origName}`);
       } catch (e) {
         job.errors++;
-        job.lastError = e.message?.slice(0, 200) || 'erro desconhecido';
-        console.error(`[batch-faststart] ERRO (${item.table}#${item.id} ${item.field}):`, e.message?.slice(0, 150));
+        job.lastError = (e.stderr || e.message || 'erro desconhecido').slice(0, 400);
+        console.error(`[batch-faststart] ERRO (${item.table}#${item.id} ${item.field}):`, e.stderr || e.message);
       } finally {
+        try { if (tmpIn)  fs.unlinkSync(tmpIn);  } catch {}
         try { if (tmpOut) fs.unlinkSync(tmpOut); } catch {}
       }
     }
@@ -855,8 +871,8 @@ router.post('/batch-generate-hls', async (_req, res) => {
         job.done++;
       } catch (e) {
         job.errors++;
-        job.lastError = e.message?.slice(0, 200) || 'erro desconhecido';
-        console.error('[batch-hls] ERRO:', item.cdnUrl, e.message?.slice(0, 150));
+        job.lastError = (e.stderr || e.message || 'erro desconhecido').slice(0, 400);
+        console.error('[batch-hls] ERRO:', item.cdnUrl, e.stderr || e.message);
       }
     }
     job.running = false;
