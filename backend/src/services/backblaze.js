@@ -178,6 +178,56 @@ async function finishLargeFile(fileId, partSha1Array) {
   return data;
 }
 
+// Lista TODAS as versões de cada arquivo (b2_list_file_versions)
+// Retorna pares {keep, old[]} para arquivos com mais de uma versão
+async function listOldVersions() {
+  const auth = await authorize();
+  const allFiles = [];
+  let startFileName = null;
+  let startFileId = null;
+
+  do {
+    const body = { bucketId: process.env.BACKBLAZE_BUCKET_ID, maxFileCount: 1000 };
+    if (startFileName) { body.startFileName = startFileName; body.startFileId = startFileId; }
+
+    const { data } = await axios.post(
+      `${auth.apiUrl}/b2api/v2/b2_list_file_versions`,
+      body,
+      { headers: { Authorization: auth.authorizationToken }, timeout: B2_API_TIMEOUT }
+    );
+
+    allFiles.push(...data.files);
+    startFileName = data.nextFileName;
+    startFileId = data.nextFileId;
+  } while (startFileName);
+
+  // Agrupa por fileName, ordena do mais recente para o mais antigo
+  const byName = new Map();
+  for (const f of allFiles) {
+    if (!byName.has(f.fileName)) byName.set(f.fileName, []);
+    byName.get(f.fileName).push(f);
+  }
+
+  const toDelete = [];
+  let totalWasted = 0;
+
+  for (const [, versions] of byName) {
+    // Separa uploads reais de hide markers (marcadores de deleção)
+    const uploads = versions.filter(v => v.action === 'upload')
+      .sort((a, b) => (b.uploadTimestamp || 0) - (a.uploadTimestamp || 0));
+    const hides = versions.filter(v => v.action === 'hide');
+
+    // Mantém o upload mais recente; deleta os demais e todos os hide markers
+    const old = [...uploads.slice(1), ...hides];
+    for (const f of old) {
+      toDelete.push({ fileId: f.fileId, fileName: f.fileName, size: f.contentLength || 0 });
+      totalWasted += f.contentLength || 0;
+    }
+  }
+
+  return { toDelete, totalWasted };
+}
+
 // Cópia server-side no B2 (sem usar banda — ideal para reorganizar arquivos)
 async function copyFile(sourceFileId, newFileName) {
   const auth = await authorize();
@@ -314,4 +364,4 @@ async function getDirectDownloadInfo(filename) {
 
 const fs = require('fs');
 
-module.exports = { authorize, getUploadUrl, uploadFile, uploadFileFromPath, deleteFile, listFiles, listHlsFiles, setupCors, startLargeFile, getUploadPartUrl, listParts, finishLargeFile, getDirectDownloadInfo, sanitizeFilename, copyFile };
+module.exports = { authorize, getUploadUrl, uploadFile, uploadFileFromPath, deleteFile, listFiles, listHlsFiles, setupCors, startLargeFile, getUploadPartUrl, listParts, finishLargeFile, getDirectDownloadInfo, sanitizeFilename, copyFile, listOldVersions };

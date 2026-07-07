@@ -61,6 +61,14 @@ export default function Configuracoes() {
   const dupPollRef = useRef(null);
   const [dupConfirm, setDupConfirm] = useState(false);
 
+  const [verScan, setVerScan] = useState(null);
+  const [verScanning, setVerScanning] = useState(false);
+  const [verRunning, setVerRunning] = useState(false);
+  const [verMsg, setVerMsg] = useState('');
+  const [verProgress, setVerProgress] = useState(null);
+  const verPollRef = useRef(null);
+  const [verConfirm, setVerConfirm] = useState(false);
+
   useEffect(() => {
     api.get('/settings').then(r => setSettings(r.data)).finally(() => setLoading(false));
     api.get('/payments/plans/all')
@@ -933,6 +941,147 @@ export default function Configuracoes() {
 
           {dupMsg && !dupRunning && (
             <p style={{ color: dupMsg.startsWith('✅') ? '#4caf50' : '#ff6b6b', fontSize: 13, margin: '8px 0 0' }}>{dupMsg}</p>
+          )}
+        </div>
+      </section>
+
+      {/* ── VERSÕES ANTIGAS NO BACKBLAZE ── */}
+      <section style={{ marginBottom: 40 }}>
+        <h3 style={{ color: '#fff', marginBottom: 16 }}>Versões Antigas no Backblaze</h3>
+        <div style={{ background: '#1a1a1a', borderRadius: 12, padding: 24, border: '1px solid #2a2a2a' }}>
+          <p style={{ color: '#888', fontSize: 13, margin: '0 0 16px' }}>
+            Detecta arquivos com múltiplas versões (o indicador "(12)" no painel B2). Mantém apenas a versão mais recente e deleta as antigas.
+          </p>
+
+          {!verScan && !verScanning && (
+            <button
+              onClick={async () => {
+                setVerScanning(true);
+                setVerMsg('');
+                try {
+                  const { data } = await api.get('/admin/old-versions/scan');
+                  setVerScan(data);
+                } catch (e) {
+                  setVerMsg('❌ Erro ao escanear: ' + (e.response?.data?.error || e.message));
+                } finally {
+                  setVerScanning(false);
+                }
+              }}
+              style={{ padding: '10px 20px', borderRadius: 8, background: '#1565c0', color: '#fff', border: 'none', fontWeight: 700, cursor: 'pointer', fontSize: 14 }}>
+              🔍 Escanear versões antigas
+            </button>
+          )}
+          {verScanning && <p style={{ color: '#888', fontSize: 13 }}>Escaneando... (pode demorar para buckets grandes)</p>}
+
+          {verScan && !verRunning && (
+            <>
+              <div style={{ marginBottom: 16, padding: '12px 16px', borderRadius: 8, background: '#111', border: '1px solid #333' }}>
+                {verScan.totalFiles === 0
+                  ? <span style={{ color: '#4caf50', fontSize: 13 }}>✅ Nenhuma versão antiga — bucket está limpo.</span>
+                  : <span style={{ color: '#ff9800', fontSize: 13 }}>
+                      ⚠️ <strong style={{ color: '#fff' }}>{verScan.totalFiles}</strong> versão(ões) antiga(s) em{' '}
+                      <strong style={{ color: '#fff' }}>{verScan.groups.length}</strong> arquivo(s) —
+                      liberaria <strong style={{ color: '#E50914' }}>{(verScan.totalWasted / 1073741824).toFixed(2)} GB</strong>.
+                    </span>
+                }
+              </div>
+
+              {verScan.groups?.length > 0 && (
+                <div style={{ maxHeight: 300, overflowY: 'auto', marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {verScan.groups.map((g, gi) => (
+                    <div key={gi} style={{ background: '#111', borderRadius: 8, padding: '10px 14px', border: '1px solid #2a2a2a' }}>
+                      <div style={{ color: '#888', fontSize: 11, marginBottom: 4 }}>
+                        {g.oldVersions} versão(ões) antiga(s) · {(g.wastedBytes / 1048576).toFixed(0)} MB desperdiçado
+                      </div>
+                      <div style={{ color: '#ccc', fontSize: 12, fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                        {decodeURIComponent(g.fileName)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {verScan.totalFiles > 0 && (
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <button
+                    onClick={() => { setVerScan(null); setVerMsg(''); setVerConfirm(false); }}
+                    style={{ padding: '8px 16px', borderRadius: 8, background: '#222', color: '#aaa', border: '1px solid #333', cursor: 'pointer', fontSize: 13 }}>
+                    🔄 Novo scan
+                  </button>
+                  {!verConfirm
+                    ? <button
+                        onClick={() => setVerConfirm(true)}
+                        style={{ padding: '10px 20px', borderRadius: 8, background: '#b71c1c', color: '#fff', border: 'none', fontWeight: 700, cursor: 'pointer' }}>
+                        🗑️ Deletar {verScan.totalFiles} versão(ões) antiga(s)
+                      </button>
+                    : <>
+                        <span style={{ color: '#ff6b6b', fontSize: 13, fontWeight: 600 }}>Tem certeza? Não pode ser desfeito.</span>
+                        <button
+                          onClick={async () => {
+                            setVerConfirm(false);
+                            setVerRunning(true);
+                            setVerMsg('');
+                            setVerProgress(null);
+                            clearInterval(verPollRef.current);
+                            const allFiles = verScan.groups.flatMap(g => g.files);
+                            try {
+                              const { data } = await api.post('/admin/old-versions/delete', { files: allFiles });
+                              verPollRef.current = setInterval(async () => {
+                                try {
+                                  const { data: st } = await api.get('/admin/old-versions/status', { params: { jobId: data.jobId } });
+                                  setVerProgress(st);
+                                  if (!st.running) {
+                                    clearInterval(verPollRef.current);
+                                    setVerRunning(false);
+                                    setVerScan(null);
+                                    setVerMsg(`✅ Concluído: ${st.done} versão(ões) deletada(s)${st.errors > 0 ? `, ${st.errors} erro(s)` : ''}.`);
+                                  }
+                                } catch {}
+                              }, 2000);
+                            } catch (e) {
+                              setVerRunning(false);
+                              setVerMsg('❌ Erro: ' + (e.response?.data?.error || e.message));
+                            }
+                          }}
+                          style={{ padding: '10px 20px', borderRadius: 8, background: '#b71c1c', color: '#fff', border: 'none', fontWeight: 700, cursor: 'pointer' }}>
+                          Confirmar
+                        </button>
+                        <button
+                          onClick={() => setVerConfirm(false)}
+                          style={{ padding: '8px 16px', borderRadius: 8, background: '#222', color: '#aaa', border: '1px solid #333', cursor: 'pointer', fontSize: 13 }}>
+                          Cancelar
+                        </button>
+                      </>
+                  }
+                </div>
+              )}
+              {verScan.totalFiles === 0 && (
+                <button
+                  onClick={() => { setVerScan(null); setVerMsg(''); }}
+                  style={{ padding: '8px 16px', borderRadius: 8, background: '#222', color: '#aaa', border: '1px solid #333', cursor: 'pointer', fontSize: 13, marginTop: 8 }}>
+                  🔄 Novo scan
+                </button>
+              )}
+            </>
+          )}
+
+          {verProgress && verRunning && (
+            <div style={{ background: '#111', borderRadius: 8, padding: '12px 16px', marginTop: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                <span style={{ color: '#fff', fontSize: 13, fontWeight: 600 }}>
+                  Deletando... {verProgress.done} / {verProgress.total}
+                  {verProgress.errors > 0 && <span style={{ color: '#ff6b6b', marginLeft: 8 }}>({verProgress.errors} erros)</span>}
+                </span>
+                <span style={{ color: '#888', fontSize: 12 }}>{Math.round((verProgress.done / verProgress.total) * 100)}%</span>
+              </div>
+              <div style={{ background: '#222', borderRadius: 4, height: 6, overflow: 'hidden' }}>
+                <div style={{ height: '100%', borderRadius: 4, background: '#b71c1c', width: `${Math.round((verProgress.done / verProgress.total) * 100)}%`, transition: 'width 0.5s ease' }} />
+              </div>
+            </div>
+          )}
+
+          {verMsg && !verRunning && (
+            <p style={{ color: verMsg.startsWith('✅') ? '#4caf50' : '#ff6b6b', fontSize: 13, margin: '8px 0 0' }}>{verMsg}</p>
           )}
         </div>
       </section>

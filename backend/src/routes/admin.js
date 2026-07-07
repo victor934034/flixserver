@@ -870,6 +870,69 @@ router.get('/duplicates/status', (req, res) => {
   res.json(job);
 });
 
+// ── VERSÕES ANTIGAS NO BACKBLAZE ─────────────────────────────────────────────
+const oldVerJobs = new Map();
+
+// Prévia: lista todas as versões antigas que seriam deletadas
+router.get('/old-versions/scan', async (req, res) => {
+  try {
+    const { listOldVersions } = require('../services/backblaze');
+    const { toDelete, totalWasted } = await listOldVersions();
+
+    // Agrupa por fileName para exibir no frontend
+    const byFile = new Map();
+    for (const f of toDelete) {
+      if (!byFile.has(f.fileName)) byFile.set(f.fileName, []);
+      byFile.get(f.fileName).push(f);
+    }
+
+    const groups = Array.from(byFile.entries()).map(([fileName, files]) => ({
+      fileName,
+      oldVersions: files.length,
+      wastedBytes: files.reduce((s, f) => s + (f.size || 0), 0),
+      files,
+    })).sort((a, b) => b.wastedBytes - a.wastedBytes);
+
+    res.json({ groups, totalFiles: toDelete.length, totalWasted });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Deleta todas as versões antigas em background
+router.post('/old-versions/delete', async (req, res) => {
+  const { files } = req.body;
+  if (!Array.isArray(files) || files.length === 0)
+    return res.status(400).json({ error: 'Lista de arquivos obrigatória.' });
+
+  const jobId = `oldver_${Date.now()}`;
+  oldVerJobs.set(jobId, { total: files.length, done: 0, errors: 0, running: true });
+  res.json({ ok: true, jobId, total: files.length });
+
+  (async () => {
+    const { deleteFile } = require('../services/backblaze');
+    const job = oldVerJobs.get(jobId);
+    for (const f of files) {
+      try {
+        await deleteFile(f.fileId, f.fileName);
+        job.done++;
+      } catch (e) {
+        job.errors++;
+        console.error('[old-versions] delete error:', f.fileName, e.message);
+      }
+    }
+    job.running = false;
+  })();
+});
+
+router.get('/old-versions/status', (req, res) => {
+  const { jobId } = req.query;
+  if (!jobId) return res.status(400).json({ error: 'jobId obrigatório' });
+  const job = oldVerJobs.get(jobId);
+  if (!job) return res.status(404).json({ error: 'Job não encontrado.' });
+  res.json(job);
+});
+
 // Gerenciamento de assinaturas de usuários (para o painel admin)
 router.get('/users/subscriptions', async (req, res) => {
   try {
