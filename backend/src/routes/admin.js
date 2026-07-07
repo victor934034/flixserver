@@ -672,6 +672,10 @@ router.get('/reorganize/scan', async (req, res) => {
 
 // Inicia reorganização em background: copia para novo path → atualiza banco → deleta original
 router.post('/reorganize/start', async (req, res) => {
+  // Impede múltiplos jobs simultâneos
+  const running = [...reorganizeJobs.values()].find(j => j.running);
+  if (running) return res.status(409).json({ error: 'Já existe um job de reorganização em andamento.' });
+
   try {
     const { listFiles, copyFile, deleteFile } = require('../services/backblaze');
     const CDN = process.env.CDN_BASE_URL;
