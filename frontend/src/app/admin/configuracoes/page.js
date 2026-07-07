@@ -653,22 +653,37 @@ export default function Configuracoes() {
                       <div style={{ color: '#888', fontSize: 11, marginBottom: 6 }}>
                         {g.byHash ? 'SHA1 idêntico' : 'Mesmo tamanho'} · {g.count} arquivos · {(g.wastedSize / 1048576).toFixed(0)} MB desperdiçado
                       </div>
-                      {g.files.map((f, fi) => (
-                        <div key={fi} style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-                          <span style={{
-                            fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
-                            background: f.keep ? '#0d2a0d' : '#2a0d0d',
-                            color: f.keep ? '#4caf50' : '#ff6b6b',
-                            flexShrink: 0,
-                          }}>
-                            {f.keep ? 'MANTER' : 'DELETAR'}
-                          </span>
-                          {f.inDb && <span style={{ fontSize: 10, color: '#1565c0', flexShrink: 0 }}>● banco</span>}
-                          <span style={{ fontSize: 12, color: '#aaa', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {f.fileName}
-                          </span>
-                        </div>
-                      ))}
+                      {g.files.map((f, fi) => {
+                        const sizeMB = f.size >= 1073741824
+                          ? `${(f.size / 1073741824).toFixed(2)} GB`
+                          : f.size >= 1048576
+                            ? `${(f.size / 1048576).toFixed(0)} MB`
+                            : f.size === 0 ? '0 B (vazio!)' : `${(f.size / 1024).toFixed(0)} KB`;
+                        return (
+                          <div key={fi} style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                            <span style={{
+                              fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
+                              background: f.keep ? '#0d2a0d' : '#2a0d0d',
+                              color: f.keep ? '#4caf50' : '#ff6b6b',
+                              flexShrink: 0,
+                            }}>
+                              {f.keep ? 'MANTER' : 'DELETAR'}
+                            </span>
+                            <span style={{
+                              fontSize: 10, padding: '2px 6px', borderRadius: 4, flexShrink: 0,
+                              background: f.size === 0 ? '#3a0a0a' : '#1a1a2a',
+                              color: f.size === 0 ? '#ff4444' : '#888',
+                              fontWeight: f.size === 0 ? 700 : 400,
+                            }}>
+                              {sizeMB}
+                            </span>
+                            {f.inDb && <span style={{ fontSize: 10, color: '#1565c0', flexShrink: 0 }}>● banco</span>}
+                            <span style={{ fontSize: 12, color: '#aaa', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {f.fileName}
+                            </span>
+                          </div>
+                        );
+                      })}
                     </div>
                   ))}
                 </div>

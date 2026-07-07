@@ -620,7 +620,7 @@ router.get('/duplicates/scan', async (req, res) => {
   try {
     const { listFiles } = require('../services/backblaze');
     const CDN = process.env.CDN_BASE_URL;
-    const MIN_SIZE = 50 * 1024 * 1024; // 50 MB
+    const MIN_SIZE_FOR_SIZE_GROUP = 50 * 1024 * 1024; // 50 MB (só agrupa por tamanho acima disto)
 
     const b2Files = await listFiles('', 100000);
 
@@ -638,9 +638,11 @@ router.get('/duplicates/scan', async (req, res) => {
 
     const byKey = new Map();
     for (const f of b2Files) {
-      if (f.contentLength < MIN_SIZE) continue;
       const sha1 = f.contentSha1;
       const isRealSha1 = sha1 && sha1.length === 40 && sha1 !== 'none';
+      // SHA1 real: inclui qualquer tamanho (identidade garantida)
+      // Sem SHA1: só agrupa arquivos ≥ 50 MB (evita falsos positivos)
+      if (!isRealSha1 && f.contentLength < MIN_SIZE_FOR_SIZE_GROUP) continue;
       const key = isRealSha1 ? `sha1:${sha1}` : `size:${f.contentLength}`;
       if (!byKey.has(key)) byKey.set(key, []);
       byKey.get(key).push(f);
@@ -657,19 +659,29 @@ router.get('/duplicates/scan', async (req, res) => {
         return { fileId: f.fileId, fileName: f.fileName, size: f.contentLength, uploadedAt: f.uploadTimestamp, inDb };
       });
 
-      // Prioridade para manter: 1) está no banco; 2) mais recente
-      let keepIdx = withInfo.findIndex(f => f.inDb);
-      if (keepIdx === -1) {
-        keepIdx = withInfo.reduce((best, f, i) =>
-          (f.uploadedAt || 0) > (withInfo[best].uploadedAt || 0) ? i : best, 0);
+      // Prioridade para manter:
+      // 1) MAIOR TAMANHO — nunca deletar arquivo com conteúdo em favor de um vazio
+      // 2) Está no banco de dados
+      // 3) Mais recente
+      const maxSize = Math.max(...withInfo.map(f => f.size));
+      const topCandidates = withInfo.map((f, i) => ({ ...f, origIdx: i })).filter(f => f.size === maxSize);
+      let keepOrigIdx;
+      const inDbTop = topCandidates.find(f => f.inDb);
+      if (inDbTop) {
+        keepOrigIdx = inDbTop.origIdx;
+      } else {
+        keepOrigIdx = topCandidates.reduce((bestIdx, f) =>
+          (f.uploadedAt || 0) > (withInfo[bestIdx].uploadedAt || 0) ? f.origIdx : bestIdx,
+          topCandidates[0].origIdx
+        );
       }
 
-      const wastedSize = withInfo.reduce((s, f, i) => i !== keepIdx ? s + f.size : s, 0);
+      const wastedSize = withInfo.reduce((s, f, i) => i !== keepOrigIdx ? s + f.size : s, 0);
       groups.push({
         byHash: key.startsWith('sha1:'),
         count: files.length,
         wastedSize,
-        files: withInfo.map((f, i) => ({ ...f, keep: i === keepIdx })),
+        files: withInfo.map((f, i) => ({ ...f, keep: i === keepOrigIdx })),
       });
     }
 
