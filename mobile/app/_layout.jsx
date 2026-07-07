@@ -72,6 +72,7 @@ function handleNotificationTap(data, router) {
     if (screen === 'filme' && id) router.push(`/filme/${id}`);
     else if (screen === 'serie' && id) router.push(`/serie/${id}`);
     else if (screen === 'subscription') router.push('/subscription');
+    else if (screen === 'iptv') router.push('/(tabs)/iptv');
     else if (screen === 'home') router.replace('/(tabs)');
   } catch {}
 }
