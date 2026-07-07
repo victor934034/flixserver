@@ -1,8 +1,4 @@
 .expo/
 node_modules/
-android/.gradle/
-android/build/
-android/app/build/
-android/.idea/
-android/app/.cxx/
+android/
 *.keystore
