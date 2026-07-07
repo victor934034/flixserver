@@ -610,6 +610,129 @@ router.get('/hls-cleanup/status', (req, res) => {
   res.json(job);
 });
 
+// ── Detecção e remoção de arquivos duplicados no Backblaze ───────────────────
+
+const dupDeleteJobs = new Map();
+
+// Agrupa por SHA1 real ou por tamanho (≥ 50 MB) como fallback
+// Cruza com o banco para marcar qual arquivo manter
+router.get('/duplicates/scan', async (req, res) => {
+  try {
+    const { listFiles } = require('../services/backblaze');
+    const CDN = process.env.CDN_BASE_URL;
+    const MIN_SIZE = 50 * 1024 * 1024; // 50 MB
+
+    const b2Files = await listFiles('', 100000);
+
+    const [moviesRes, episodesRes] = await Promise.all([
+      supabase.from('movies').select('file_dubbing, file_subtitled, file_cinema, file_4k'),
+      supabase.from('episodes').select('file_dubbing, file_subtitled, file_cinema'),
+    ]);
+    const dbUrls = new Set();
+    for (const m of moviesRes.data || []) {
+      [m.file_dubbing, m.file_subtitled, m.file_cinema, m.file_4k].filter(Boolean).forEach(u => dbUrls.add(u));
+    }
+    for (const e of episodesRes.data || []) {
+      [e.file_dubbing, e.file_subtitled, e.file_cinema].filter(Boolean).forEach(u => dbUrls.add(u));
+    }
+
+    const byKey = new Map();
+    for (const f of b2Files) {
+      if (f.contentLength < MIN_SIZE) continue;
+      const sha1 = f.contentSha1;
+      const isRealSha1 = sha1 && sha1.length === 40 && sha1 !== 'none';
+      const key = isRealSha1 ? `sha1:${sha1}` : `size:${f.contentLength}`;
+      if (!byKey.has(key)) byKey.set(key, []);
+      byKey.get(key).push(f);
+    }
+
+    const groups = [];
+    for (const [key, files] of byKey) {
+      if (files.length < 2) continue;
+
+      const withInfo = files.map(f => {
+        const cdnEncoded = `${CDN}/${encodeURIComponent(f.fileName)}`;
+        const cdnRaw = `${CDN}/${f.fileName}`;
+        const inDb = dbUrls.has(cdnEncoded) || dbUrls.has(cdnRaw);
+        return { fileId: f.fileId, fileName: f.fileName, size: f.contentLength, uploadedAt: f.uploadTimestamp, inDb };
+      });
+
+      // Prioridade para manter: 1) está no banco; 2) mais recente
+      let keepIdx = withInfo.findIndex(f => f.inDb);
+      if (keepIdx === -1) {
+        keepIdx = withInfo.reduce((best, f, i) =>
+          (f.uploadedAt || 0) > (withInfo[best].uploadedAt || 0) ? i : best, 0);
+      }
+
+      const wastedSize = withInfo.reduce((s, f, i) => i !== keepIdx ? s + f.size : s, 0);
+      groups.push({
+        byHash: key.startsWith('sha1:'),
+        count: files.length,
+        wastedSize,
+        files: withInfo.map((f, i) => ({ ...f, keep: i === keepIdx })),
+      });
+    }
+
+    const totalWasted = groups.reduce((s, g) => s + g.wastedSize, 0);
+    res.json({
+      totalGroups: groups.length,
+      totalDuplicates: groups.reduce((s, g) => s + g.count - 1, 0),
+      totalWastedBytes: totalWasted,
+      display: totalWasted >= 1073741824
+        ? `${(totalWasted / 1073741824).toFixed(2)} GB`
+        : `${(totalWasted / 1048576).toFixed(0)} MB`,
+      groups,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Deleta os arquivos marcados como duplicata (recebe lista {fileId, fileName})
+router.post('/duplicates/delete', async (req, res) => {
+  const { files } = req.body;
+  if (!Array.isArray(files) || files.length === 0) {
+    return res.status(400).json({ error: 'files é obrigatório' });
+  }
+  try {
+    const { deleteFile } = require('../services/backblaze');
+    const jobId = `dup_${Date.now()}`;
+    dupDeleteJobs.set(jobId, { total: files.length, done: 0, errors: 0, running: true, lastFile: '', lastError: '' });
+    res.json({ ok: true, jobId, total: files.length });
+
+    (async () => {
+      const job = dupDeleteJobs.get(jobId);
+      const CONCURRENCY = 5;
+      for (let i = 0; i < files.length; i += CONCURRENCY) {
+        const batch = files.slice(i, i + CONCURRENCY);
+        await Promise.allSettled(batch.map(async f => {
+          try {
+            await deleteFile(f.fileId, f.fileName);
+            job.done++;
+            job.lastFile = f.fileName.split('/').pop();
+          } catch (e) {
+            job.errors++;
+            job.lastError = `${f.fileName.split('/').pop()}: ${e.message?.slice(0, 80)}`;
+            console.error('[dup-delete] erro:', f.fileName, e.message);
+          }
+        }));
+      }
+      job.running = false;
+      console.log(`[dup-delete] concluído: ${job.done} deletados, ${job.errors} erros`);
+    })();
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/duplicates/status', (req, res) => {
+  const { jobId } = req.query;
+  if (!jobId) return res.status(400).json({ error: 'jobId obrigatório' });
+  const job = dupDeleteJobs.get(jobId);
+  if (!job) return res.status(404).json({ error: 'Job não encontrado.' });
+  res.json(job);
+});
+
 // Gerenciamento de assinaturas de usuários (para o painel admin)
 router.get('/users/subscriptions', async (req, res) => {
   try {

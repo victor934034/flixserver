@@ -45,6 +45,14 @@ export default function Configuracoes() {
   const hlsCleanPollRef = useRef(null);
   const [hlsCleanConfirm, setHlsCleanConfirm] = useState(false);
 
+  const [dupScan, setDupScan] = useState(null);        // resultado do scan de duplicatas
+  const [dupScanning, setDupScanning] = useState(false);
+  const [dupRunning, setDupRunning] = useState(false);
+  const [dupMsg, setDupMsg] = useState('');
+  const [dupProgress, setDupProgress] = useState(null);
+  const dupPollRef = useRef(null);
+  const [dupConfirm, setDupConfirm] = useState(false);
+
   useEffect(() => {
     api.get('/settings').then(r => setSettings(r.data)).finally(() => setLoading(false));
     api.get('/payments/plans/all')
@@ -589,6 +597,174 @@ export default function Configuracoes() {
                 </p>
               )}
             </div>
+          )}
+        </div>
+      </section>
+
+      {/* ── DUPLICATAS NO BACKBLAZE ── */}
+      <section style={{ marginBottom: 40 }}>
+        <h3 style={{ color: '#fff', marginBottom: 16 }}>Arquivos Duplicados no Backblaze</h3>
+        <div style={{ background: '#1a1a1a', borderRadius: 12, padding: 24, border: '1px solid #2a2a2a' }}>
+          <p style={{ color: '#888', fontSize: 13, margin: '0 0 16px' }}>
+            Detecta arquivos com o mesmo conteúdo (mesmo SHA1 ou mesmo tamanho ≥ 50 MB) armazenados mais de uma vez.
+            Mantém o arquivo que está cadastrado no banco ou o mais recente, e deleta os demais.
+          </p>
+
+          {/* Botão de scan */}
+          {!dupScan && !dupScanning && (
+            <button
+              onClick={async () => {
+                setDupScanning(true);
+                setDupMsg('');
+                try {
+                  const { data } = await api.get('/admin/duplicates/scan');
+                  setDupScan(data);
+                } catch (e) {
+                  setDupMsg('Erro ao escanear: ' + (e.response?.data?.error || e.message));
+                } finally {
+                  setDupScanning(false);
+                }
+              }}
+              style={{ padding: '10px 24px', borderRadius: 8, background: '#1565c0', color: '#fff', border: 'none', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>
+              Escanear bucket
+            </button>
+          )}
+          {dupScanning && <p style={{ color: '#888', fontSize: 13 }}>Escaneando... (pode demorar para buckets grandes)</p>}
+
+          {/* Resultado do scan */}
+          {dupScan && !dupRunning && (
+            <>
+              <div style={{ marginBottom: 16, padding: '12px 16px', borderRadius: 8, background: '#111', border: '1px solid #333' }}>
+                {dupScan.totalGroups === 0
+                  ? <span style={{ color: '#4caf50', fontSize: 13 }}>✅ Nenhuma duplicata encontrada — bucket está limpo.</span>
+                  : <span style={{ color: '#ff9800', fontSize: 13 }}>
+                      ⚠️ <strong style={{ color: '#fff' }}>{dupScan.totalDuplicates}</strong> arquivo(s) duplicado(s) em{' '}
+                      <strong style={{ color: '#fff' }}>{dupScan.totalGroups}</strong> grupo(s) —
+                      liberaria <strong style={{ color: '#E50914' }}>{dupScan.display}</strong>.
+                    </span>
+                }
+              </div>
+
+              {/* Lista de grupos */}
+              {dupScan.groups?.length > 0 && (
+                <div style={{ maxHeight: 300, overflowY: 'auto', marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {dupScan.groups.map((g, gi) => (
+                    <div key={gi} style={{ background: '#111', borderRadius: 8, padding: '10px 14px', border: '1px solid #2a2a2a' }}>
+                      <div style={{ color: '#888', fontSize: 11, marginBottom: 6 }}>
+                        {g.byHash ? 'SHA1 idêntico' : 'Mesmo tamanho'} · {g.count} arquivos · {(g.wastedSize / 1048576).toFixed(0)} MB desperdiçado
+                      </div>
+                      {g.files.map((f, fi) => (
+                        <div key={fi} style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                          <span style={{
+                            fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
+                            background: f.keep ? '#0d2a0d' : '#2a0d0d',
+                            color: f.keep ? '#4caf50' : '#ff6b6b',
+                            flexShrink: 0,
+                          }}>
+                            {f.keep ? 'MANTER' : 'DELETAR'}
+                          </span>
+                          {f.inDb && <span style={{ fontSize: 10, color: '#1565c0', flexShrink: 0 }}>● banco</span>}
+                          <span style={{ fontSize: 12, color: '#aaa', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {f.fileName}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Ações */}
+              {dupScan.totalGroups > 0 && (
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <button
+                    onClick={() => { setDupScan(null); setDupMsg(''); setDupConfirm(false); }}
+                    style={{ padding: '8px 16px', borderRadius: 8, background: '#222', color: '#aaa', border: '1px solid #333', cursor: 'pointer', fontSize: 13 }}>
+                    🔄 Novo scan
+                  </button>
+                  {!dupConfirm
+                    ? <button
+                        onClick={() => setDupConfirm(true)}
+                        style={{ padding: '10px 20px', borderRadius: 8, background: '#7b1fa2', color: '#fff', border: 'none', fontWeight: 700, cursor: 'pointer' }}>
+                        🗑️ Remover {dupScan.totalDuplicates} duplicata(s)
+                      </button>
+                    : <>
+                        <span style={{ color: '#ff6b6b', fontSize: 13, fontWeight: 600 }}>Tem certeza? Não pode ser desfeito.</span>
+                        <button
+                          onClick={async () => {
+                            setDupConfirm(false);
+                            setDupRunning(true);
+                            setDupMsg('');
+                            setDupProgress(null);
+                            clearInterval(dupPollRef.current);
+                            const toDelete = dupScan.groups.flatMap(g => g.files.filter(f => !f.keep));
+                            try {
+                              const { data } = await api.post('/admin/duplicates/delete', { files: toDelete });
+                              dupPollRef.current = setInterval(async () => {
+                                try {
+                                  const s = await api.get(`/admin/duplicates/status?jobId=${data.jobId}`);
+                                  setDupProgress(s.data);
+                                  if (!s.data.running) {
+                                    clearInterval(dupPollRef.current);
+                                    setDupRunning(false);
+                                    setDupScan(null);
+                                    setDupMsg(
+                                      s.data.errors === 0
+                                        ? `✅ ${s.data.done} arquivo(s) deletado(s) com sucesso!`
+                                        : `${s.data.done} deletado(s), ${s.data.errors} erro(s)${s.data.lastError ? ': ' + s.data.lastError : ''}`
+                                    );
+                                  }
+                                } catch { clearInterval(dupPollRef.current); setDupRunning(false); }
+                              }, 2000);
+                            } catch (e) {
+                              setDupMsg('Erro: ' + (e.response?.data?.error || e.message));
+                              setDupRunning(false);
+                            }
+                          }}
+                          style={{ padding: '10px 20px', borderRadius: 8, background: '#c62828', color: '#fff', border: 'none', fontWeight: 700, cursor: 'pointer' }}>
+                          ✅ Sim, deletar
+                        </button>
+                        <button onClick={() => setDupConfirm(false)}
+                          style={{ padding: '10px 16px', borderRadius: 8, background: '#222', color: '#aaa', border: '1px solid #333', cursor: 'pointer' }}>
+                          Cancelar
+                        </button>
+                      </>
+                  }
+                </div>
+              )}
+              {dupScan.totalGroups === 0 && (
+                <button
+                  onClick={() => { setDupScan(null); setDupMsg(''); }}
+                  style={{ padding: '8px 16px', borderRadius: 8, background: '#222', color: '#aaa', border: '1px solid #333', cursor: 'pointer', fontSize: 13, marginTop: 8 }}>
+                  🔄 Novo scan
+                </button>
+              )}
+            </>
+          )}
+
+          {/* Progresso da deleção */}
+          {dupProgress && dupRunning && (
+            <div style={{ background: '#111', borderRadius: 8, padding: '12px 16px', marginTop: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                <span style={{ color: '#fff', fontSize: 13, fontWeight: 600 }}>
+                  Deletando... {dupProgress.done} / {dupProgress.total}
+                  {dupProgress.errors > 0 && <span style={{ color: '#ff6b6b', marginLeft: 8 }}>({dupProgress.errors} erros)</span>}
+                </span>
+                <span style={{ color: '#888', fontSize: 12 }}>{Math.round((dupProgress.done / dupProgress.total) * 100)}%</span>
+              </div>
+              <div style={{ background: '#222', borderRadius: 4, height: 6, overflow: 'hidden' }}>
+                <div style={{ height: '100%', borderRadius: 4, background: '#7b1fa2', width: `${Math.round((dupProgress.done / dupProgress.total) * 100)}%`, transition: 'width 0.5s ease' }} />
+              </div>
+              {dupProgress.lastFile && (
+                <p style={{ color: '#555', fontSize: 11, margin: '6px 0 0', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {dupProgress.lastFile}
+                </p>
+              )}
+            </div>
+          )}
+
+          {dupMsg && !dupRunning && (
+            <p style={{ color: dupMsg.startsWith('✅') ? '#4caf50' : '#ff6b6b', fontSize: 13, margin: '8px 0 0' }}>{dupMsg}</p>
           )}
         </div>
       </section>
