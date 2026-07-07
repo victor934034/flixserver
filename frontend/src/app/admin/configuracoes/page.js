@@ -62,8 +62,13 @@ export default function Configuracoes() {
   async function sendNotification(title, body) {
     setSaving('notify');
     try {
-      await api.post('/admin/notify', { title, body });
-      setMsg('Notificação enviada!');
+      const { data } = await api.post('/admin/notify', { title, body });
+      const count = data?.sent ?? 0;
+      if (count === 0) {
+        setMsg('⚠️ Enviado, mas nenhum usuário tem token de notificação (instale o APK mais recente e abra o app)');
+      } else {
+        setMsg(`✅ Notificação enviada para ${count} dispositivo(s)!`);
+      }
     } catch {
       setMsg('Erro ao enviar notificação');
     } finally {

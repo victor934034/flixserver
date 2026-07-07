@@ -517,8 +517,12 @@ router.delete('/preset-avatars/:id', async (req, res) => {
 router.post('/notify', async (req, res) => {
   const { title, body, data = {} } = req.body;
   if (!title || !body) return res.status(400).json({ error: 'title e body são obrigatórios' });
-  sendPushToAll(supabase, title, body, data).catch(() => {});
-  res.json({ ok: true });
+  try {
+    const count = await sendPushToAll(supabase, title, body, data);
+    res.json({ ok: true, sent: count });
+  } catch {
+    res.json({ ok: true, sent: 0 });
+  }
 });
 
 // Gerenciamento de assinaturas de usuários (para o painel admin)

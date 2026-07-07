@@ -25,10 +25,15 @@ async function sendPushToAll(supabase, title, body, data = {}) {
       .from('users')
       .select('push_token')
       .not('push_token', 'is', null);
-    const tokens = (users || []).map(u => u.push_token).filter(Boolean);
-    await sendPush(tokens, title, body, data);
+    const tokens = (users || [])
+      .map(u => u.push_token)
+      .filter(t => t && t.startsWith('ExponentPushToken'));
+    console.log(`[push] sendPushToAll: ${tokens.length} token(s) encontrado(s)`);
+    if (tokens.length) await sendPush(tokens, title, body, data);
+    return tokens.length;
   } catch (e) {
     console.error('[push] sendPushToAll erro:', e.message);
+    return 0;
   }
 }
 

@@ -28,19 +28,16 @@ async function setupAndroidChannel() {
   });
 }
 
-async function requestNotificationPermission() {
-  if (isExpoGo) return;
-  try {
-    const { status } = await Notifications.getPermissionsAsync();
-    if (status !== 'granted') await Notifications.requestPermissionsAsync();
-  } catch {}
-}
-
 async function registerPushToken() {
   if (isExpoGo) return;
   try {
-    const { status } = await Notifications.getPermissionsAsync();
-    if (status !== 'granted') return;
+    const { status: existing } = await Notifications.getPermissionsAsync();
+    let finalStatus = existing;
+    if (existing !== 'granted') {
+      const { status } = await Notifications.requestPermissionsAsync();
+      finalStatus = status;
+    }
+    if (finalStatus !== 'granted') return;
     const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? '77d031ac-6342-4017-8641-8376b1476a3b';
     const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
     if (token) await api.post('/auth/push-token', { token });
@@ -160,7 +157,6 @@ function AppGate() {
 export default function RootLayout() {
   useEffect(() => {
     setupAndroidChannel();
-    requestNotificationPermission();
   }, []);
 
   return (
