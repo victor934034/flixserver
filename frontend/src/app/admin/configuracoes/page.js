@@ -61,6 +61,17 @@ export default function Configuracoes() {
   const dupPollRef = useRef(null);
   const [dupConfirm, setDupConfirm] = useState(false);
 
+  const [audioScanJobId,  setAudioScanJobId]  = useState(null);
+  const [audioScanning,   setAudioScanning]   = useState(false);
+  const [audioScanResult, setAudioScanResult] = useState(null);
+  const [audioFixJobId,   setAudioFixJobId]   = useState(null);
+  const [audioFixing,     setAudioFixing]      = useState(false);
+  const [audioFixProgress,setAudioFixProgress] = useState(null);
+  const [audioMsg,        setAudioMsg]         = useState('');
+  const [audioConfirm,    setAudioConfirm]     = useState(false);
+  const audioScanPollRef = useRef(null);
+  const audioFixPollRef  = useRef(null);
+
   const [verScan, setVerScan] = useState(null);
   const [verScanning, setVerScanning] = useState(false);
   const [verRunning, setVerRunning] = useState(false);
@@ -941,6 +952,153 @@ export default function Configuracoes() {
 
           {dupMsg && !dupRunning && (
             <p style={{ color: dupMsg.startsWith('✅') ? '#4caf50' : '#ff6b6b', fontSize: 13, margin: '8px 0 0' }}>{dupMsg}</p>
+          )}
+        </div>
+      </section>
+
+      {/* ── CORREÇÃO DE ÁUDIO ── */}
+      <section style={{ marginBottom: 40 }}>
+        <h3 style={{ color: '#fff', marginBottom: 16 }}>Correção de Áudio (AAC)</h3>
+        <div style={{ background: '#1a1a1a', borderRadius: 12, padding: 24, border: '1px solid #2a2a2a' }}>
+          <p style={{ color: '#888', fontSize: 13, margin: '0 0 16px' }}>
+            Verifica o codec de áudio de todos os vídeos. Arquivos com AC3, DTS ou outros codecs incompatíveis com o navegador são remixados para AAC automaticamente no servidor, sem re-encodar o vídeo.
+          </p>
+
+          {/* Botão de scan */}
+          {!audioScanResult && !audioScanning && !audioFixing && (
+            <button
+              onClick={async () => {
+                setAudioScanning(true); setAudioMsg(''); setAudioScanResult(null);
+                clearInterval(audioScanPollRef.current);
+                try {
+                  const { data } = await api.post('/admin/audio-fix/scan');
+                  setAudioScanJobId(data.jobId);
+                  audioScanPollRef.current = setInterval(async () => {
+                    try {
+                      const { data: st } = await api.get('/admin/audio-fix/scan-status', { params: { jobId: data.jobId } });
+                      if (!st.running) {
+                        clearInterval(audioScanPollRef.current);
+                        setAudioScanning(false);
+                        setAudioScanResult(st);
+                      }
+                    } catch {}
+                  }, 2000);
+                } catch (e) {
+                  setAudioScanning(false);
+                  setAudioMsg('❌ Erro ao iniciar scan: ' + (e.response?.data?.error || e.message));
+                }
+              }}
+              style={{ padding: '10px 20px', borderRadius: 8, background: '#1565c0', color: '#fff', border: 'none', fontWeight: 700, cursor: 'pointer', fontSize: 14 }}>
+              🔍 Escanear codecs de áudio
+            </button>
+          )}
+
+          {/* Progresso do scan */}
+          {audioScanning && audioScanJobId && (
+            <div style={{ marginTop: 8 }}>
+              <p style={{ color: '#888', fontSize: 13, margin: 0 }}>Escaneando... (pode demorar para catálogos grandes)</p>
+            </div>
+          )}
+
+          {/* Resultado do scan */}
+          {audioScanResult && !audioFixing && (
+            <>
+              <div style={{ marginBottom: 16, padding: '12px 16px', borderRadius: 8, background: '#111', border: '1px solid #333' }}>
+                {audioScanResult.needsFix.length === 0
+                  ? <span style={{ color: '#4caf50', fontSize: 13 }}>✅ Todos os {audioScanResult.total} arquivo(s) já estão em AAC.</span>
+                  : <span style={{ color: '#ff9800', fontSize: 13 }}>
+                      ⚠️ <strong style={{ color: '#fff' }}>{audioScanResult.needsFix.length}</strong> de{' '}
+                      <strong style={{ color: '#fff' }}>{audioScanResult.total}</strong> arquivo(s) com codec incompatível.
+                    </span>
+                }
+              </div>
+
+              {audioScanResult.needsFix.length > 0 && (
+                <div style={{ maxHeight: 260, overflowY: 'auto', marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {audioScanResult.needsFix.map((item, i) => (
+                    <div key={i} style={{ background: '#111', borderRadius: 8, padding: '8px 12px', border: '1px solid #2a2a2a', display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ background: '#b71c1c', color: '#fff', borderRadius: 4, padding: '2px 7px', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>{item.codec.toUpperCase()}</span>
+                      <span style={{ color: '#ccc', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.title}</span>
+                      <span style={{ color: '#555', fontSize: 11, flexShrink: 0 }}>{item.field.replace('file_', '')}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                <button
+                  onClick={() => { setAudioScanResult(null); setAudioMsg(''); setAudioConfirm(false); }}
+                  style={{ padding: '8px 16px', borderRadius: 8, background: '#222', color: '#aaa', border: '1px solid #333', cursor: 'pointer', fontSize: 13 }}>
+                  🔄 Novo scan
+                </button>
+                {audioScanResult.needsFix.length > 0 && (
+                  !audioConfirm
+                    ? <button
+                        onClick={() => setAudioConfirm(true)}
+                        style={{ padding: '10px 20px', borderRadius: 8, background: '#e65100', color: '#fff', border: 'none', fontWeight: 700, cursor: 'pointer' }}>
+                        🔧 Corrigir {audioScanResult.needsFix.length} arquivo(s)
+                      </button>
+                    : <>
+                        <span style={{ color: '#ff6b6b', fontSize: 13, fontWeight: 600 }}>Confirmar? O processo pode levar minutos.</span>
+                        <button
+                          onClick={async () => {
+                            setAudioConfirm(false); setAudioFixing(true); setAudioMsg(''); setAudioFixProgress(null);
+                            clearInterval(audioFixPollRef.current);
+                            try {
+                              const { data } = await api.post('/admin/audio-fix/fix', { items: audioScanResult.needsFix });
+                              setAudioFixJobId(data.jobId);
+                              audioFixPollRef.current = setInterval(async () => {
+                                try {
+                                  const { data: st } = await api.get('/admin/audio-fix/fix-status', { params: { jobId: data.jobId } });
+                                  setAudioFixProgress(st);
+                                  if (!st.running) {
+                                    clearInterval(audioFixPollRef.current);
+                                    setAudioFixing(false); setAudioScanResult(null);
+                                    setAudioMsg(`✅ Concluído: ${st.done} corrigido(s)${st.errors > 0 ? `, ${st.errors} erro(s)` : ''}.`);
+                                  }
+                                } catch {}
+                              }, 3000);
+                            } catch (e) {
+                              setAudioFixing(false);
+                              setAudioMsg('❌ Erro: ' + (e.response?.data?.error || e.message));
+                            }
+                          }}
+                          style={{ padding: '10px 20px', borderRadius: 8, background: '#e65100', color: '#fff', border: 'none', fontWeight: 700, cursor: 'pointer' }}>
+                          Confirmar
+                        </button>
+                        <button onClick={() => setAudioConfirm(false)}
+                          style={{ padding: '8px 16px', borderRadius: 8, background: '#222', color: '#aaa', border: '1px solid #333', cursor: 'pointer', fontSize: 13 }}>
+                          Cancelar
+                        </button>
+                      </>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* Progresso do fix */}
+          {audioFixProgress && audioFixing && (
+            <div style={{ background: '#111', borderRadius: 8, padding: '12px 16px', marginTop: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                <span style={{ color: '#fff', fontSize: 13, fontWeight: 600 }}>
+                  Corrigindo... {audioFixProgress.done} / {audioFixProgress.total}
+                  {audioFixProgress.errors > 0 && <span style={{ color: '#ff6b6b', marginLeft: 8 }}>({audioFixProgress.errors} erros)</span>}
+                </span>
+                <span style={{ color: '#888', fontSize: 12 }}>{Math.round((audioFixProgress.done / audioFixProgress.total) * 100)}%</span>
+              </div>
+              <div style={{ background: '#222', borderRadius: 4, height: 6, overflow: 'hidden' }}>
+                <div style={{ height: '100%', borderRadius: 4, background: '#e65100', width: `${Math.round((audioFixProgress.done / audioFixProgress.total) * 100)}%`, transition: 'width 0.5s ease' }} />
+              </div>
+              {audioFixProgress.current && (
+                <p style={{ color: '#555', fontSize: 11, margin: '6px 0 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  ⚙ {audioFixProgress.current}
+                </p>
+              )}
+            </div>
+          )}
+
+          {audioMsg && !audioFixing && !audioScanning && (
+            <p style={{ color: audioMsg.startsWith('✅') ? '#4caf50' : '#ff6b6b', fontSize: 13, margin: '8px 0 0' }}>{audioMsg}</p>
           )}
         </div>
       </section>

@@ -937,6 +937,158 @@ router.get('/old-versions/status', (req, res) => {
   res.json(job);
 });
 
+// ── CORREÇÃO DE ÁUDIO (AAC) ───────────────────────────────────────────────────
+const { execFile } = require('child_process');
+const os = require('os');
+const path = require('path');
+const fs = require('fs');
+const { spawn: spawnProc } = require('child_process');
+
+const AAC_OK = new Set(['aac', 'mp3', 'opus', 'vorbis', 'flac', 'pcm_s16le', 'pcm_s24le']);
+const audioScanJobs = new Map();
+const audioFixJobs = new Map();
+
+const MOVIE_FIELDS = ['file_dubbing', 'file_subtitled', 'file_cinema', 'file_4k'];
+const EP_FIELDS    = ['file_dubbing', 'file_subtitled', 'file_cinema'];
+
+function probeAudioCodec(url) {
+  return new Promise((resolve) => {
+    execFile('ffprobe', ['-v','quiet','-print_format','json','-show_streams','-select_streams','a:0', url],
+      { timeout: 20_000 },
+      (err, stdout) => {
+        if (err) return resolve(null);
+        try { resolve(JSON.parse(stdout).streams?.[0]?.codec_name || null); }
+        catch { resolve(null); }
+      });
+  });
+}
+
+function remuxToAac(inputUrl, tmpPath) {
+  return new Promise((resolve, reject) => {
+    const ff = spawnProc('ffmpeg', [
+      '-hide_banner', '-loglevel', 'error',
+      '-i', inputUrl,
+      '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-ac', '2',
+      '-movflags', '+faststart', '-y', tmpPath,
+    ]);
+    ff.on('close', code => code === 0 ? resolve() : reject(new Error(`ffmpeg exit ${code}`)));
+    ff.on('error', reject);
+  });
+}
+
+// POST /admin/audio-fix/scan — inicia scan em background
+router.post('/audio-fix/scan', async (req, res) => {
+  const jobId = `audioscan_${Date.now()}`;
+  const job = { total: 0, done: 0, running: true, needsFix: [], errors: 0 };
+  audioScanJobs.set(jobId, job);
+  res.json({ ok: true, jobId });
+
+  (async () => {
+    try {
+      const { getDirectDownloadInfo } = require('../services/backblaze');
+      const CDN = process.env.CDN_BASE_URL || '';
+
+      const [moviesRes, episodesRes] = await Promise.all([
+        supabase.from('movies').select(`id, title, ${MOVIE_FIELDS.join(', ')}`).eq('is_active', true),
+        supabase.from('episodes').select(`id, title, season_number, episode_number, series_id, series:series_id(title), ${EP_FIELDS.join(', ')}`),
+      ]);
+
+      const items = [];
+      for (const m of moviesRes.data || []) {
+        for (const f of MOVIE_FIELDS) {
+          if (m[f]) items.push({ type: 'movie', id: m.id, title: m.title, field: f, url: m[f] });
+        }
+      }
+      for (const e of episodesRes.data || []) {
+        const label = `${e.series?.title || ''} S${String(e.season_number).padStart(2,'0')}E${String(e.episode_number).padStart(2,'0')} - ${e.title}`;
+        for (const f of EP_FIELDS) {
+          if (e[f]) items.push({ type: 'episode', id: e.id, title: label, field: f, url: e[f] });
+        }
+      }
+
+      job.total = items.length;
+
+      const CONCURRENCY = 4;
+      for (let i = 0; i < items.length; i += CONCURRENCY) {
+        const batch = items.slice(i, i + CONCURRENCY);
+        await Promise.all(batch.map(async (item) => {
+          try {
+            const b2Name = CDN ? decodeURIComponent(item.url.replace(CDN + '/', '')) : item.url;
+            const { url: directUrl } = await getDirectDownloadInfo(b2Name);
+            const codec = await probeAudioCodec(directUrl);
+            if (codec && !AAC_OK.has(codec)) {
+              job.needsFix.push({ ...item, codec, b2Name });
+            }
+          } catch { job.errors++; }
+          job.done++;
+        }));
+      }
+    } catch (e) {
+      console.error('[audio-fix scan]', e.message);
+    } finally {
+      job.running = false;
+    }
+  })();
+});
+
+router.get('/audio-fix/scan-status', (req, res) => {
+  const job = audioScanJobs.get(req.query.jobId);
+  if (!job) return res.status(404).json({ error: 'Job não encontrado.' });
+  res.json(job);
+});
+
+// POST /admin/audio-fix/fix — inicia remux em background para a lista recebida
+router.post('/audio-fix/fix', async (req, res) => {
+  const { items } = req.body; // [{type, id, field, url, b2Name, title, codec}]
+  if (!Array.isArray(items) || items.length === 0)
+    return res.status(400).json({ error: 'Lista de itens obrigatória.' });
+
+  const jobId = `audiofix_${Date.now()}`;
+  const job = { total: items.length, done: 0, errors: 0, running: true, current: '' };
+  audioFixJobs.set(jobId, job);
+  res.json({ ok: true, jobId, total: items.length });
+
+  (async () => {
+    const { getDirectDownloadInfo, uploadFileFromPath, deleteFile, getLatestFileVersion } = require('../services/backblaze');
+
+    for (const item of items) {
+      const tmpPath = path.join(os.tmpdir(), `audiofix_${Date.now()}_${path.basename(item.b2Name)}`);
+      job.current = item.title;
+      try {
+        // Pega fileId da versão atual antes de re-upload
+        const oldVer = await getLatestFileVersion(item.b2Name);
+
+        // URL B2 direto para ffmpeg
+        const { url: inputUrl } = await getDirectDownloadInfo(item.b2Name);
+
+        // Remux audio → AAC (arquivo temporário local)
+        await remuxToAac(inputUrl, tmpPath);
+
+        // Re-upload com mesmo nome (cria nova versão no B2)
+        await uploadFileFromPath(tmpPath, item.b2Name, 'video/mp4');
+
+        // Deleta versão antiga
+        if (oldVer) await deleteFile(oldVer.fileId, oldVer.fileName);
+
+        job.done++;
+      } catch (e) {
+        job.errors++;
+        console.error('[audio-fix]', item.title, e.message);
+      } finally {
+        if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+      }
+    }
+    job.running = false;
+    job.current = '';
+  })();
+});
+
+router.get('/audio-fix/fix-status', (req, res) => {
+  const job = audioFixJobs.get(req.query.jobId);
+  if (!job) return res.status(404).json({ error: 'Job não encontrado.' });
+  res.json(job);
+});
+
 // Gerenciamento de assinaturas de usuários (para o painel admin)
 router.get('/users/subscriptions', async (req, res) => {
   try {

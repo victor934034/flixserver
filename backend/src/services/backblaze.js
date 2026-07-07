@@ -178,6 +178,18 @@ async function finishLargeFile(fileId, partSha1Array) {
   return data;
 }
 
+// Retorna a versão mais recente de um arquivo específico (para pegar o fileId antes de re-upload)
+async function getLatestFileVersion(fileName) {
+  const auth = await authorize();
+  const { data } = await axios.post(
+    `${auth.apiUrl}/b2api/v2/b2_list_file_versions`,
+    { bucketId: process.env.BACKBLAZE_BUCKET_ID, startFileName: fileName, maxFileCount: 2 },
+    { headers: { Authorization: auth.authorizationToken }, timeout: B2_API_TIMEOUT }
+  );
+  const file = data.files?.find(f => f.fileName === fileName && f.action === 'upload');
+  return file || null; // { fileId, fileName, contentLength, ... }
+}
+
 // Cancela um large file que foi iniciado mas nunca finalizado
 async function cancelLargeFile(fileId) {
   const auth = await authorize();
@@ -294,7 +306,7 @@ async function uploadFileFromPath(filePath, filename, contentType = 'video/mp4')
   const auth = await authorize();
   const startRes = await axios.post(
     `${auth.apiUrl}/b2api/v2/b2_start_large_file`,
-    { bucketId: process.env.BACKBLAZE_BUCKET_ID, fileName: encodeURIComponent(filename), contentType },
+    { bucketId: process.env.BACKBLAZE_BUCKET_ID, fileName: filename, contentType },
     { headers: { Authorization: auth.authorizationToken }, timeout: B2_API_TIMEOUT }
   );
   const fileId = startRes.data.fileId;
@@ -375,4 +387,4 @@ async function getDirectDownloadInfo(filename) {
 
 const fs = require('fs');
 
-module.exports = { authorize, getUploadUrl, uploadFile, uploadFileFromPath, deleteFile, cancelLargeFile, listFiles, listHlsFiles, setupCors, startLargeFile, getUploadPartUrl, listParts, finishLargeFile, getDirectDownloadInfo, sanitizeFilename, copyFile, listOldVersions };
+module.exports = { authorize, getUploadUrl, uploadFile, uploadFileFromPath, deleteFile, cancelLargeFile, listFiles, listHlsFiles, setupCors, startLargeFile, getUploadPartUrl, listParts, finishLargeFile, getDirectDownloadInfo, sanitizeFilename, copyFile, listOldVersions, getLatestFileVersion };
