@@ -178,6 +178,17 @@ async function finishLargeFile(fileId, partSha1Array) {
   return data;
 }
 
+// Cópia server-side no B2 (sem usar banda — ideal para reorganizar arquivos)
+async function copyFile(sourceFileId, newFileName) {
+  const auth = await authorize();
+  const { data } = await axios.post(
+    `${auth.apiUrl}/b2api/v2/b2_copy_file`,
+    { sourceFileId, fileName: newFileName, destinationBucketId: process.env.BACKBLAZE_BUCKET_ID },
+    { headers: { Authorization: auth.authorizationToken }, timeout: 600_000 } // 10 min para arquivos grandes
+  );
+  return data; // { fileId, fileName, ... }
+}
+
 async function setupCors() {
   try {
     const auth = await authorize();
@@ -303,4 +314,4 @@ async function getDirectDownloadInfo(filename) {
 
 const fs = require('fs');
 
-module.exports = { authorize, getUploadUrl, uploadFile, uploadFileFromPath, deleteFile, listFiles, listHlsFiles, setupCors, startLargeFile, getUploadPartUrl, listParts, finishLargeFile, getDirectDownloadInfo, sanitizeFilename };
+module.exports = { authorize, getUploadUrl, uploadFile, uploadFileFromPath, deleteFile, listFiles, listHlsFiles, setupCors, startLargeFile, getUploadPartUrl, listParts, finishLargeFile, getDirectDownloadInfo, sanitizeFilename, copyFile };

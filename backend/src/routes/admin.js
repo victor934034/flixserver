@@ -610,6 +610,131 @@ router.get('/hls-cleanup/status', (req, res) => {
   res.json(job);
 });
 
+// ── Reorganização de arquivos de séries em pastas no Backblaze ───────────────
+
+// Detecta se um arquivo é episódio de série e retorna o novo path organizado
+// Retorna null se for filme ou já estiver organizado
+function detectSeriesNewPath(fileName) {
+  if (fileName.startsWith('series/')) return null; // já organizado
+  const slash = fileName.lastIndexOf('/');
+  const base = slash >= 0 ? fileName.slice(slash + 1) : fileName;
+  const match = base.match(/^(.+?)[.\s_-]+(?:[SsTt](\d{1,2})[Ee]|(\d{1,2})x)\d{1,2}/i);
+  if (!match) return null;
+  const raw = match[1];
+  const season = parseInt(match[2] || match[3], 10);
+  if (isNaN(season)) return null;
+  const name = raw.replace(/[._]/g, ' ')
+    .replace(/\b(1080p|720p|4k|2160p|bluray|webrip|bdrip|hdrip|hdtv|x264|x265|hevc|aac|br)\b/gi, '')
+    .trim();
+  if (!name) return null;
+  const folderName = name.replace(/\s+/g, '.').replace(/[^a-zA-Z0-9.\-_]/g, '').replace(/\.+/g, '.').replace(/^\.+|\.+$/g, '');
+  if (!folderName) return null;
+  const { sanitizeFilename } = require('../services/backblaze');
+  const seasonFolder = `Temporada${String(season).padStart(2, '0')}`;
+  return `series/${folderName}/Temporada${String(season).padStart(2, '0')}/${sanitizeFilename(base)}`;
+}
+
+function buildCandidates(b2Files, CDN) {
+  const candidates = [];
+  for (const f of b2Files) {
+    const newPath = detectSeriesNewPath(f.fileName);
+    if (!newPath) continue;
+    candidates.push({
+      fileId: f.fileId,
+      oldFileName: f.fileName,
+      newFileName: newPath,
+      oldCdnEncoded: `${CDN}/${encodeURIComponent(f.fileName)}`,
+      oldCdnRaw: `${CDN}/${f.fileName}`,
+      newCdnUrl: `${CDN}/${encodeURIComponent(newPath)}`,
+      size: f.contentLength,
+    });
+  }
+  return candidates;
+}
+
+const reorganizeJobs = new Map();
+
+// Prévia: mostra quais arquivos seriam movidos
+router.get('/reorganize/scan', async (req, res) => {
+  try {
+    const { listFiles } = require('../services/backblaze');
+    const b2Files = await listFiles('', 100000);
+    const candidates = buildCandidates(b2Files, process.env.CDN_BASE_URL);
+    res.json({
+      total: candidates.length,
+      preview: candidates.slice(0, 50).map(c => ({ old: c.oldFileName, new: c.newFileName, size: c.size })),
+      hasMore: candidates.length > 50,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Inicia reorganização em background: copia para novo path → atualiza banco → deleta original
+router.post('/reorganize/start', async (req, res) => {
+  try {
+    const { listFiles, copyFile, deleteFile } = require('../services/backblaze');
+    const CDN = process.env.CDN_BASE_URL;
+
+    const b2Files = await listFiles('', 100000);
+    const candidates = buildCandidates(b2Files, CDN);
+
+    if (candidates.length === 0) {
+      return res.json({ ok: true, jobId: null, total: 0, message: 'Nenhum arquivo para reorganizar.' });
+    }
+
+    const jobId = `reorg_${Date.now()}`;
+    reorganizeJobs.set(jobId, { total: candidates.length, done: 0, errors: 0, running: true, lastFile: '', lastError: '' });
+    res.json({ ok: true, jobId, total: candidates.length });
+
+    (async () => {
+      const job = reorganizeJobs.get(jobId);
+      const MOVIE_FIELDS = ['file_dubbing', 'file_subtitled', 'file_cinema', 'file_4k'];
+      const EP_FIELDS = ['file_dubbing', 'file_subtitled', 'file_cinema'];
+
+      for (const c of candidates) {
+        try {
+          job.lastFile = c.oldFileName;
+
+          // 1. Copia server-side no B2 (sem usar banda)
+          await copyFile(c.fileId, c.newFileName);
+
+          // 2. Atualiza banco — testa URL com e sem encodeURIComponent
+          for (const oldUrl of [c.oldCdnEncoded, c.oldCdnRaw]) {
+            for (const field of MOVIE_FIELDS) {
+              await supabase.from('movies').update({ [field]: c.newCdnUrl }).eq(field, oldUrl);
+            }
+            for (const field of EP_FIELDS) {
+              await supabase.from('episodes').update({ [field]: c.newCdnUrl }).eq(field, oldUrl);
+            }
+          }
+
+          // 3. Deleta original (só depois do banco atualizado)
+          await deleteFile(c.fileId, c.oldFileName);
+
+          job.done++;
+          console.log(`[reorg] ${job.done}/${job.total}: ${c.oldFileName} → ${c.newFileName}`);
+        } catch (e) {
+          job.errors++;
+          job.lastError = `${c.oldFileName}: ${e.message?.slice(0, 100)}`;
+          console.error('[reorg] erro:', c.oldFileName, e.message);
+        }
+      }
+      job.running = false;
+      console.log(`[reorg] concluído: ${job.done} ok, ${job.errors} erros`);
+    })();
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/reorganize/status', (req, res) => {
+  const { jobId } = req.query;
+  const job = reorganizeJobs.get(jobId);
+  if (!job) return res.status(404).json({ error: 'Job não encontrado.' });
+  res.json(job);
+});
+
 // ── Detecção e remoção de arquivos duplicados no Backblaze ───────────────────
 
 const dupDeleteJobs = new Map();

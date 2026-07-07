@@ -45,6 +45,14 @@ export default function Configuracoes() {
   const hlsCleanPollRef = useRef(null);
   const [hlsCleanConfirm, setHlsCleanConfirm] = useState(false);
 
+  const [reorgScan, setReorgScan] = useState(null);
+  const [reorgScanning, setReorgScanning] = useState(false);
+  const [reorgRunning, setReorgRunning] = useState(false);
+  const [reorgMsg, setReorgMsg] = useState('');
+  const [reorgProgress, setReorgProgress] = useState(null);
+  const reorgPollRef = useRef(null);
+  const [reorgConfirm, setReorgConfirm] = useState(false);
+
   const [dupScan, setDupScan] = useState(null);        // resultado do scan de duplicatas
   const [dupScanning, setDupScanning] = useState(false);
   const [dupRunning, setDupRunning] = useState(false);
@@ -597,6 +605,151 @@ export default function Configuracoes() {
                 </p>
               )}
             </div>
+          )}
+        </div>
+      </section>
+
+      {/* ── REORGANIZAR SÉRIES EM PASTAS ── */}
+      <section style={{ marginBottom: 40 }}>
+        <h3 style={{ color: '#fff', marginBottom: 16 }}>Organizar Séries em Pastas</h3>
+        <div style={{ background: '#1a1a1a', borderRadius: 12, padding: 24, border: '1px solid #2a2a2a' }}>
+          <p style={{ color: '#888', fontSize: 13, margin: '0 0 16px' }}>
+            Move arquivos de episódios que estão na raiz do Backblaze para a estrutura de pastas{' '}
+            <code style={{ background: '#111', padding: '1px 5px', borderRadius: 4, color: '#aaa' }}>series/NomeSerie/TemporadaNN/arquivo.mp4</code>.
+            Usa cópia server-side do B2 (sem consumir banda) e atualiza as URLs no banco automaticamente.
+          </p>
+
+          {!reorgScan && !reorgScanning && !reorgRunning && (
+            <button
+              onClick={async () => {
+                setReorgScanning(true);
+                setReorgMsg('');
+                try {
+                  const { data } = await api.get('/admin/reorganize/scan');
+                  setReorgScan(data);
+                } catch (e) {
+                  setReorgMsg('Erro: ' + (e.response?.data?.error || e.message));
+                } finally {
+                  setReorgScanning(false);
+                }
+              }}
+              style={{ padding: '10px 24px', borderRadius: 8, background: '#1565c0', color: '#fff', border: 'none', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>
+              Escanear bucket
+            </button>
+          )}
+          {reorgScanning && <p style={{ color: '#888', fontSize: 13 }}>Escaneando...</p>}
+
+          {reorgScan && !reorgRunning && (
+            <>
+              <div style={{ marginBottom: 12, padding: '12px 16px', borderRadius: 8, background: '#111', border: '1px solid #333' }}>
+                {reorgScan.total === 0
+                  ? <span style={{ color: '#4caf50', fontSize: 13 }}>✅ Todos os episódios já estão organizados em pastas.</span>
+                  : <span style={{ color: '#ff9800', fontSize: 13 }}>
+                      ⚠️ <strong style={{ color: '#fff' }}>{reorgScan.total}</strong> arquivo(s) de série para mover para pastas.
+                    </span>
+                }
+              </div>
+
+              {reorgScan.preview?.length > 0 && (
+                <div style={{ maxHeight: 240, overflowY: 'auto', marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {reorgScan.preview.map((p, i) => (
+                    <div key={i} style={{ background: '#111', borderRadius: 6, padding: '8px 12px', fontSize: 11, fontFamily: 'monospace', color: '#888' }}>
+                      <div style={{ color: '#ff6b6b', marginBottom: 2 }}>− {p.old}</div>
+                      <div style={{ color: '#4caf50' }}>+ {p.new}</div>
+                    </div>
+                  ))}
+                  {reorgScan.hasMore && (
+                    <p style={{ color: '#666', fontSize: 12, margin: '4px 0 0' }}>... e mais {reorgScan.total - 50} arquivo(s)</p>
+                  )}
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                <button
+                  onClick={() => { setReorgScan(null); setReorgMsg(''); setReorgConfirm(false); }}
+                  style={{ padding: '8px 16px', borderRadius: 8, background: '#222', color: '#aaa', border: '1px solid #333', cursor: 'pointer', fontSize: 13 }}>
+                  🔄 Novo scan
+                </button>
+                {reorgScan.total > 0 && (
+                  !reorgConfirm
+                    ? <button
+                        onClick={() => setReorgConfirm(true)}
+                        style={{ padding: '10px 20px', borderRadius: 8, background: '#1b5e20', color: '#fff', border: 'none', fontWeight: 700, cursor: 'pointer' }}>
+                        📁 Reorganizar {reorgScan.total} arquivo(s)
+                      </button>
+                    : <>
+                        <span style={{ color: '#ff9800', fontSize: 13, fontWeight: 600 }}>Isso moverá os arquivos e atualizará o banco. Confirma?</span>
+                        <button
+                          onClick={async () => {
+                            setReorgConfirm(false);
+                            setReorgRunning(true);
+                            setReorgMsg('');
+                            setReorgProgress(null);
+                            clearInterval(reorgPollRef.current);
+                            try {
+                              const { data } = await api.post('/admin/reorganize/start', {}, { timeout: 30000 });
+                              if (!data.jobId) {
+                                setReorgMsg(data.message || '✓ Nenhum arquivo para reorganizar.');
+                                setReorgRunning(false);
+                                return;
+                              }
+                              setReorgProgress({ total: data.total, done: 0, errors: 0, running: true, lastFile: '' });
+                              reorgPollRef.current = setInterval(async () => {
+                                try {
+                                  const s = await api.get(`/admin/reorganize/status?jobId=${data.jobId}`);
+                                  setReorgProgress(s.data);
+                                  if (!s.data.running) {
+                                    clearInterval(reorgPollRef.current);
+                                    setReorgRunning(false);
+                                    setReorgScan(null);
+                                    setReorgMsg(
+                                      s.data.errors === 0
+                                        ? `✅ ${s.data.done} arquivo(s) reorganizado(s) com sucesso!`
+                                        : `${s.data.done} ok, ${s.data.errors} erro(s)${s.data.lastError ? ': ' + s.data.lastError : ''}`
+                                    );
+                                  }
+                                } catch { clearInterval(reorgPollRef.current); setReorgRunning(false); }
+                              }, 3000);
+                            } catch (e) {
+                              setReorgMsg('Erro: ' + (e.response?.data?.error || e.message));
+                              setReorgRunning(false);
+                            }
+                          }}
+                          style={{ padding: '10px 20px', borderRadius: 8, background: '#2e7d32', color: '#fff', border: 'none', fontWeight: 700, cursor: 'pointer' }}>
+                          ✅ Sim, reorganizar
+                        </button>
+                        <button onClick={() => setReorgConfirm(false)}
+                          style={{ padding: '10px 16px', borderRadius: 8, background: '#222', color: '#aaa', border: '1px solid #333', cursor: 'pointer' }}>
+                          Cancelar
+                        </button>
+                      </>
+                )}
+              </div>
+            </>
+          )}
+
+          {reorgProgress && reorgRunning && (
+            <div style={{ background: '#111', borderRadius: 8, padding: '12px 16px', marginTop: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                <span style={{ color: '#fff', fontSize: 13, fontWeight: 600 }}>
+                  Movendo... {reorgProgress.done} / {reorgProgress.total}
+                  {reorgProgress.errors > 0 && <span style={{ color: '#ff6b6b', marginLeft: 8 }}>({reorgProgress.errors} erros)</span>}
+                </span>
+                <span style={{ color: '#888', fontSize: 12 }}>{Math.round((reorgProgress.done / reorgProgress.total) * 100)}%</span>
+              </div>
+              <div style={{ background: '#222', borderRadius: 4, height: 6, overflow: 'hidden' }}>
+                <div style={{ height: '100%', borderRadius: 4, background: '#1b5e20', width: `${Math.round((reorgProgress.done / reorgProgress.total) * 100)}%`, transition: 'width 0.5s ease' }} />
+              </div>
+              {reorgProgress.lastFile && (
+                <p style={{ color: '#555', fontSize: 11, margin: '6px 0 0', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {reorgProgress.lastFile}
+                </p>
+              )}
+            </div>
+          )}
+
+          {reorgMsg && !reorgRunning && (
+            <p style={{ color: reorgMsg.startsWith('✅') ? '#4caf50' : '#ff6b6b', fontSize: 13, margin: '8px 0 0' }}>{reorgMsg}</p>
           )}
         </div>
       </section>
