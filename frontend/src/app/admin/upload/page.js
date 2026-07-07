@@ -34,13 +34,13 @@ function formatETA(seconds) {
 }
 
 // Single-file upload (< 200 MB)
-function doUploadXHR(item, presign, onProgress, signal) {
+function doUploadXHR(item, presign, b2FileName, onProgress, signal) {
   let _bps = 0, _t = Date.now(), _b = 0;
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', presign.uploadUrl);
     xhr.setRequestHeader('Authorization', presign.authorizationToken);
-    xhr.setRequestHeader('X-Bz-File-Name', encodeURIComponent(item.file.name));
+    xhr.setRequestHeader('X-Bz-File-Name', encodeURIComponent(b2FileName || item.file.name));
     xhr.setRequestHeader('Content-Type', item.file.type || 'video/mp4');
     xhr.setRequestHeader('X-Bz-Content-Sha1', 'do_not_verify');
 
@@ -270,9 +270,10 @@ export default function UploadPage() {
             item.resumeState,
           );
         } else {
-          const { data: presign } = await api.get('/upload/presign');
-          await doUploadXHR(item, presign, ({ pct, speed }) => updateFile(item.id, { progress: pct, speed }), controller.signal);
-          cdnUrl = `${presign.cdnBase}/${encodeURIComponent(item.file.name)}`;
+          const { data: presign } = await api.get('/upload/presign', { params: { filename: item.file.name } });
+          const b2Name = presign.b2FileName || item.file.name;
+          await doUploadXHR(item, presign, b2Name, ({ pct, speed }) => updateFile(item.id, { progress: pct, speed }), controller.signal);
+          cdnUrl = `${presign.cdnBase}/${encodeURIComponent(b2Name)}`;
         }
 
         updateFile(item.id, { progress: 92 });

@@ -135,7 +135,7 @@ async function startLargeFile(filename, contentType) {
   const auth = await authorize();
   const { data } = await axios.post(
     `${auth.apiUrl}/b2api/v2/b2_start_large_file`,
-    { bucketId: process.env.BACKBLAZE_BUCKET_ID, fileName: encodeURIComponent(clean), contentType: contentType || 'video/mp4' },
+    { bucketId: process.env.BACKBLAZE_BUCKET_ID, fileName: clean, contentType: contentType || 'video/mp4' },
     { headers: { Authorization: auth.authorizationToken }, timeout: B2_API_TIMEOUT }
   );
   return { ...data, sanitizedFileName: clean };
@@ -293,7 +293,8 @@ async function getDirectDownloadInfo(filename) {
   }
 
   // Inclui o token como query param — FFmpeg acessa sem precisar de header customizado
-  const base = `${auth.downloadUrl}/file/${bucketNameCache}/${encodeURIComponent(filename)}`;
+  const encodedPath = filename.split('/').map(encodeURIComponent).join('/');
+  const base = `${auth.downloadUrl}/file/${bucketNameCache}/${encodedPath}`;
   return {
     url: `${base}?Authorization=${encodeURIComponent(auth.authorizationToken)}`,
     token: auth.authorizationToken,

@@ -12,6 +12,40 @@ const { adminMiddleware } = require('../middleware/admin');
 // Rastreamento de jobs batch em memória (reseta ao reiniciar, mas é suficiente)
 const batchJobs = new Map();
 
+// Constrói o path B2 para séries: series/NomeSerie/TemporadaNN/arquivo.ext
+// Se seriesName + seasonNumber forem fornecidos, usa-os diretamente.
+// Caso contrário, tenta detectar pelo padrão do nome do arquivo (S01E05, T01E05, 1x05).
+function buildSeriesB2Path(filename, seriesName, seasonNumber) {
+  let name = seriesName || null;
+  let season = seasonNumber != null ? parseInt(seasonNumber, 10) : NaN;
+
+  if (!name || isNaN(season)) {
+    const base = path.basename(filename);
+    const match = base.match(/^(.+?)[.\s_-]+(?:[SsTt](\d{1,2})[Ee]|(\d{1,2})x)\d{1,2}/i);
+    if (!match) return null;
+    if (!name) {
+      const raw = match[1];
+      name = raw.replace(/[._]/g, ' ')
+        .replace(/\b(1080p|720p|4k|2160p|bluray|webrip|bdrip|hdrip|hdtv|x264|x265|hevc|aac|br)\b/gi, '')
+        .trim();
+    }
+    if (isNaN(season)) season = parseInt(match[2] || match[3], 10);
+  }
+
+  if (!name || isNaN(season)) return null;
+
+  const folderName = name
+    .replace(/\s+/g, '.')
+    .replace(/[^a-zA-Z0-9.\-_]/g, '')
+    .replace(/\.+/g, '.')
+    .replace(/^\.+|\.+$/g, '');
+  if (!folderName) return null;
+
+  const seasonFolder = `Temporada${String(season).padStart(2, '0')}`;
+  const cleanFile = sanitizeFilename(path.basename(filename));
+  return `series/${folderName}/${seasonFolder}/${cleanFile}`;
+}
+
 // ── Geração de HLS (M3U8 + segmentos .ts) ────────────────────────────────────
 // Converte qualquer vídeo do B2 em HLS — o player começa a tocar em < 1s
 // porque só precisa baixar o primeiro segmento (4s ≈ 500KB) antes de iniciar.
@@ -373,6 +407,8 @@ router.post('/subtitle', upload.single('file'), async (req, res) => {
 });
 
 // Retorna URL pré-assinada para upload direto do frontend
+// Parâmetros opcionais: filename, seriesName, seasonNumber
+// Retorna b2FileName com o path final no B2 (inclui pasta de série, se detectado)
 router.get('/presign', async (req, res) => {
   try {
     if (!process.env.BACKBLAZE_KEY_ID || !process.env.BACKBLAZE_APP_KEY) {
@@ -380,10 +416,16 @@ router.get('/presign', async (req, res) => {
     }
     const { getUploadUrl } = require('../services/backblaze');
     const uploadData = await getUploadUrl();
+    const { filename, seriesName, seasonNumber } = req.query;
+    let b2FileName = null;
+    if (filename) {
+      b2FileName = buildSeriesB2Path(filename, seriesName, seasonNumber) || sanitizeFilename(filename);
+    }
     res.json({
       uploadUrl: uploadData.uploadUrl,
       authorizationToken: uploadData.authorizationToken,
       cdnBase: process.env.CDN_BASE_URL,
+      b2FileName,
     });
   } catch (err) {
     const msg = err.response?.data?.message || err.message;
@@ -396,12 +438,14 @@ router.get('/presign', async (req, res) => {
 });
 
 // Start B2 large file upload (for files > 5GB)
+// Parâmetros opcionais: seriesName, seasonNumber — usados para construir pasta de série
 router.post('/start-large', async (req, res) => {
-  const { filename, contentType } = req.body;
+  const { filename, contentType, seriesName, seasonNumber } = req.body;
   if (!filename) return res.status(400).json({ error: 'filename é obrigatório' });
   try {
     const { startLargeFile } = require('../services/backblaze');
-    const data = await startLargeFile(filename, contentType);
+    const b2Path = buildSeriesB2Path(filename, seriesName, seasonNumber) || filename;
+    const data = await startLargeFile(b2Path, contentType);
     res.json({ fileId: data.fileId, filename: data.sanitizedFileName });
   } catch (err) {
     res.status(500).json({ error: err.response?.data?.message || err.message });

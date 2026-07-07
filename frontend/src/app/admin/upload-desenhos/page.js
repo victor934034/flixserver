@@ -22,13 +22,13 @@ const LARGE_FILE_THRESHOLD = 200 * 1024 * 1024;
 const PART_SIZE = 100 * 1024 * 1024;
 const PARALLEL_PARTS = 6;
 
-function doUploadXHR(file, presign, onProgress, signal) {
+function doUploadXHR(file, presign, b2FileName, onProgress, signal) {
   let _bps = 0, _t = Date.now(), _b = 0;
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', presign.uploadUrl);
     xhr.setRequestHeader('Authorization', presign.authorizationToken);
-    xhr.setRequestHeader('X-Bz-File-Name', encodeURIComponent(file.name));
+    xhr.setRequestHeader('X-Bz-File-Name', encodeURIComponent(b2FileName || file.name));
     xhr.setRequestHeader('Content-Type', file.type || 'video/mp4');
     xhr.setRequestHeader('X-Bz-Content-Sha1', 'do_not_verify');
     xhr.upload.onprogress = (e) => {
@@ -46,7 +46,7 @@ function doUploadXHR(file, presign, onProgress, signal) {
   });
 }
 
-async function doLargeUploadXHR(file, onProgress, signal, resumeState) {
+async function doLargeUploadXHR(file, onProgress, signal, resumeState, seriesInfo) {
   let fileId = resumeState?.fileId;
   let serverFilename = null;
   const totalParts = Math.ceil(file.size / PART_SIZE);
@@ -65,6 +65,7 @@ async function doLargeUploadXHR(file, onProgress, signal, resumeState) {
   } else {
     const { data: { fileId: newId, filename: sName } } = await api.post('/upload/start-large', {
       filename: file.name, contentType: file.type || 'video/mp4',
+      ...(seriesInfo || {}),
     });
     fileId = newId; serverFilename = sName;
     for (let i = 0; i < totalParts; i++) toUpload.push(i);
@@ -127,13 +128,16 @@ async function doLargeUploadXHR(file, onProgress, signal, resumeState) {
   return cdnUrl;
 }
 
-async function uploadFileToCDN(file, onProgress, signal, resumeState) {
+async function uploadFileToCDN(file, onProgress, signal, resumeState, seriesInfo) {
   if (file.size >= LARGE_FILE_THRESHOLD) {
-    return await doLargeUploadXHR(file, onProgress, signal, resumeState);
+    return await doLargeUploadXHR(file, onProgress, signal, resumeState, seriesInfo);
   }
-  const { data: presign } = await api.get('/upload/presign');
-  await doUploadXHR(file, presign, onProgress, signal);
-  return `${presign.cdnBase}/${encodeURIComponent(file.name)}`;
+  const params = { filename: file.name };
+  if (seriesInfo?.seriesName) { params.seriesName = seriesInfo.seriesName; params.seasonNumber = seriesInfo.seasonNumber; }
+  const { data: presign } = await api.get('/upload/presign', { params });
+  const b2FileName = presign.b2FileName || file.name;
+  await doUploadXHR(file, presign, b2FileName, onProgress, signal);
+  return `${presign.cdnBase}/${encodeURIComponent(b2FileName)}`;
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -276,6 +280,7 @@ export default function UploadDesenhosPage() {
           ({ pct, fileId, speed }) => updateEp(ep.episode_number, { progress: pct, speed, resumeState: fileId ? { fileId } : ep.resumeState }),
           controller.signal,
           ep.resumeState,
+          { seriesName: series.title, seasonNumber: selectedSeason.season_number },
         );
 
         // Save episode in DB
