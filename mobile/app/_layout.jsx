@@ -29,21 +29,44 @@ async function setupAndroidChannel() {
 }
 
 async function registerPushToken() {
-  if (isExpoGo) return;
+  const dbg = {
+    execEnv: Constants.executionEnvironment,
+    ownership: Constants.appOwnership,
+    isExpoGo,
+    step: 'start',
+    error: null,
+  };
+  const sendDbg = () => api.post('/auth/push-debug', dbg).catch(() => {});
+
+  if (isExpoGo) { dbg.step = 'skipped-expo-go'; sendDbg(); return; }
+
   try {
     const { status: existing } = await Notifications.getPermissionsAsync();
+    dbg.permStatus = existing;
     let finalStatus = existing;
     if (existing !== 'granted') {
       const { status } = await Notifications.requestPermissionsAsync();
       finalStatus = status;
+      dbg.permStatus = finalStatus;
     }
-    if (finalStatus !== 'granted') return;
+    if (finalStatus !== 'granted') { dbg.step = 'no-permission'; sendDbg(); return; }
+
     const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? '77d031ac-6342-4017-8641-8376b1476a3b';
+    dbg.projectId = projectId;
+    dbg.step = 'getting-token';
     const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
-    if (token) await api.post('/auth/push-token', { token });
+    dbg.tokenPrefix = token ? token.slice(0, 40) : null;
+    dbg.step = token ? 'got-token' : 'no-token';
+
+    if (token) {
+      await api.post('/auth/push-token', { token });
+      dbg.step = 'saved';
+    }
   } catch (e) {
-    console.warn('[push] registerPushToken:', e.message);
+    dbg.step = 'error';
+    dbg.error = e.message;
   }
+  sendDbg();
 }
 
 async function checkSubscription(user, router) {

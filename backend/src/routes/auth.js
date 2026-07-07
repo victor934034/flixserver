@@ -211,6 +211,12 @@ router.get('/me', authMiddleware, async (req, res) => {
   }
 });
 
+// POST /auth/push-debug — diagnóstico enviado pelo app
+router.post('/push-debug', authMiddleware, async (req, res) => {
+  console.log(`[push-debug] user=${req.user.id}`, JSON.stringify(req.body));
+  res.json({ ok: true });
+});
+
 // POST /auth/push-token
 router.post('/push-token', authMiddleware, async (req, res) => {
   const { token } = req.body;
