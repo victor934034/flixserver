@@ -178,6 +178,16 @@ async function finishLargeFile(fileId, partSha1Array) {
   return data;
 }
 
+// Cancela um large file que foi iniciado mas nunca finalizado
+async function cancelLargeFile(fileId) {
+  const auth = await authorize();
+  await axios.post(
+    `${auth.apiUrl}/b2api/v2/b2_cancel_large_file`,
+    { fileId },
+    { headers: { Authorization: auth.authorizationToken }, timeout: B2_API_TIMEOUT }
+  );
+}
+
 // Lista TODAS as versões de cada arquivo (b2_list_file_versions)
 // Retorna pares {keep, old[]} para arquivos com mais de uma versão
 async function listOldVersions() {
@@ -212,15 +222,16 @@ async function listOldVersions() {
   let totalWasted = 0;
 
   for (const [, versions] of byName) {
-    // Separa uploads reais de hide markers (marcadores de deleção)
+    // Separa uploads reais, hide markers e large files não finalizados
     const uploads = versions.filter(v => v.action === 'upload')
       .sort((a, b) => (b.uploadTimestamp || 0) - (a.uploadTimestamp || 0));
     const hides = versions.filter(v => v.action === 'hide');
+    const starts = versions.filter(v => v.action === 'start'); // uploads incompletos (multipart)
 
-    // Mantém o upload mais recente; deleta os demais e todos os hide markers
-    const old = [...uploads.slice(1), ...hides];
+    // Mantém o upload mais recente; deleta os demais, hide markers e starts
+    const old = [...uploads.slice(1), ...hides, ...starts];
     for (const f of old) {
-      toDelete.push({ fileId: f.fileId, fileName: f.fileName, size: f.contentLength || 0 });
+      toDelete.push({ fileId: f.fileId, fileName: f.fileName, size: f.contentLength || 0, action: f.action });
       totalWasted += f.contentLength || 0;
     }
   }
@@ -364,4 +375,4 @@ async function getDirectDownloadInfo(filename) {
 
 const fs = require('fs');
 
-module.exports = { authorize, getUploadUrl, uploadFile, uploadFileFromPath, deleteFile, listFiles, listHlsFiles, setupCors, startLargeFile, getUploadPartUrl, listParts, finishLargeFile, getDirectDownloadInfo, sanitizeFilename, copyFile, listOldVersions };
+module.exports = { authorize, getUploadUrl, uploadFile, uploadFileFromPath, deleteFile, cancelLargeFile, listFiles, listHlsFiles, setupCors, startLargeFile, getUploadPartUrl, listParts, finishLargeFile, getDirectDownloadInfo, sanitizeFilename, copyFile, listOldVersions };

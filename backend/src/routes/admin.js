@@ -910,11 +910,15 @@ router.post('/old-versions/delete', async (req, res) => {
   res.json({ ok: true, jobId, total: files.length });
 
   (async () => {
-    const { deleteFile } = require('../services/backblaze');
+    const { deleteFile, cancelLargeFile } = require('../services/backblaze');
     const job = oldVerJobs.get(jobId);
     for (const f of files) {
       try {
-        await deleteFile(f.fileId, f.fileName);
+        if (f.action === 'start') {
+          await cancelLargeFile(f.fileId);
+        } else {
+          await deleteFile(f.fileId, f.fileName);
+        }
         job.done++;
       } catch (e) {
         job.errors++;
