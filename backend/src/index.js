@@ -22,6 +22,7 @@ const suggestionsRouter = require('./routes/suggestions');
 const streamsRouter = require('./routes/streams');
 const likesRouter = require('./routes/likes');
 const iptvRouter = require('./routes/iptv');
+const remuxRouter = require('./routes/remux');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -71,6 +72,7 @@ app.use('/api/suggestions', suggestionsRouter);
 app.use('/api/streams', streamsRouter);
 app.use('/api/likes', likesRouter);
 app.use('/api/iptv', iptvRouter);
+app.use('/api/remux', remuxRouter);
 
 app.get('/api/preset-avatars', async (req, res) => {
   const { supabase } = require('./services/supabase');

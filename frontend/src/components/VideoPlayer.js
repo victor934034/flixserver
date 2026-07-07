@@ -46,6 +46,7 @@ export default function VideoPlayer({ content, onProgress }) {
   const [showControls, setShowControls] = useState(true);
   const [currentTime,  setCurrentTime]  = useState(0);
   const [audioWarning, setAudioWarning] = useState(false);
+  const [remuxActive, setRemuxActive]   = useState(false);
   const [castStatus,   setCastStatus]   = useState('idle');
   const [flashIcon,    setFlashIcon]    = useState(null); // 'play' | 'pause'
   const [hoverTime,    setHoverTime]    = useState(null); // { pct, time }
@@ -64,7 +65,9 @@ export default function VideoPlayer({ content, onProgress }) {
     { key: 'es',   label: 'Espanhol',  url: content.subtitle_es },
   ].filter(s => s.key === 'none' || s.url);
 
-  const currentUrl = versions.find(v => v.key === version)?.url || versions[0]?.url;
+  const rawUrl    = versions.find(v => v.key === version)?.url || versions[0]?.url;
+  const remuxUrl  = rawUrl ? `/api/remux?url=${encodeURIComponent(rawUrl)}` : null;
+  const currentUrl = remuxActive ? remuxUrl : rawUrl;
 
   const showCtrl = useCallback(() => {
     setShowControls(true);
@@ -194,9 +197,25 @@ export default function VideoPlayer({ content, onProgress }) {
     }
   }
 
+  function activateRemux() {
+    const saved = videoRef.current?.currentTime || 0;
+    setRemuxActive(true);
+    setAudioWarning(false);
+    setTimeout(() => {
+      videoRef.current?.addEventListener('loadedmetadata', function onReady() {
+        const v = videoRef.current;
+        if (!v) return;
+        v.currentTime = saved;
+        if (playing) v.play();
+        v.removeEventListener('loadedmetadata', onReady);
+      });
+    }, 50);
+  }
+
   function changeVersion(key) {
     const saved = videoRef.current?.currentTime || 0;
     setVersion(key);
+    setRemuxActive(false);
     setAudioWarning(false);
     setTimeout(() => {
       videoRef.current?.addEventListener('loadedmetadata', function onReady() {
@@ -265,8 +284,13 @@ export default function VideoPlayer({ content, onProgress }) {
 
       {audioWarning && (
         <div className={styles.audioWarning}>
-          ⚠ Sem áudio — codec AAC incompatível. Use <strong>Chrome</strong> ou <strong>Edge</strong>,
-          ou transmita para a TV com o botão abaixo.
+          ⚠ Codec de áudio incompatível com este navegador.{' '}
+          <button
+            onClick={(e) => { e.stopPropagation(); activateRemux(); }}
+            style={{ background: '#E50914', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', fontWeight: 700, fontSize: 13, marginLeft: 8 }}
+          >
+            Corrigir áudio
+          </button>
         </div>
       )}
 
