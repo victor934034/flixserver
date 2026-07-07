@@ -215,7 +215,12 @@ router.get('/me', authMiddleware, async (req, res) => {
 router.post('/push-token', authMiddleware, async (req, res) => {
   const { token } = req.body;
   if (!token) return res.status(400).json({ error: 'token é obrigatório' });
-  await supabase.from('users').update({ push_token: token }).eq('id', req.user.id);
+  const { error } = await supabase.from('users').update({ push_token: token }).eq('id', req.user.id);
+  if (error) {
+    console.error('[push-token] erro ao salvar token:', error.message);
+    return res.status(500).json({ error: error.message });
+  }
+  console.log(`[push-token] token salvo para user ${req.user.id}: ${token.slice(0, 30)}...`);
   res.json({ ok: true });
 });
 

@@ -36,12 +36,17 @@ export default function Configuracoes() {
   const [hlsProgress, setHlsProgress] = useState(null);
   const hlsPollRef = useRef(null);
 
+  const [pushTokenCount, setPushTokenCount] = useState(null);
+
   useEffect(() => {
     api.get('/settings').then(r => setSettings(r.data)).finally(() => setLoading(false));
     api.get('/payments/plans/all')
       .then(r => setPlans(r.data?.length ? r.data : DEFAULT_PLANS))
       .catch(() => setPlans(DEFAULT_PLANS))
       .finally(() => setPlansLoading(false));
+    api.get('/admin/push-tokens/count')
+      .then(r => setPushTokenCount(r.data))
+      .catch(() => {});
   }, []);
 
   async function toggle(key, currentValue) {
@@ -461,6 +466,14 @@ export default function Configuracoes() {
       <section>
         <h3 style={{ color: '#fff', marginBottom: 16 }}>Notificações Push</h3>
         <div style={{ background: '#1a1a1a', borderRadius: 12, padding: 24, border: '1px solid #2a2a2a' }}>
+          <div style={{ marginBottom: 16, padding: '10px 14px', borderRadius: 8, background: pushTokenCount === null ? '#111' : pushTokenCount?.valid > 0 ? '#0d2a0d' : '#2a1a0d', border: '1px solid #333', fontSize: 13 }}>
+            {pushTokenCount === null
+              ? <span style={{ color: '#666' }}>Carregando tokens...</span>
+              : pushTokenCount.valid === 0
+                ? <span style={{ color: '#ff9800' }}>⚠️ Nenhum dispositivo registrado — instale o APK mais recente e abra o app para registrar.</span>
+                : <span style={{ color: '#4caf50' }}>✅ {pushTokenCount.valid} dispositivo(s) com notificação ativa</span>
+            }
+          </div>
           <p style={{ color: '#888', fontSize: 13, marginBottom: 16 }}>
             Notificações são enviadas automaticamente quando você adiciona filmes, séries ou episódios. Também é possível enviar manualmente.
           </p>

@@ -513,6 +513,21 @@ router.delete('/preset-avatars/:id', async (req, res) => {
   res.json({ success: true });
 });
 
+// Quantidade de tokens de push registrados
+router.get('/push-tokens/count', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .select('push_token')
+      .not('push_token', 'is', null);
+    if (error) return res.status(500).json({ error: error.message });
+    const valid = (data || []).filter(u => u.push_token?.startsWith('ExponentPushToken'));
+    res.json({ total: (data || []).length, valid: valid.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Notificação push manual para todos os usuários
 router.post('/notify', async (req, res) => {
   const { title, body, data = {} } = req.body;
