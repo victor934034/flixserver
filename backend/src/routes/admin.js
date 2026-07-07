@@ -540,6 +540,76 @@ router.post('/notify', async (req, res) => {
   }
 });
 
+// ── Limpeza de arquivos HLS (.ts + .m3u8) do Backblaze ───────────────────────
+
+const hlsCleanJobs = new Map();
+
+// Escaneia o bucket e retorna a contagem + tamanho total dos arquivos HLS
+router.get('/hls-cleanup/scan', async (req, res) => {
+  try {
+    const { listHlsFiles } = require('../services/backblaze');
+    const files = await listHlsFiles();
+    const totalBytes = files.reduce((s, f) => s + (f.contentLength || 0), 0);
+    const totalMB = (totalBytes / 1024 / 1024).toFixed(1);
+    const totalGB = (totalBytes / 1024 / 1024 / 1024).toFixed(2);
+    res.json({
+      count: files.length,
+      totalBytes,
+      totalMB: Number(totalMB),
+      totalGB: Number(totalGB),
+      display: totalBytes >= 1024 * 1024 * 1024 ? `${totalGB} GB` : `${totalMB} MB`,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Inicia a deleção em background e retorna um jobId para polling
+router.post('/hls-cleanup/delete', async (req, res) => {
+  try {
+    const { listHlsFiles, deleteFile } = require('../services/backblaze');
+    const files = await listHlsFiles();
+    if (files.length === 0) return res.json({ ok: true, jobId: null, total: 0, message: 'Nenhum arquivo HLS encontrado.' });
+
+    const jobId = `hls_clean_${Date.now()}`;
+    hlsCleanJobs.set(jobId, { total: files.length, done: 0, errors: 0, running: true, lastFile: '', lastError: '' });
+    res.json({ ok: true, jobId, total: files.length });
+
+    // Deleta em background com concorrência de 10
+    (async () => {
+      const job = hlsCleanJobs.get(jobId);
+      const CONCURRENCY = 10;
+      for (let i = 0; i < files.length; i += CONCURRENCY) {
+        const batch = files.slice(i, i + CONCURRENCY);
+        await Promise.allSettled(batch.map(async f => {
+          try {
+            await deleteFile(f.fileId, f.fileName);
+            job.done++;
+            job.lastFile = f.fileName;
+          } catch (e) {
+            job.errors++;
+            job.lastError = `${f.fileName}: ${e.message?.slice(0, 80)}`;
+            console.error('[hls-cleanup] erro ao deletar', f.fileName, e.message);
+          }
+        }));
+      }
+      job.running = false;
+      console.log(`[hls-cleanup] concluído: ${job.done} deletados, ${job.errors} erros`);
+    })();
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Progresso do job de limpeza HLS
+router.get('/hls-cleanup/status', (req, res) => {
+  const { jobId } = req.query;
+  if (!jobId) return res.status(400).json({ error: 'jobId obrigatório' });
+  const job = hlsCleanJobs.get(jobId);
+  if (!job) return res.status(404).json({ error: 'Job não encontrado.' });
+  res.json(job);
+});
+
 // Gerenciamento de assinaturas de usuários (para o painel admin)
 router.get('/users/subscriptions', async (req, res) => {
   try {

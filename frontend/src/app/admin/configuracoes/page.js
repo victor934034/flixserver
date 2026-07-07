@@ -38,6 +38,13 @@ export default function Configuracoes() {
 
   const [pushTokenCount, setPushTokenCount] = useState(null);
 
+  const [hlsCleanScan, setHlsCleanScan] = useState(null);   // { count, display }
+  const [hlsCleanRunning, setHlsCleanRunning] = useState(false);
+  const [hlsCleanMsg, setHlsCleanMsg] = useState('');
+  const [hlsCleanProgress, setHlsCleanProgress] = useState(null);
+  const hlsCleanPollRef = useRef(null);
+  const [hlsCleanConfirm, setHlsCleanConfirm] = useState(false);
+
   useEffect(() => {
     api.get('/settings').then(r => setSettings(r.data)).finally(() => setLoading(false));
     api.get('/payments/plans/all')
@@ -46,6 +53,9 @@ export default function Configuracoes() {
       .finally(() => setPlansLoading(false));
     api.get('/admin/push-tokens/count')
       .then(r => setPushTokenCount(r.data))
+      .catch(() => {});
+    api.get('/admin/hls-cleanup/scan')
+      .then(r => setHlsCleanScan(r.data))
       .catch(() => {});
   }, []);
 
@@ -459,6 +469,127 @@ export default function Configuracoes() {
               </div>
             )}
           </div>
+        </div>
+      </section>
+
+      {/* ── LIMPEZA HLS ── */}
+      <section style={{ marginBottom: 40 }}>
+        <h3 style={{ color: '#fff', marginBottom: 16 }}>Limpeza de Arquivos HLS</h3>
+        <div style={{ background: '#1a1a1a', borderRadius: 12, padding: 24, border: '1px solid #2a2a2a' }}>
+          <p style={{ color: '#888', fontSize: 13, margin: '0 0 16px' }}>
+            Arquivos <strong style={{ color: '#fff' }}>.ts</strong> e <strong style={{ color: '#fff' }}>.m3u8</strong> do HLS ocupam muito espaço no Backblaze.
+            Se os vídeos já têm faststart, esses arquivos são desnecessários e podem ser deletados.
+          </p>
+
+          {/* Resultado do scan */}
+          <div style={{ marginBottom: 16, padding: '12px 16px', borderRadius: 8, background: '#111', border: '1px solid #333' }}>
+            {hlsCleanScan === null
+              ? <span style={{ color: '#666', fontSize: 13 }}>Escaneando bucket...</span>
+              : hlsCleanScan.count === 0
+                ? <span style={{ color: '#4caf50', fontSize: 13 }}>✅ Nenhum arquivo HLS encontrado — bucket já está limpo.</span>
+                : <span style={{ color: '#ff9800', fontSize: 13 }}>
+                    ⚠️ <strong style={{ color: '#fff' }}>{hlsCleanScan.count.toLocaleString()}</strong> arquivos HLS encontrados ocupando{' '}
+                    <strong style={{ color: '#E50914' }}>{hlsCleanScan.display}</strong> no Backblaze.
+                  </span>
+            }
+          </div>
+
+          {/* Botões */}
+          {hlsCleanScan?.count > 0 && !hlsCleanRunning && (
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+              <button
+                onClick={() => { setHlsCleanScan(null); api.get('/admin/hls-cleanup/scan').then(r => setHlsCleanScan(r.data)).catch(() => {}); }}
+                style={{ padding: '8px 16px', borderRadius: 8, background: '#222', color: '#aaa', border: '1px solid #333', cursor: 'pointer', fontSize: 13 }}>
+                🔄 Atualizar contagem
+              </button>
+              {!hlsCleanConfirm
+                ? <button
+                    onClick={() => setHlsCleanConfirm(true)}
+                    style={{ padding: '10px 20px', borderRadius: 8, background: '#7b1fa2', color: '#fff', border: 'none', fontWeight: 700, cursor: 'pointer' }}>
+                    🗑️ Deletar todos os arquivos HLS
+                  </button>
+                : <>
+                    <span style={{ color: '#ff6b6b', fontSize: 13, fontWeight: 600 }}>Tem certeza? Isso não pode ser desfeito.</span>
+                    <button
+                      onClick={async () => {
+                        setHlsCleanConfirm(false);
+                        setHlsCleanRunning(true);
+                        setHlsCleanMsg('');
+                        setHlsCleanProgress(null);
+                        clearInterval(hlsCleanPollRef.current);
+                        try {
+                          const { data } = await api.post('/admin/hls-cleanup/delete');
+                          if (!data.jobId) {
+                            setHlsCleanMsg('Nenhum arquivo encontrado.');
+                            setHlsCleanRunning(false);
+                            return;
+                          }
+                          hlsCleanPollRef.current = setInterval(async () => {
+                            try {
+                              const s = await api.get(`/admin/hls-cleanup/status?jobId=${data.jobId}`);
+                              setHlsCleanProgress(s.data);
+                              if (!s.data.running) {
+                                clearInterval(hlsCleanPollRef.current);
+                                setHlsCleanRunning(false);
+                                setHlsCleanScan({ count: 0, display: '0 MB' });
+                                setHlsCleanMsg(
+                                  s.data.errors === 0
+                                    ? `✅ ${s.data.done.toLocaleString()} arquivo(s) deletados com sucesso!`
+                                    : `${s.data.done.toLocaleString()} deletados, ${s.data.errors} erros.`
+                                );
+                              }
+                            } catch { clearInterval(hlsCleanPollRef.current); setHlsCleanRunning(false); }
+                          }, 2000);
+                        } catch (e) {
+                          setHlsCleanMsg('Erro: ' + (e.response?.data?.error || e.message));
+                          setHlsCleanRunning(false);
+                        }
+                      }}
+                      style={{ padding: '10px 20px', borderRadius: 8, background: '#c62828', color: '#fff', border: 'none', fontWeight: 700, cursor: 'pointer' }}>
+                      ✅ Sim, deletar tudo
+                    </button>
+                    <button onClick={() => setHlsCleanConfirm(false)}
+                      style={{ padding: '10px 16px', borderRadius: 8, background: '#222', color: '#aaa', border: '1px solid #333', cursor: 'pointer' }}>
+                      Cancelar
+                    </button>
+                  </>
+              }
+            </div>
+          )}
+
+          {/* Mensagem final */}
+          {hlsCleanMsg && !hlsCleanRunning && (
+            <p style={{ color: hlsCleanMsg.startsWith('✅') ? '#4caf50' : '#ff6b6b', fontSize: 13, margin: '8px 0 0' }}>
+              {hlsCleanMsg}
+            </p>
+          )}
+
+          {/* Barra de progresso durante deleção */}
+          {hlsCleanProgress && hlsCleanRunning && (
+            <div style={{ background: '#111', borderRadius: 8, padding: '12px 16px', marginTop: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                <span style={{ color: '#fff', fontSize: 13, fontWeight: 600 }}>
+                  Deletando... {hlsCleanProgress.done.toLocaleString()} / {hlsCleanProgress.total.toLocaleString()}
+                  {hlsCleanProgress.errors > 0 && <span style={{ color: '#ff6b6b', marginLeft: 8 }}>({hlsCleanProgress.errors} erros)</span>}
+                </span>
+                <span style={{ color: '#888', fontSize: 12 }}>
+                  {Math.round((hlsCleanProgress.done / hlsCleanProgress.total) * 100)}%
+                </span>
+              </div>
+              <div style={{ background: '#222', borderRadius: 4, height: 6, overflow: 'hidden' }}>
+                <div style={{
+                  height: '100%', borderRadius: 4, background: '#7b1fa2',
+                  width: `${Math.round((hlsCleanProgress.done / hlsCleanProgress.total) * 100)}%`,
+                  transition: 'width 0.5s ease',
+                }} />
+              </div>
+              {hlsCleanProgress.lastFile && (
+                <p style={{ color: '#555', fontSize: 11, margin: '6px 0 0', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {hlsCleanProgress.lastFile}
+                </p>
+              )}
+            </div>
+          )}
         </div>
       </section>
 

@@ -82,6 +82,29 @@ async function deleteFile(fileId, fileName) {
   );
 }
 
+// Lista todos os arquivos HLS (.ts e .m3u8) sem filtro de extensão de vídeo
+async function listHlsFiles() {
+  const auth = await authorize();
+  const allFiles = [];
+  let nextFileName = null;
+
+  do {
+    const body = { bucketId: process.env.BACKBLAZE_BUCKET_ID, maxFileCount: 1000 };
+    if (nextFileName) body.startFileName = nextFileName;
+
+    const { data } = await axios.post(
+      `${auth.apiUrl}/b2api/v2/b2_list_file_names`,
+      body,
+      { headers: { Authorization: auth.authorizationToken }, timeout: B2_API_TIMEOUT }
+    );
+
+    allFiles.push(...data.files.filter(f => /\.(ts|m3u8)$/i.test(f.fileName)));
+    nextFileName = data.nextFileName;
+  } while (nextFileName);
+
+  return allFiles;
+}
+
 const VIDEO_EXTENSIONS = /\.(mp4|mkv|avi|mov|m4v|webm|ts|wmv)$/i;
 
 async function listFiles(prefix = '', limit = 1000) {
@@ -279,4 +302,4 @@ async function getDirectDownloadInfo(filename) {
 
 const fs = require('fs');
 
-module.exports = { authorize, getUploadUrl, uploadFile, uploadFileFromPath, deleteFile, listFiles, setupCors, startLargeFile, getUploadPartUrl, listParts, finishLargeFile, getDirectDownloadInfo, sanitizeFilename };
+module.exports = { authorize, getUploadUrl, uploadFile, uploadFileFromPath, deleteFile, listFiles, listHlsFiles, setupCors, startLargeFile, getUploadPartUrl, listParts, finishLargeFile, getDirectDownloadInfo, sanitizeFilename };
