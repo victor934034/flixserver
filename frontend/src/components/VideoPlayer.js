@@ -101,7 +101,10 @@ export default function VideoPlayer({ content, onProgress }) {
       if (video.audioTracks && video.audioTracks.length === 0) setAudioWarning(true);
     };
     const onEnded  = () => setPlaying(false);
-    const onError  = () => { if (video.error?.code === 4) setAudioWarning(true); };
+    const onError  = () => {
+      // code 4 = MEDIA_ERR_SRC_NOT_SUPPORTED (codec de áudio ou vídeo incompatível)
+      if (video.error?.code === 4 || video.error?.code === 3) setAudioWarning(true);
+    };
 
     video.addEventListener('timeupdate', onTimeUpdate);
     video.addEventListener('loadedmetadata', onLoaded);
@@ -284,7 +287,7 @@ export default function VideoPlayer({ content, onProgress }) {
 
       {audioWarning && (
         <div className={styles.audioWarning}>
-          ⚠ Codec de áudio incompatível com este navegador.{' '}
+          ⚠ Codec incompatível com este navegador (vídeo H.265 ou áudio AC3).{' '}
           <button
             onClick={(e) => { e.stopPropagation(); activateRemux(); }}
             style={{ background: '#E50914', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', fontWeight: 700, fontSize: 13, marginLeft: 8 }}

@@ -1005,20 +1005,28 @@ export default function Configuracoes() {
             <>
               <div style={{ marginBottom: 16, padding: '12px 16px', borderRadius: 8, background: '#111', border: '1px solid #333' }}>
                 {audioScanResult.needsFix.length === 0
-                  ? <span style={{ color: '#4caf50', fontSize: 13 }}>✅ Todos os {audioScanResult.total} arquivo(s) já estão em AAC.</span>
-                  : <span style={{ color: '#ff9800', fontSize: 13 }}>
-                      ⚠️ <strong style={{ color: '#fff' }}>{audioScanResult.needsFix.length}</strong> de{' '}
-                      <strong style={{ color: '#fff' }}>{audioScanResult.total}</strong> arquivo(s) com codec incompatível.
-                    </span>
+                  ? <span style={{ color: '#4caf50', fontSize: 13 }}>✅ Todos os {audioScanResult.total} arquivo(s) já estão com codecs compatíveis.</span>
+                  : (() => {
+                      const hevc = audioScanResult.needsFix.filter(f => f.needsTranscode).length;
+                      const quick = audioScanResult.needsFix.length - hevc;
+                      return <span style={{ color: '#ff9800', fontSize: 13 }}>
+                        ⚠️ <strong style={{ color: '#fff' }}>{audioScanResult.needsFix.length}</strong> de{' '}
+                        <strong style={{ color: '#fff' }}>{audioScanResult.total}</strong> arquivo(s) com problema.
+                        {quick > 0 && <span style={{ color: '#4fc3f7' }}> {quick} remux rápido.</span>}
+                        {hevc > 0 && <span style={{ color: '#ff6b6b' }}> {hevc} HEVC (requer transcode lento).</span>}
+                      </span>;
+                    })()
                 }
               </div>
 
               {audioScanResult.needsFix.length > 0 && (
                 <div style={{ maxHeight: 260, overflowY: 'auto', marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {audioScanResult.needsFix.map((item, i) => (
-                    <div key={i} style={{ background: '#111', borderRadius: 8, padding: '8px 12px', border: '1px solid #2a2a2a', display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <span style={{ background: '#b71c1c', color: '#fff', borderRadius: 4, padding: '2px 7px', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>{item.codec.toUpperCase()}</span>
-                      <span style={{ color: '#ccc', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.title}</span>
+                    <div key={i} style={{ background: '#111', borderRadius: 8, padding: '8px 12px', border: `1px solid ${item.needsTranscode ? '#4a1a1a' : '#2a2a2a'}`, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      {item.badVideo && <span style={{ background: item.needsTranscode ? '#b71c1c' : '#e65100', color: '#fff', borderRadius: 4, padding: '2px 7px', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>VIDEO:{item.videoCodec?.toUpperCase()}</span>}
+                      {item.badAudio && <span style={{ background: '#6a0dad', color: '#fff', borderRadius: 4, padding: '2px 7px', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>AUDIO:{item.audioCodec?.toUpperCase()}</span>}
+                      {item.needsTranscode && <span style={{ background: '#333', color: '#ff6b6b', borderRadius: 4, padding: '2px 6px', fontSize: 10, flexShrink: 0 }}>⚠ transcode lento</span>}
+                      <span style={{ color: '#ccc', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{item.title}</span>
                       <span style={{ color: '#555', fontSize: 11, flexShrink: 0 }}>{item.field.replace('file_', '')}</span>
                     </div>
                   ))}
@@ -1036,7 +1044,7 @@ export default function Configuracoes() {
                     ? <button
                         onClick={() => setAudioConfirm(true)}
                         style={{ padding: '10px 20px', borderRadius: 8, background: '#e65100', color: '#fff', border: 'none', fontWeight: 700, cursor: 'pointer' }}>
-                        🔧 Corrigir {audioScanResult.needsFix.length} arquivo(s)
+                        🔧 Corrigir {audioScanResult.needsFix.filter(f => !f.needsTranscode).length} arquivo(s) rápidos{audioScanResult.needsFix.some(f => f.needsTranscode) ? ' (HEVC ignorado)' : ''}
                       </button>
                     : <>
                         <span style={{ color: '#ff6b6b', fontSize: 13, fontWeight: 600 }}>Confirmar? O processo pode levar minutos.</span>

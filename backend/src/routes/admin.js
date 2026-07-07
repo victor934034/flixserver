@@ -944,33 +944,51 @@ const path = require('path');
 const fs = require('fs');
 const { spawn: spawnProc } = require('child_process');
 
-const AAC_OK = new Set(['aac', 'mp3', 'opus', 'vorbis', 'flac', 'pcm_s16le', 'pcm_s24le']);
+const AAC_OK    = new Set(['aac', 'mp3', 'opus', 'vorbis', 'flac', 'pcm_s16le', 'pcm_s24le']);
+const VIDEO_OK  = new Set(['h264', 'vp8', 'vp9', 'av1', 'theora']);
 const audioScanJobs = new Map();
 const audioFixJobs = new Map();
 
 const MOVIE_FIELDS = ['file_dubbing', 'file_subtitled', 'file_cinema', 'file_4k'];
 const EP_FIELDS    = ['file_dubbing', 'file_subtitled', 'file_cinema'];
 
-function probeAudioCodec(url) {
+// Retorna {audioCodec, videoCodec, hasFaststart} de uma URL via ffprobe
+function probeFile(url) {
   return new Promise((resolve) => {
-    execFile('ffprobe', ['-v','quiet','-print_format','json','-show_streams','-select_streams','a:0', url],
-      { timeout: 20_000 },
-      (err, stdout) => {
-        if (err) return resolve(null);
-        try { resolve(JSON.parse(stdout).streams?.[0]?.codec_name || null); }
-        catch { resolve(null); }
-      });
+    execFile('ffprobe', [
+      '-v', 'quiet', '-print_format', 'json',
+      '-show_streams', '-show_format', url,
+    ], { timeout: 30_000 }, (err, stdout) => {
+      if (err) return resolve({ audioCodec: null, videoCodec: null, hasFaststart: null });
+      try {
+        const data = JSON.parse(stdout);
+        const audio = data.streams?.find(s => s.codec_type === 'audio');
+        const video = data.streams?.find(s => s.codec_type === 'video');
+        // faststart: moov atom vem antes dos dados → start_time próximo de 0
+        // ffprobe não expõe isso diretamente, mas podemos inferir pelo format tag
+        const tags = data.format?.tags || {};
+        const hasFaststart = tags['major_brand'] !== undefined; // heurística básica
+        resolve({
+          audioCodec: audio?.codec_name || null,
+          videoCodec: video?.codec_name || null,
+          hasFaststart,
+        });
+      } catch { resolve({ audioCodec: null, videoCodec: null, hasFaststart: null }); }
+    });
   });
 }
 
-function remuxToAac(inputUrl, tmpPath) {
+function remuxFile(inputUrl, tmpPath, { fixAudio, fixFaststart }) {
+  const args = ['-hide_banner', '-loglevel', 'error', '-i', inputUrl];
+  args.push('-c:v', 'copy');
+  if (fixAudio) {
+    args.push('-c:a', 'aac', '-b:a', '192k', '-ac', '2');
+  } else {
+    args.push('-c:a', 'copy');
+  }
+  args.push('-movflags', '+faststart', '-y', tmpPath);
   return new Promise((resolve, reject) => {
-    const ff = spawnProc('ffmpeg', [
-      '-hide_banner', '-loglevel', 'error',
-      '-i', inputUrl,
-      '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-ac', '2',
-      '-movflags', '+faststart', '-y', tmpPath,
-    ]);
+    const ff = spawnProc('ffmpeg', args);
     ff.on('close', code => code === 0 ? resolve() : reject(new Error(`ffmpeg exit ${code}`)));
     ff.on('error', reject);
   });
@@ -1015,9 +1033,17 @@ router.post('/audio-fix/scan', async (req, res) => {
           try {
             const b2Name = CDN ? decodeURIComponent(item.url.replace(CDN + '/', '')) : item.url;
             const { url: directUrl } = await getDirectDownloadInfo(b2Name);
-            const codec = await probeAudioCodec(directUrl);
-            if (codec && !AAC_OK.has(codec)) {
-              job.needsFix.push({ ...item, codec, b2Name });
+            const { audioCodec, videoCodec } = await probeFile(directUrl);
+            const badAudio = audioCodec && !AAC_OK.has(audioCodec);
+            const badVideo = videoCodec && !VIDEO_OK.has(videoCodec);
+            if (badAudio || badVideo) {
+              job.needsFix.push({
+                ...item, b2Name,
+                audioCodec, videoCodec,
+                badAudio, badVideo,
+                // HEVC precisa de transcode pesado; outros (áudio ruim, faststart) são só remux rápido
+                needsTranscode: badVideo && (videoCodec === 'hevc' || videoCodec === 'h265'),
+              });
             }
           } catch { job.errors++; }
           job.done++;
@@ -1052,28 +1078,22 @@ router.post('/audio-fix/fix', async (req, res) => {
     const { getDirectDownloadInfo, uploadFileFromPath, deleteFile, getLatestFileVersion } = require('../services/backblaze');
 
     for (const item of items) {
-      const tmpPath = path.join(os.tmpdir(), `audiofix_${Date.now()}_${path.basename(item.b2Name)}`);
+      if (item.needsTranscode) { job.skipped = (job.skipped || 0) + 1; continue; } // HEVC: pula por enquanto
+      const tmpPath = path.join(os.tmpdir(), `mediafix_${Date.now()}_${path.basename(item.b2Name)}`);
       job.current = item.title;
       try {
-        // Pega fileId da versão atual antes de re-upload
         const oldVer = await getLatestFileVersion(item.b2Name);
-
-        // URL B2 direto para ffmpeg
         const { url: inputUrl } = await getDirectDownloadInfo(item.b2Name);
 
-        // Remux audio → AAC (arquivo temporário local)
-        await remuxToAac(inputUrl, tmpPath);
+        // Remux: copia vídeo, converte áudio se necessário, sempre adiciona faststart
+        await remuxFile(inputUrl, tmpPath, { fixAudio: item.badAudio, fixFaststart: true });
 
-        // Re-upload com mesmo nome (cria nova versão no B2)
         await uploadFileFromPath(tmpPath, item.b2Name, 'video/mp4');
-
-        // Deleta versão antiga
         if (oldVer) await deleteFile(oldVer.fileId, oldVer.fileName);
-
         job.done++;
       } catch (e) {
         job.errors++;
-        console.error('[audio-fix]', item.title, e.message);
+        console.error('[media-fix]', item.title, e.message);
       } finally {
         if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
       }
