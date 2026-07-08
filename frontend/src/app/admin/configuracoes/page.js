@@ -69,6 +69,7 @@ export default function Configuracoes() {
   const [audioFixProgress,setAudioFixProgress] = useState(null);
   const [audioMsg,        setAudioMsg]         = useState('');
   const [audioConfirm,    setAudioConfirm]     = useState(false);
+  const [selectedFixes,   setSelectedFixes]    = useState(new Set());
   const audioScanPollRef = useRef(null);
   const audioFixPollRef  = useRef(null);
 
@@ -980,6 +981,7 @@ export default function Configuracoes() {
                         clearInterval(audioScanPollRef.current);
                         setAudioScanning(false);
                         setAudioScanResult(st);
+                        setSelectedFixes(new Set((st.needsFix || []).map((_, i) => i).filter(i => !st.needsFix[i].needsTranscode)));
                       }
                     } catch {}
                   }, 2000);
@@ -1019,19 +1021,35 @@ export default function Configuracoes() {
                 }
               </div>
 
-              {audioScanResult.needsFix.length > 0 && (
-                <div style={{ maxHeight: 260, overflowY: 'auto', marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {audioScanResult.needsFix.map((item, i) => (
-                    <div key={i} style={{ background: '#111', borderRadius: 8, padding: '8px 12px', border: `1px solid ${item.needsTranscode ? '#4a1a1a' : '#2a2a2a'}`, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                      {item.badVideo && <span style={{ background: item.needsTranscode ? '#b71c1c' : '#e65100', color: '#fff', borderRadius: 4, padding: '2px 7px', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>VIDEO:{item.videoCodec?.toUpperCase()}</span>}
-                      {item.badAudio && <span style={{ background: '#6a0dad', color: '#fff', borderRadius: 4, padding: '2px 7px', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>AUDIO:{item.audioCodec?.toUpperCase()}</span>}
-                      {item.needsTranscode && <span style={{ background: '#333', color: '#ff6b6b', borderRadius: 4, padding: '2px 6px', fontSize: 10, flexShrink: 0 }}>⚠ transcode lento</span>}
-                      <span style={{ color: '#ccc', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{item.title}</span>
-                      <span style={{ color: '#555', fontSize: 11, flexShrink: 0 }}>{item.field.replace('file_', '')}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
+              {audioScanResult.needsFix.length > 0 && (() => {
+                const fixable = audioScanResult.needsFix.filter(f => !f.needsTranscode);
+                const allSelected = fixable.every((_, j) => selectedFixes.has(audioScanResult.needsFix.indexOf(fixable[j]) >= 0 ? audioScanResult.needsFix.findIndex((x, ii) => x === fixable[j]) : -1));
+                const toggle = (i) => setSelectedFixes(prev => { const s = new Set(prev); s.has(i) ? s.delete(i) : s.add(i); return s; });
+                const selectAll = () => setSelectedFixes(new Set(audioScanResult.needsFix.map((f, i) => !f.needsTranscode ? i : -1).filter(i => i >= 0)));
+                const selectNone = () => setSelectedFixes(new Set());
+                return (<>
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+                    <span style={{ color: '#888', fontSize: 12 }}>{selectedFixes.size} selecionado(s)</span>
+                    <button onClick={selectAll} style={{ padding: '3px 10px', borderRadius: 6, background: '#222', color: '#aaa', border: '1px solid #333', cursor: 'pointer', fontSize: 11 }}>Todos</button>
+                    <button onClick={selectNone} style={{ padding: '3px 10px', borderRadius: 6, background: '#222', color: '#aaa', border: '1px solid #333', cursor: 'pointer', fontSize: 11 }}>Nenhum</button>
+                  </div>
+                  <div style={{ maxHeight: 300, overflowY: 'auto', marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {audioScanResult.needsFix.map((item, i) => (
+                      <div key={i}
+                        onClick={() => !item.needsTranscode && toggle(i)}
+                        style={{ background: selectedFixes.has(i) ? '#1a1a2e' : '#111', borderRadius: 8, padding: '8px 12px', border: `1px solid ${selectedFixes.has(i) ? '#3949ab' : item.needsTranscode ? '#4a1a1a' : '#2a2a2a'}`, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', cursor: item.needsTranscode ? 'default' : 'pointer' }}>
+                        <input type="checkbox" checked={selectedFixes.has(i)} disabled={item.needsTranscode} onChange={() => toggle(i)} onClick={e => e.stopPropagation()} style={{ accentColor: '#3949ab', flexShrink: 0 }} />
+                        {item.badVideo && <span style={{ background: item.needsTranscode ? '#b71c1c' : '#e65100', color: '#fff', borderRadius: 4, padding: '2px 7px', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>VIDEO:{item.videoCodec?.toUpperCase()}</span>}
+                        {item.badAudio && <span style={{ background: '#6a0dad', color: '#fff', borderRadius: 4, padding: '2px 7px', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>AUDIO:{item.audioCodec?.toUpperCase()}</span>}
+                        {item.needsRemux && !item.badAudio && !item.badVideo && <span style={{ background: '#1a3a1a', color: '#81c784', borderRadius: 4, padding: '2px 7px', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>MKV→MP4</span>}
+                        {item.needsTranscode && <span style={{ background: '#333', color: '#ff6b6b', borderRadius: 4, padding: '2px 6px', fontSize: 10, flexShrink: 0 }}>⚠ transcode lento</span>}
+                        <span style={{ color: '#ccc', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{item.title}</span>
+                        <span style={{ color: '#555', fontSize: 11, flexShrink: 0 }}>{item.field.replace('file_', '')}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>);
+              })()}
 
               <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
                 <button
@@ -1039,21 +1057,22 @@ export default function Configuracoes() {
                   style={{ padding: '8px 16px', borderRadius: 8, background: '#222', color: '#aaa', border: '1px solid #333', cursor: 'pointer', fontSize: 13 }}>
                   🔄 Novo scan
                 </button>
-                {audioScanResult.needsFix.length > 0 && (
+                {selectedFixes.size > 0 && (
                   !audioConfirm
                     ? <button
                         onClick={() => setAudioConfirm(true)}
                         style={{ padding: '10px 20px', borderRadius: 8, background: '#e65100', color: '#fff', border: 'none', fontWeight: 700, cursor: 'pointer' }}>
-                        🔧 Corrigir {audioScanResult.needsFix.filter(f => !f.needsTranscode).length} arquivo(s) rápidos{audioScanResult.needsFix.some(f => f.needsTranscode) ? ' (HEVC ignorado)' : ''}
+                        🔧 Corrigir {selectedFixes.size} arquivo(s) selecionado(s)
                       </button>
                     : <>
                         <span style={{ color: '#ff6b6b', fontSize: 13, fontWeight: 600 }}>Confirmar? O processo pode levar minutos.</span>
                         <button
                           onClick={async () => {
+                            const itemsToFix = audioScanResult.needsFix.filter((_, i) => selectedFixes.has(i));
                             setAudioConfirm(false); setAudioFixing(true); setAudioMsg(''); setAudioFixProgress(null);
                             clearInterval(audioFixPollRef.current);
                             try {
-                              const { data } = await api.post('/admin/audio-fix/fix', { items: audioScanResult.needsFix });
+                              const { data } = await api.post('/admin/audio-fix/fix', { items: itemsToFix });
                               setAudioFixJobId(data.jobId);
                               audioFixPollRef.current = setInterval(async () => {
                                 try {
