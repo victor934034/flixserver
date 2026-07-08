@@ -963,7 +963,7 @@ function probeFile(url) {
       '-v', 'quiet', '-print_format', 'json',
       '-show_streams', '-show_format', url,
     ], { timeout: 30_000 }, (err, stdout) => {
-      if (err) return resolve({ audioCodec: null, videoCodec: null, hasFaststart: null, isMkv: false });
+      if (err) return resolve({ audioCodec: null, videoCodec: null, hasFaststart: null, isMkv: false, isAvi: false, needsRemux: false });
       try {
         const data = JSON.parse(stdout);
         const audio = data.streams?.find(s => s.codec_type === 'audio');
@@ -972,11 +972,13 @@ function probeFile(url) {
         const hasFaststart = tags['major_brand'] !== undefined;
         const fmt = data.format?.format_name || '';
         const isMkv = fmt.includes('matroska') || fmt.includes('webm');
+        const isAvi = fmt.includes('avi');
+        const needsRemux = isMkv || isAvi;
         resolve({
           audioCodec: audio?.codec_name || null,
           videoCodec: video?.codec_name || null,
           hasFaststart,
-          isMkv,
+          isMkv, isAvi, needsRemux,
         });
       } catch { resolve({ audioCodec: null, videoCodec: null, hasFaststart: null, isMkv: false }); }
     });
@@ -1039,14 +1041,14 @@ router.post('/audio-fix/scan', async (req, res) => {
           try {
             const b2Name = CDN ? decodeURIComponent(item.url.replace(CDN + '/', '')) : item.url;
             const { url: directUrl } = await getDirectDownloadInfo(b2Name);
-            const { audioCodec, videoCodec, isMkv } = await probeFile(directUrl);
+            const { audioCodec, videoCodec, isMkv, isAvi, needsRemux } = await probeFile(directUrl);
             const badAudio = audioCodec && !AAC_OK.has(audioCodec);
             const badVideo = videoCodec && !VIDEO_OK.has(videoCodec);
-            if (badAudio || badVideo || isMkv) {
+            if (badAudio || badVideo || needsRemux) {
               job.needsFix.push({
                 ...item, b2Name,
                 audioCodec, videoCodec,
-                badAudio, badVideo, isMkv,
+                badAudio, badVideo, isMkv, isAvi, needsRemux,
                 needsTranscode: badVideo && (videoCodec === 'hevc' || videoCodec === 'h265'),
               });
             }
@@ -1086,15 +1088,15 @@ router.post('/audio-fix/fix', async (req, res) => {
       if (item.needsTranscode) { job.skipped = (job.skipped || 0) + 1; continue; } // HEVC: pula por enquanto
       // MKV → saída como .mp4 para ffmpeg inferir o container correto
       const baseName = path.basename(item.b2Name, path.extname(item.b2Name));
-      const tmpExt = item.isMkv ? '.mp4' : (path.extname(item.b2Name) || '.mp4');
+      const tmpExt = item.needsRemux ? '.mp4' : (path.extname(item.b2Name) || '.mp4');
       const tmpPath = path.join(os.tmpdir(), `mediafix_${Date.now()}_${baseName}${tmpExt}`);
       job.current = item.title;
       try {
         const oldVer = await getLatestFileVersion(item.b2Name);
         const { url: inputUrl } = await getDirectDownloadInfo(item.b2Name);
 
-        // Remux: copia vídeo, converte áudio se necessário, força MP4 se era MKV
-        await remuxFile(inputUrl, tmpPath, { fixAudio: item.badAudio, fixContainer: item.isMkv });
+        // Remux: copia vídeo, converte áudio se necessário, força MP4 se era MKV/AVI
+        await remuxFile(inputUrl, tmpPath, { fixAudio: item.badAudio, fixContainer: item.needsRemux });
 
         await uploadFileFromPath(tmpPath, item.b2Name, 'video/mp4');
         if (oldVer) await deleteFile(oldVer.fileId, oldVer.fileName);
