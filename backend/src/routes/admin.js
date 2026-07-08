@@ -987,8 +987,19 @@ function probeFile(url) {
   });
 }
 
-function remuxFile(inputUrl, tmpPath, { fixAudio, fixContainer }) {
-  const args = ['-hide_banner', '-loglevel', 'error', '-i', inputUrl];
+async function downloadToTemp(url, destPath) {
+  const axios = require('axios');
+  const writer = fs.createWriteStream(destPath);
+  const resp = await axios.get(url, { responseType: 'stream', timeout: 300_000 });
+  await new Promise((resolve, reject) => {
+    resp.data.pipe(writer);
+    writer.on('finish', resolve);
+    writer.on('error', reject);
+  });
+}
+
+function remuxFile(inputPath, tmpPath, { fixAudio, fixContainer }) {
+  const args = ['-hide_banner', '-loglevel', 'error', '-i', inputPath];
   args.push('-c:v', 'copy');
   if (fixAudio) {
     args.push('-c:a', 'aac', '-b:a', '192k', '-ac', '2');
@@ -1100,26 +1111,32 @@ router.post('/audio-fix/fix', async (req, res) => {
 
     for (const item of items) {
       if (item.needsTranscode) { job.skipped = (job.skipped || 0) + 1; continue; } // HEVC: pula por enquanto
-      // MKV → saída como .mp4 para ffmpeg inferir o container correto
       const baseName = path.basename(item.b2Name, path.extname(item.b2Name));
-      const tmpExt = item.needsRemux ? '.mp4' : (path.extname(item.b2Name) || '.mp4');
-      const tmpPath = path.join(os.tmpdir(), `mediafix_${Date.now()}_${baseName}${tmpExt}`);
+      const inputExt = path.extname(item.b2Name) || '.mp4';
+      const outExt = item.needsRemux ? '.mp4' : inputExt;
+      const ts = Date.now();
+      const inputTmp = path.join(os.tmpdir(), `mediafix_in_${ts}_${baseName}${inputExt}`);
+      const outputTmp = path.join(os.tmpdir(), `mediafix_out_${ts}_${baseName}${outExt}`);
       job.current = item.title;
       try {
         const oldVer = await getLatestFileVersion(item.b2Name);
         const { url: inputUrl } = await getDirectDownloadInfo(item.b2Name);
 
-        // Remux: copia vídeo, converte áudio se necessário, força MP4 se era MKV/AVI
-        await remuxFile(inputUrl, tmpPath, { fixAudio: item.badAudio, fixContainer: item.needsRemux });
+        // Baixa o arquivo localmente antes de passar ao ffmpeg (container sem DNS externo)
+        await downloadToTemp(inputUrl, inputTmp);
 
-        await uploadFileFromPath(tmpPath, item.b2Name, 'video/mp4');
+        // Remux: copia vídeo, converte áudio se necessário, força MP4 se era MKV/AVI
+        await remuxFile(inputTmp, outputTmp, { fixAudio: item.badAudio, fixContainer: item.needsRemux });
+
+        await uploadFileFromPath(outputTmp, item.b2Name, 'video/mp4');
         if (oldVer) await deleteFile(oldVer.fileId, oldVer.fileName);
         job.done++;
       } catch (e) {
         job.errors++;
         console.error('[media-fix]', item.title, e.message);
       } finally {
-        if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+        if (fs.existsSync(inputTmp)) fs.unlinkSync(inputTmp);
+        if (fs.existsSync(outputTmp)) fs.unlinkSync(outputTmp);
       }
     }
     job.running = false;
