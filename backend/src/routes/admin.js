@@ -947,6 +947,8 @@ const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const { spawn: spawnProc } = require('child_process');
+const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+const ffprobePath = require('ffprobe-static').path;
 
 const AAC_OK    = new Set(['aac', 'mp3', 'opus', 'vorbis', 'flac', 'pcm_s16le', 'pcm_s24le']);
 const VIDEO_OK  = new Set(['h264', 'vp8', 'vp9', 'av1', 'theora']);
@@ -959,7 +961,7 @@ const EP_FIELDS    = ['file_dubbing', 'file_subtitled', 'file_cinema'];
 // Retorna {audioCodec, videoCodec, hasFaststart} de uma URL via ffprobe
 function probeFile(url) {
   return new Promise((resolve) => {
-    execFile('ffprobe', [
+    execFile(ffprobePath, [
       '-v', 'quiet', '-print_format', 'json',
       '-show_streams', '-show_format', url,
     ], { timeout: 30_000 }, (err, stdout) => {
@@ -996,7 +998,7 @@ function remuxFile(inputUrl, tmpPath, { fixAudio, fixContainer }) {
   if (fixContainer) args.push('-f', 'mp4'); // força container MP4 (para MKV)
   args.push('-movflags', '+faststart', '-y', tmpPath);
   return new Promise((resolve, reject) => {
-    const ff = spawnProc('ffmpeg', args);
+    const ff = spawnProc(ffmpegPath, args);
     ff.on('close', code => code === 0 ? resolve() : reject(new Error(`ffmpeg exit ${code}`)));
     ff.on('error', reject);
   });
