@@ -1121,10 +1121,10 @@ router.post('/audio-fix/fix', async (req, res) => {
       job.current = item.title;
       try {
         const oldVer = await getLatestFileVersion(item.b2Name);
-        const { url: inputUrl } = await getDirectDownloadInfo(item.b2Name);
 
-        // Baixa o arquivo localmente antes de passar ao ffmpeg (container sem DNS externo)
-        await downloadToTemp(inputUrl, inputTmp);
+        // Usa URL do CDN (Cloudflare) para download — IP direto do B2 fica inacessível no container
+        const downloadUrl = item.url.startsWith('http') ? item.url : (await getDirectDownloadInfo(item.b2Name)).url;
+        await downloadToTemp(downloadUrl, inputTmp);
 
         // Remux: copia vídeo, converte áudio se necessário, força MP4 se era MKV/AVI
         await remuxFile(inputTmp, outputTmp, { fixAudio: item.badAudio, fixContainer: item.needsRemux });
