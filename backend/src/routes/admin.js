@@ -963,26 +963,27 @@ function probeFile(url) {
       '-v', 'quiet', '-print_format', 'json',
       '-show_streams', '-show_format', url,
     ], { timeout: 30_000 }, (err, stdout) => {
-      if (err) return resolve({ audioCodec: null, videoCodec: null, hasFaststart: null });
+      if (err) return resolve({ audioCodec: null, videoCodec: null, hasFaststart: null, isMkv: false });
       try {
         const data = JSON.parse(stdout);
         const audio = data.streams?.find(s => s.codec_type === 'audio');
         const video = data.streams?.find(s => s.codec_type === 'video');
-        // faststart: moov atom vem antes dos dados → start_time próximo de 0
-        // ffprobe não expõe isso diretamente, mas podemos inferir pelo format tag
         const tags = data.format?.tags || {};
-        const hasFaststart = tags['major_brand'] !== undefined; // heurística básica
+        const hasFaststart = tags['major_brand'] !== undefined;
+        const fmt = data.format?.format_name || '';
+        const isMkv = fmt.includes('matroska') || fmt.includes('webm');
         resolve({
           audioCodec: audio?.codec_name || null,
           videoCodec: video?.codec_name || null,
           hasFaststart,
+          isMkv,
         });
-      } catch { resolve({ audioCodec: null, videoCodec: null, hasFaststart: null }); }
+      } catch { resolve({ audioCodec: null, videoCodec: null, hasFaststart: null, isMkv: false }); }
     });
   });
 }
 
-function remuxFile(inputUrl, tmpPath, { fixAudio, fixFaststart }) {
+function remuxFile(inputUrl, tmpPath, { fixAudio, fixContainer }) {
   const args = ['-hide_banner', '-loglevel', 'error', '-i', inputUrl];
   args.push('-c:v', 'copy');
   if (fixAudio) {
@@ -990,6 +991,7 @@ function remuxFile(inputUrl, tmpPath, { fixAudio, fixFaststart }) {
   } else {
     args.push('-c:a', 'copy');
   }
+  if (fixContainer) args.push('-f', 'mp4'); // força container MP4 (para MKV)
   args.push('-movflags', '+faststart', '-y', tmpPath);
   return new Promise((resolve, reject) => {
     const ff = spawnProc('ffmpeg', args);
@@ -1037,15 +1039,14 @@ router.post('/audio-fix/scan', async (req, res) => {
           try {
             const b2Name = CDN ? decodeURIComponent(item.url.replace(CDN + '/', '')) : item.url;
             const { url: directUrl } = await getDirectDownloadInfo(b2Name);
-            const { audioCodec, videoCodec } = await probeFile(directUrl);
+            const { audioCodec, videoCodec, isMkv } = await probeFile(directUrl);
             const badAudio = audioCodec && !AAC_OK.has(audioCodec);
             const badVideo = videoCodec && !VIDEO_OK.has(videoCodec);
-            if (badAudio || badVideo) {
+            if (badAudio || badVideo || isMkv) {
               job.needsFix.push({
                 ...item, b2Name,
                 audioCodec, videoCodec,
-                badAudio, badVideo,
-                // HEVC precisa de transcode pesado; outros (áudio ruim, faststart) são só remux rápido
+                badAudio, badVideo, isMkv,
                 needsTranscode: badVideo && (videoCodec === 'hevc' || videoCodec === 'h265'),
               });
             }
@@ -1083,14 +1084,17 @@ router.post('/audio-fix/fix', async (req, res) => {
 
     for (const item of items) {
       if (item.needsTranscode) { job.skipped = (job.skipped || 0) + 1; continue; } // HEVC: pula por enquanto
-      const tmpPath = path.join(os.tmpdir(), `mediafix_${Date.now()}_${path.basename(item.b2Name)}`);
+      // MKV → saída como .mp4 para ffmpeg inferir o container correto
+      const baseName = path.basename(item.b2Name, path.extname(item.b2Name));
+      const tmpExt = item.isMkv ? '.mp4' : (path.extname(item.b2Name) || '.mp4');
+      const tmpPath = path.join(os.tmpdir(), `mediafix_${Date.now()}_${baseName}${tmpExt}`);
       job.current = item.title;
       try {
         const oldVer = await getLatestFileVersion(item.b2Name);
         const { url: inputUrl } = await getDirectDownloadInfo(item.b2Name);
 
-        // Remux: copia vídeo, converte áudio se necessário, sempre adiciona faststart
-        await remuxFile(inputUrl, tmpPath, { fixAudio: item.badAudio, fixFaststart: true });
+        // Remux: copia vídeo, converte áudio se necessário, força MP4 se era MKV
+        await remuxFile(inputUrl, tmpPath, { fixAudio: item.badAudio, fixContainer: item.isMkv });
 
         await uploadFileFromPath(tmpPath, item.b2Name, 'video/mp4');
         if (oldVer) await deleteFile(oldVer.fileId, oldVer.fileName);

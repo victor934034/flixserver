@@ -146,6 +146,7 @@ export default function PlayerScreen() {
   const [timerRemaining, setTimerRemaining] = useState(null);
   const [nextCountdown, setNextCountdown] = useState(null);
   const [episodes, setEpisodes] = useState([]);
+  const [activeSheetSeason, setActiveSheetSeason] = useState(1);
   const [nextMovie, setNextMovie] = useState(null);
   const { activeProfile } = useProfile();
   const [streamBlocked, setStreamBlocked] = useState(false);
@@ -426,15 +427,17 @@ export default function PlayerScreen() {
     saveProgress();
     const url = nextEp.file_dubbing || nextEp.file_subtitled || nextEp.file_cinema || nextEp.file_color || nextEp.file_bw;
     if (!url) return;
+    const nextNext = findNextEp(nextEp.id);
     const nextParams = {
-      url, title: nextEp.title || `Episódio ${nextEp.episode_number}`,
+      url,
+      title: `T${nextEp.season_number}E${pad(nextEp.episode_number)}${nextEp.title ? ` · ${nextEp.title}` : ''}`,
       id: String(nextEp.id), type: 'episode',
       currentVersion: activeVer,
       versions: JSON.stringify({ dubbing: nextEp.file_dubbing || null, subtitled: nextEp.file_subtitled || null, cinema: nextEp.file_cinema || null, color: nextEp.file_color || null, bw: nextEp.file_bw || null }),
       subtitles: JSON.stringify({ pt: nextEp.subtitle_pt || null, en: nextEp.subtitle_en || null, es: nextEp.subtitle_es || null }),
     };
     if (seriesId) nextParams.seriesId = seriesId;
-    if (nextEp.next) nextParams.nextEpisode = JSON.stringify(nextEp.next);
+    if (nextNext) nextParams.nextEpisode = JSON.stringify(buildNavEpParam(nextNext));
     if (nextEp.intro_end) nextParams.introEnd = String(nextEp.intro_end);
     router.replace({ pathname: '/player', params: nextParams });
   };
@@ -458,6 +461,37 @@ export default function PlayerScreen() {
   const sortedEps = [...episodes].sort((a, b) =>
     a.season_number !== b.season_number ? a.season_number - b.season_number : a.episode_number - b.episode_number
   );
+  const seasonNums = [...new Set(sortedEps.map(e => e.season_number))].sort((a, b) => a - b);
+  const sheetSeasonEps = sortedEps.filter(e => e.season_number === activeSheetSeason);
+
+  const buildNavEpParam = (ep) => ({
+    id: ep.id,
+    title: ep.title || `Episódio ${ep.episode_number}`,
+    episode_number: ep.episode_number,
+    season_number: ep.season_number,
+    thumbnail_url: ep.thumbnail_url || null,
+    file_dubbing: ep.file_dubbing || null,
+    file_subtitled: ep.file_subtitled || null,
+    file_cinema: ep.file_cinema || null,
+    file_color: ep.file_color || null,
+    file_bw: ep.file_bw || null,
+    subtitle_pt: ep.subtitle_pt || null,
+    subtitle_en: ep.subtitle_en || null,
+    subtitle_es: ep.subtitle_es || null,
+    intro_end: ep.intro_end || null,
+  });
+
+  const findNextEp = (epId) => {
+    const idx = sortedEps.findIndex(e => String(e.id) === String(epId));
+    const raw = idx >= 0 && idx + 1 < sortedEps.length ? sortedEps[idx + 1] : null;
+    return raw && (raw.file_dubbing || raw.file_subtitled || raw.file_cinema || raw.file_color || raw.file_bw) ? raw : null;
+  };
+
+  const openEpisodesSheet = () => {
+    const cur = sortedEps.find(e => String(e.id) === String(id));
+    setActiveSheetSeason(cur?.season_number || seasonNums[0] || 1);
+    openSheet('episodes');
+  };
 
   // ─── Render ───────────────────────────────────────────────────────────────
   // Overlay de limite de streams simultâneos
@@ -653,7 +687,7 @@ export default function PlayerScreen() {
 
               {seriesId && <>
                 <View style={styles.actionDiv} />
-                <TouchableOpacity style={styles.actionBtn} onPress={() => openSheet('episodes')}>
+                <TouchableOpacity style={styles.actionBtn} onPress={openEpisodesSheet}>
                   <Ionicons name="list-outline" size={15} color="#fff" />
                   <Text style={styles.actionBtnText}>Episódios</Text>
                 </TouchableOpacity>
@@ -946,41 +980,83 @@ export default function PlayerScreen() {
               <Text style={styles.sheetTitle}>Episódios</Text>
               {sortedEps.length === 0
                 ? <Text style={styles.sheetEmpty}>Carregando...</Text>
-                : <FlatList
-                    data={sortedEps}
-                    keyExtractor={e => e.id}
-                    style={{ maxHeight: 360 }}
+                : <>
+                  {seasonNums.length > 1 && (
+                    <FlatList
+                      horizontal
+                      data={seasonNums}
+                      keyExtractor={s => String(s)}
+                      showsHorizontalScrollIndicator={false}
+                      style={styles.seasonTabsRow}
+                      contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}
+                      renderItem={({ item: s }) => (
+                        <TouchableOpacity
+                          style={[styles.seasonTab, activeSheetSeason === s && styles.seasonTabActive]}
+                          onPress={() => setActiveSheetSeason(s)}
+                        >
+                          <Text style={[styles.seasonTabText, activeSheetSeason === s && styles.seasonTabTextActive]}>
+                            Temporada {s}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                    />
+                  )}
+                  <FlatList
+                    data={sheetSeasonEps}
+                    keyExtractor={e => String(e.id)}
+                    style={{ maxHeight: seasonNums.length > 1 ? 300 : 360 }}
                     renderItem={({ item: ep }) => {
                       const epUrl = ep.file_dubbing || ep.file_subtitled || ep.file_cinema || ep.file_color || ep.file_bw;
-                      const isActive = ep.id === id;
+                      const isActive = String(ep.id) === String(id);
+                      const nextForNav = findNextEp(ep.id);
                       return (
                         <TouchableOpacity
-                          style={[styles.sheetRow, isActive && styles.sheetRowHL]}
+                          style={[styles.epRow, isActive && styles.epRowActive]}
                           disabled={!epUrl}
                           onPress={() => {
                             if (!epUrl) return;
                             setSheet(null);
-                            router.replace({
-                              pathname: '/player',
-                              params: {
-                                url: epUrl, id: ep.id, type: 'episode',
-                                title: ep.title || `Episódio ${ep.episode_number}`,
-                                seriesId: seriesId || undefined, currentVersion: activeVer,
-                                versions: JSON.stringify({ dubbing: ep.file_dubbing || null, subtitled: ep.file_subtitled || null, cinema: ep.file_cinema || null, color: ep.file_color || null, bw: ep.file_bw || null }),
-                                subtitles: JSON.stringify({ pt: ep.subtitle_pt || null, en: ep.subtitle_en || null, es: ep.subtitle_es || null }),
-                                introEnd: ep.intro_end ? String(ep.intro_end) : undefined,
-                              },
-                            });
+                            const navParams = {
+                              url: epUrl,
+                              id: String(ep.id),
+                              type: 'episode',
+                              title: `T${ep.season_number}E${pad(ep.episode_number)}${ep.title ? ` · ${ep.title}` : ''}`,
+                              seriesId: seriesId || undefined,
+                              currentVersion: activeVer,
+                              versions: JSON.stringify({ dubbing: ep.file_dubbing || null, subtitled: ep.file_subtitled || null, cinema: ep.file_cinema || null, color: ep.file_color || null, bw: ep.file_bw || null }),
+                              subtitles: JSON.stringify({ pt: ep.subtitle_pt || null, en: ep.subtitle_en || null, es: ep.subtitle_es || null }),
+                              introEnd: ep.intro_end ? String(ep.intro_end) : undefined,
+                            };
+                            if (nextForNav) navParams.nextEpisode = JSON.stringify(buildNavEpParam(nextForNav));
+                            router.replace({ pathname: '/player', params: navParams });
                           }}
                         >
-                          <Text style={[styles.sheetRowText, isActive && styles.sheetRowActive, !epUrl && { opacity: 0.3 }]}>
-                            T{ep.season_number}E{pad(ep.episode_number)} · {ep.title || `Episódio ${ep.episode_number}`}
-                          </Text>
-                          {isActive && <Ionicons name="play" size={16} color="#E50914" />}
+                          {ep.thumbnail_url
+                            ? <Image source={{ uri: ep.thumbnail_url }} style={styles.epThumb} />
+                            : <View style={styles.epThumbPlaceholder}>
+                                <Ionicons name="film-outline" size={18} color="#333" />
+                              </View>
+                          }
+                          <View style={styles.epInfo}>
+                            <Text style={styles.epNum}>E{pad(ep.episode_number)}</Text>
+                            <Text style={[styles.epTitle, !epUrl && { opacity: 0.3 }]} numberOfLines={2}>
+                              {ep.title || `Episódio ${ep.episode_number}`}
+                            </Text>
+                            {ep.duration > 0 && (
+                              <Text style={styles.epDuration}>{Math.round(ep.duration / 60)} min</Text>
+                            )}
+                          </View>
+                          {isActive
+                            ? <Ionicons name="play-circle" size={22} color="#E50914" style={{ marginRight: 4 }} />
+                            : !epUrl
+                            ? <Ionicons name="lock-closed-outline" size={16} color="#444" style={{ marginRight: 4 }} />
+                            : null
+                          }
                         </TouchableOpacity>
                       );
                     }}
                   />
+                </>
               }
             </>}
 
@@ -1081,6 +1157,20 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.65)', paddingHorizontal: 14, paddingVertical: 5,
     borderRadius: 5, overflow: 'hidden', lineHeight: 24,
   },
+  seasonTabsRow: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)' },
+  seasonTab: { paddingHorizontal: 16, paddingVertical: 7, borderRadius: 20, backgroundColor: '#222' },
+  seasonTabActive: { backgroundColor: '#E50914' },
+  seasonTabText: { color: '#888', fontSize: 13, fontWeight: '600' },
+  seasonTabTextActive: { color: '#fff' },
+  epRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 16, gap: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.04)' },
+  epRowActive: { backgroundColor: 'rgba(229,9,20,0.07)' },
+  epThumb: { width: 88, height: 52, borderRadius: 5, backgroundColor: '#1a1a1a' },
+  epThumbPlaceholder: { width: 88, height: 52, borderRadius: 5, backgroundColor: '#141414', justifyContent: 'center', alignItems: 'center' },
+  epInfo: { flex: 1 },
+  epNum: { color: '#555', fontSize: 11, fontWeight: '700', marginBottom: 2 },
+  epTitle: { color: '#ddd', fontSize: 13, lineHeight: 18 },
+  epDuration: { color: '#555', fontSize: 11, marginTop: 3 },
+
   sheetBg: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
   sheet: { backgroundColor: '#141414', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingTop: 8, paddingBottom: 40, maxHeight: '72%' },
   sheetTitle: {
