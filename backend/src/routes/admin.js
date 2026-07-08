@@ -999,7 +999,9 @@ function remuxFile(inputUrl, tmpPath, { fixAudio, fixContainer }) {
   args.push('-movflags', '+faststart', '-y', tmpPath);
   return new Promise((resolve, reject) => {
     const ff = spawnProc(ffmpegPath, args);
-    ff.on('close', code => code === 0 ? resolve() : reject(new Error(`ffmpeg exit ${code}`)));
+    let stderr = '';
+    ff.stderr.on('data', d => { stderr += d.toString(); });
+    ff.on('close', code => code === 0 ? resolve() : reject(new Error(`ffmpeg exit ${code}: ${stderr.slice(-400)}`)));
     ff.on('error', reject);
   });
 }
