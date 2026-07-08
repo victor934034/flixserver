@@ -1087,7 +1087,7 @@ router.post('/audio-fix/fix', async (req, res) => {
     return res.status(400).json({ error: 'Lista de itens obrigatória.' });
 
   const jobId = `audiofix_${Date.now()}`;
-  const job = { total: items.length, done: 0, errors: 0, running: true, current: '' };
+  const job = { total: items.length, done: 0, errors: 0, skipped: 0, running: true, current: '', startTime: Date.now() };
   audioFixJobs.set(jobId, job);
   res.json({ ok: true, jobId, total: items.length });
 
@@ -1126,7 +1126,11 @@ router.post('/audio-fix/fix', async (req, res) => {
 router.get('/audio-fix/fix-status', (req, res) => {
   const job = audioFixJobs.get(req.query.jobId);
   if (!job) return res.status(404).json({ error: 'Job não encontrado.' });
-  res.json(job);
+  const processed = job.done + job.errors + (job.skipped || 0);
+  const elapsed = (Date.now() - job.startTime) / 1000;
+  const rate = processed > 0 ? elapsed / processed : 0;
+  const remaining = rate > 0 ? Math.round(rate * (job.total - processed)) : null;
+  res.json({ ...job, etaSeconds: remaining });
 });
 
 // Gerenciamento de assinaturas de usuários (para o painel admin)

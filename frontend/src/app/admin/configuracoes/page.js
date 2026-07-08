@@ -1085,25 +1085,32 @@ export default function Configuracoes() {
           )}
 
           {/* Progresso do fix */}
-          {audioFixProgress && audioFixing && (
-            <div style={{ background: '#111', borderRadius: 8, padding: '12px 16px', marginTop: 12 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                <span style={{ color: '#fff', fontSize: 13, fontWeight: 600 }}>
-                  Corrigindo... {audioFixProgress.done} / {audioFixProgress.total}
-                  {audioFixProgress.errors > 0 && <span style={{ color: '#ff6b6b', marginLeft: 8 }}>({audioFixProgress.errors} erros)</span>}
-                </span>
-                <span style={{ color: '#888', fontSize: 12 }}>{Math.round((audioFixProgress.done / audioFixProgress.total) * 100)}%</span>
+          {audioFixProgress && audioFixing && (() => {
+            const processed = (audioFixProgress.done || 0) + (audioFixProgress.errors || 0) + (audioFixProgress.skipped || 0);
+            const pct = audioFixProgress.total > 0 ? Math.round((processed / audioFixProgress.total) * 100) : 0;
+            const eta = audioFixProgress.etaSeconds;
+            const fmtEta = eta == null ? '' : eta < 60 ? `~${eta}s` : eta < 3600 ? `~${Math.round(eta / 60)}min` : `~${Math.round(eta / 3600)}h`;
+            return (
+              <div style={{ background: '#111', borderRadius: 8, padding: '12px 16px', marginTop: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <span style={{ color: '#fff', fontSize: 13, fontWeight: 600 }}>
+                    Corrigindo... {processed} / {audioFixProgress.total}
+                    {audioFixProgress.errors > 0 && <span style={{ color: '#ff6b6b', marginLeft: 8 }}>({audioFixProgress.errors} erros)</span>}
+                    {audioFixProgress.skipped > 0 && <span style={{ color: '#888', marginLeft: 8 }}>({audioFixProgress.skipped} ignorados)</span>}
+                  </span>
+                  <span style={{ color: '#888', fontSize: 12 }}>{pct}%{fmtEta ? ` · restam ${fmtEta}` : ''}</span>
+                </div>
+                <div style={{ background: '#222', borderRadius: 4, height: 6, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', borderRadius: 4, background: '#e65100', width: `${pct}%`, transition: 'width 0.5s ease' }} />
+                </div>
+                {audioFixProgress.current && (
+                  <p style={{ color: '#555', fontSize: 11, margin: '6px 0 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    ⚙ {audioFixProgress.current}
+                  </p>
+                )}
               </div>
-              <div style={{ background: '#222', borderRadius: 4, height: 6, overflow: 'hidden' }}>
-                <div style={{ height: '100%', borderRadius: 4, background: '#e65100', width: `${Math.round((audioFixProgress.done / audioFixProgress.total) * 100)}%`, transition: 'width 0.5s ease' }} />
-              </div>
-              {audioFixProgress.current && (
-                <p style={{ color: '#555', fontSize: 11, margin: '6px 0 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  ⚙ {audioFixProgress.current}
-                </p>
-              )}
-            </div>
-          )}
+            );
+          })()}
 
           {audioMsg && !audioFixing && !audioScanning && (
             <p style={{ color: audioMsg.startsWith('✅') ? '#4caf50' : '#ff6b6b', fontSize: 13, margin: '8px 0 0' }}>{audioMsg}</p>
