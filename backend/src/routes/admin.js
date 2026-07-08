@@ -1129,8 +1129,21 @@ router.post('/audio-fix/fix', async (req, res) => {
         // Remux: copia vídeo, converte áudio se necessário, força MP4 se era MKV/AVI
         await remuxFile(inputTmp, outputTmp, { fixAudio: item.badAudio, fixContainer: item.needsRemux });
 
-        await uploadFileFromPath(outputTmp, item.b2Name, 'video/mp4');
+        // Se houve remux de container, renomeia para .mp4 no B2 e atualiza o banco
+        const newB2Name = item.needsRemux
+          ? item.b2Name.replace(/\.(mkv|webm|avi)$/i, '.mp4')
+          : item.b2Name;
+
+        await uploadFileFromPath(outputTmp, newB2Name, 'video/mp4');
         if (oldVer) await deleteFile(oldVer.fileId, oldVer.fileName);
+
+        if (newB2Name !== item.b2Name) {
+          const CDN = process.env.CDN_BASE_URL || '';
+          const newUrl = CDN + '/' + newB2Name.split('/').map(encodeURIComponent).join('/');
+          const table = item.type === 'movie' ? 'movies' : 'episodes';
+          await supabase.from(table).update({ [item.field]: newUrl }).eq('id', item.id);
+        }
+
         job.done++;
       } catch (e) {
         job.errors++;
