@@ -1040,15 +1040,25 @@ router.post('/audio-fix/scan', async (req, res) => {
         await Promise.all(batch.map(async (item) => {
           try {
             const b2Name = CDN ? decodeURIComponent(item.url.replace(CDN + '/', '')) : item.url;
+            // Detecção rápida por extensão (não precisa de ffprobe)
+            const extLow = (item.url.split('?')[0].split('.').pop() || '').toLowerCase();
+            const extIsMkv = extLow === 'mkv' || extLow === 'webm';
+            const extIsAvi = extLow === 'avi';
+            const extNeedsRemux = extIsMkv || extIsAvi;
+
             const { url: directUrl } = await getDirectDownloadInfo(b2Name);
             const { audioCodec, videoCodec, isMkv, isAvi, needsRemux } = await probeFile(directUrl);
             const badAudio = audioCodec && !AAC_OK.has(audioCodec);
             const badVideo = videoCodec && !VIDEO_OK.has(videoCodec);
-            if (badAudio || badVideo || needsRemux) {
+            const finalNeedsRemux = needsRemux || extNeedsRemux;
+            if (badAudio || badVideo || finalNeedsRemux) {
               job.needsFix.push({
                 ...item, b2Name,
                 audioCodec, videoCodec,
-                badAudio, badVideo, isMkv, isAvi, needsRemux,
+                badAudio, badVideo,
+                isMkv: isMkv || extIsMkv,
+                isAvi: isAvi || extIsAvi,
+                needsRemux: finalNeedsRemux,
                 needsTranscode: badVideo && (videoCodec === 'hevc' || videoCodec === 'h265'),
               });
             }
