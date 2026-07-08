@@ -1063,9 +1063,10 @@ router.post('/audio-fix/scan', async (req, res) => {
 
             const { url: directUrl } = await getDirectDownloadInfo(b2Name);
             const { audioCodec, videoCodec, isMkv, isAvi, needsRemux } = await probeFile(directUrl);
-            const badAudio = audioCodec && !AAC_OK.has(audioCodec);
-            const badVideo = videoCodec && !VIDEO_OK.has(videoCodec);
             const finalNeedsRemux = needsRemux || extNeedsRemux;
+            // Se codec não detectado E arquivo precisa remux, assume áudio ruim (seguro converter para AAC)
+            const badAudio = audioCodec ? !AAC_OK.has(audioCodec) : finalNeedsRemux;
+            const badVideo = videoCodec && !VIDEO_OK.has(videoCodec);
             if (badAudio || badVideo || finalNeedsRemux) {
               job.needsFix.push({
                 ...item, b2Name,
