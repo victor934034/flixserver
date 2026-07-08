@@ -1000,13 +1000,15 @@ async function downloadToTemp(url, destPath) {
 
 function remuxFile(inputPath, tmpPath, { fixAudio, fixContainer }) {
   const args = ['-hide_banner', '-loglevel', 'error', '-i', inputPath];
+  // Mapeia todos os streams de vídeo e áudio (preserva dual audio)
+  args.push('-map', '0:v', '-map', '0:a');
   args.push('-c:v', 'copy');
   if (fixAudio) {
-    args.push('-c:a', 'aac', '-b:a', '192k', '-ac', '2');
+    args.push('-c:a', 'aac', '-b:a', '192k'); // sem -ac 2 para preservar canais originais
   } else {
     args.push('-c:a', 'copy');
   }
-  if (fixContainer) args.push('-f', 'mp4'); // força container MP4 (para MKV)
+  if (fixContainer) args.push('-f', 'mp4');
   args.push('-movflags', '+faststart', '-y', tmpPath);
   return new Promise((resolve, reject) => {
     const ff = spawnProc(ffmpegPath, args);
