@@ -20,6 +20,7 @@ export default function NovoFilme() {
   const [tmdbSuggestions, setTmdbSuggestions] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [duplicateId, setDuplicateId] = useState(null);
   const router = useRouter();
   const debounceRef = useRef(null);
 
@@ -91,6 +92,7 @@ export default function NovoFilme() {
   async function handleSave(e) {
     e.preventDefault();
     setError('');
+    setDuplicateId(null);
     if (!form.title.trim()) { setError('Título é obrigatório'); return; }
     setSaving(true);
     try {
@@ -104,7 +106,13 @@ export default function NovoFilme() {
       await api.post('/admin/movies', payload);
       router.push('/admin/filmes');
     } catch (err) {
-      setError(err.response?.data?.error || 'Erro ao salvar');
+      const d = err.response?.data;
+      if (d?.error === 'duplicate_tmdb') {
+        setDuplicateId(d.existingId || null);
+        setError(d.message || 'Esse filme já está cadastrado.');
+      } else {
+        setError(d?.error || 'Erro ao salvar');
+      }
     } finally {
       setSaving(false);
     }
@@ -257,7 +265,16 @@ export default function NovoFilme() {
           </label>
         </div>
 
-        {error && <p className={styles.error}>{error}</p>}
+        {error && (
+          <p className={styles.error}>
+            {error}
+            {duplicateId && (
+              <> <a href={`/admin/filmes/${duplicateId}/editar`} style={{ color: '#f59e0b', textDecoration: 'underline', marginLeft: 4 }}>
+                Ir para edição
+              </a></>
+            )}
+          </p>
+        )}
 
         <div className={styles.formActions}>
           <button type="submit" className={styles.btnSave} disabled={saving}>

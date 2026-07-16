@@ -144,6 +144,15 @@ router.post('/movies', async (req, res) => {
     }
     res.status(201).json(data);
   } catch (err) {
+    if (err.code === '23505' && err.message?.includes('movies_tmdb_id_key') && req.body.tmdb_id) {
+      const { data: existing } = await supabase
+        .from('movies').select('id, title').eq('tmdb_id', req.body.tmdb_id).single();
+      return res.status(409).json({
+        error: 'duplicate_tmdb',
+        message: `"${existing?.title || 'Este filme'}" já está cadastrado.`,
+        existingId: existing?.id,
+      });
+    }
     res.status(500).json({ error: err.message });
   }
 });
