@@ -63,6 +63,19 @@ router.post('/import/:tmdbId', async (req, res) => {
   }
 });
 
+// Busca detalhes por ID TMDB sem salvar (para o admin pré-visualizar)
+router.get('/details/:id', async (req, res) => {
+  const { type = 'movie' } = req.query;
+  try {
+    const details = await getDetails(Number(req.params.id), type);
+    if (!details) return res.status(404).json({ error: 'Não encontrado' });
+    details.age_rating = extractAgeRating(details, type);
+    res.json(details);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Busca no TMDB sem salvar (para o admin pré-visualizar) — retorna 1 resultado completo
 router.get('/search', async (req, res) => {
   const { q, type = 'movie', year } = req.query;

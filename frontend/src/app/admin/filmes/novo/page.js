@@ -42,10 +42,10 @@ export default function NovoFilme() {
 
   async function pickTmdbSuggestion(item) {
     setTmdbSuggestions([]);
-    setTmdbSearch(item.title);
+    setTmdbSearch(item.title + (item.year ? ` (${item.year})` : ''));
     setTmdbLoading(true);
     try {
-      const { data } = await api.get(`/tmdb/search?q=${encodeURIComponent(item.title)}&type=movie&year=${item.year || ''}`);
+      const { data } = await api.get(`/tmdb/details/${item.id}?type=movie`);
       if (!data) { setError('Não encontrado no TMDB'); return; }
       applyTmdbData(data);
     } catch (err) {
@@ -163,6 +163,12 @@ export default function NovoFilme() {
           )}
         </div>
       </div>
+
+      {form.tmdb_id && (
+        <p style={{ fontSize: 12, color: '#888', margin: '4px 0 12px', paddingLeft: 2 }}>
+          TMDB ID selecionado: <strong style={{ color: '#aaa' }}>{form.tmdb_id}</strong>
+        </p>
+      )}
 
       <form onSubmit={handleSave} className={styles.form}>
         <div className={styles.row}>
