@@ -69,7 +69,7 @@ router.get('/:id/episodes', async (req, res) => {
     const { season } = req.query;
     let query = supabase
       .from('episodes')
-      .select('id, season_number, episode_number, title, synopsis, duration, thumbnail_url, file_dubbing, file_subtitled, file_cinema, subtitle_pt, subtitle_en, subtitle_es, air_date, views')
+      .select('id, season_number, episode_number, title, synopsis, duration, thumbnail_url, file_dubbing, file_subtitled, file_cinema, file_color, file_bw, subtitle_pt, subtitle_en, subtitle_es, air_date, views')
       .eq('series_id', req.params.id)
       .eq('is_active', true)
       .order('season_number')

@@ -2,7 +2,7 @@ const router = require('express').Router();
 const { supabase } = require('../services/supabase');
 const { optionalAuth } = require('../middleware/auth');
 
-const PUBLIC_FIELDS = 'id, tmdb_id, title, original_title, synopsis, year, duration, rating, genres, poster_url, backdrop_url, trailer_url, age_rating, file_dubbing, file_subtitled, file_cinema, file_4k, subtitle_pt, subtitle_en, subtitle_es, is_featured, views';
+const PUBLIC_FIELDS = 'id, tmdb_id, title, original_title, synopsis, year, duration, rating, genres, poster_url, backdrop_url, trailer_url, age_rating, file_dubbing, file_subtitled, file_cinema, file_4k, file_color, file_bw, subtitle_pt, subtitle_en, subtitle_es, is_featured, views';
 
 // Lista filmes com filtros e paginação
 router.get('/', optionalAuth, async (req, res) => {

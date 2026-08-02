@@ -9,6 +9,8 @@ const VERSION_META = {
   subtitled: { label: 'Legendado', color: '#1a73e8' },
   cinema:    { label: 'Original',  color: '#555' },
   '4k':      { label: '4K',        color: '#f59e0b' },
+  color:     { label: 'Colorido',  color: '#10b981' },
+  bw:        { label: 'P&B',       color: '#8b5cf6' },
 };
 
 // focusSection: 'back' | 'actions' | 'seasons' | 'episodes' | 'like'
@@ -221,7 +223,7 @@ export default function DetailScreen() {
     if (el) el.scrollIntoView({ block: 'nearest' });
   }, [secIdx, section]);
 
-  const versions = isSeries ? [] : ['dubbing','subtitled','cinema','4k'].filter(k => detail && detail['file_' + k]);
+  const versions = isSeries ? [] : ['dubbing','subtitled','cinema','4k','color','bw'].filter(k => detail && detail['file_' + k]);
   const currentEps = episodes.filter(e => e.season_number === season);
 
   // Actions row items: [play/versions..., watchlist, like, dislike]
