@@ -1,10 +1,17 @@
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
+import { memo, useCallback } from 'react';
+import { View, Text, FlatList, StyleSheet, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import MovieCard from './MovieCard';
 
-export default function ContentRow({ title, items, type, seeAllRoute }) {
+function ContentRow({ title, items, type, seeAllRoute }) {
   const router = useRouter();
   if (!items?.length) return null;
+
+  const renderItem = useCallback(({ item }) => (
+    <MovieCard item={item} type={type} />
+  ), [type]);
+
+  const keyExtractor = useCallback(item => String(item.id), []);
 
   return (
     <View style={styles.container}>
@@ -16,18 +23,23 @@ export default function ContentRow({ title, items, type, seeAllRoute }) {
           </TouchableOpacity>
         )}
       </View>
-      <ScrollView
+      <FlatList
         horizontal
+        data={items}
+        renderItem={renderItem}
+        keyExtractor={keyExtractor}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.row}
-      >
-        {items.map(item => (
-          <MovieCard key={item.id} item={item} type={type} />
-        ))}
-      </ScrollView>
+        initialNumToRender={6}
+        maxToRenderPerBatch={5}
+        windowSize={5}
+        removeClippedSubviews={true}
+      />
     </View>
   );
 }
+
+export default memo(ContentRow);
 
 const styles = StyleSheet.create({
   container: { marginBottom: 28 },

@@ -111,8 +111,8 @@ export default function PlayerScreen() {
   const player = useVideoPlayer(initialSource, p => {
     p.play();
     p.preservesPitch = true;
-    p.timeUpdateEventInterval = 0.5;
-    p.showNowPlayingNotification = true; // background playback + controles na tela de bloqueio
+    p.timeUpdateEventInterval = 1; // era 0.5 — 2 re-renders/s no componente inteiro; 1s é suficiente
+    p.showNowPlayingNotification = true;
   });
 
   const { currentTime = 0 } = useEvent(player, 'timeUpdate', { currentTime: 0 });
@@ -538,6 +538,16 @@ export default function PlayerScreen() {
         fullscreenOptions={{ isFullscreenSupported: false }}
         allowsExternalPlayback={true}
         requiresLinearPlayback={false}
+        bufferOptions={{
+          // Android (ExoPlayer): pré-carrega até 2 min para aguentar quedas de rede
+          minBufferMs: 15000,
+          maxBufferMs: 120000,
+          bufferForPlaybackMs: 2500,
+          bufferForPlaybackAfterRebufferMs: 8000,
+          // iOS (AVPlayer): aguarda buffer suficiente antes de iniciar
+          preferredForwardBufferDuration: 60,
+          waitsToMinimizeStalling: true,
+        }}
       />
 
       {/* Buffering */}

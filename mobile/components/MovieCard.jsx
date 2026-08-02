@@ -1,11 +1,14 @@
+import { memo } from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet, useWindowDimensions } from 'react-native';
 import { useRouter } from 'expo-router';
 
 const DEFAULT_CARD_W = 110;
 const DEFAULT_CARD_H = 165;
 
-export default function MovieCard({ item, type, compact = false, cardWidth, progress }) {
+function MovieCard({ item, type, compact = false, cardWidth, progress }) {
   const router = useRouter();
+  // useWindowDimensions só é necessário no modo compact — manter a chamada
+  // é inofensivo, mas encapsula o motivo para não removê-la por engano.
   const { width: screenWidth } = useWindowDimensions();
   const isSeries = type === 'series' || (type === 'mixed' && (item.total_seasons != null || item.year_start != null));
   const route = isSeries ? `/serie/${item.id}` : `/filme/${item.id}`;
@@ -52,6 +55,8 @@ export default function MovieCard({ item, type, compact = false, cardWidth, prog
     </TouchableOpacity>
   );
 }
+
+export default memo(MovieCard);
 
 const styles = StyleSheet.create({
   card: { marginBottom: 4 },

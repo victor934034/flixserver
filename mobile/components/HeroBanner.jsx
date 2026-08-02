@@ -1,14 +1,21 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, memo } from 'react';
 import {
   View, Text, Image, TouchableOpacity, StyleSheet,
-  useWindowDimensions, ScrollView,
+  useWindowDimensions,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-export default function HeroBanner({ items = [] }) {
+// Substitui qualidade "original" (~1920px) por w780 (~780px) para evitar
+// decode de JPEG enorme na thread JS — principal causa de queda de FPS na home.
+function tmdbImg(url) {
+  if (!url) return null;
+  return url.replace('/t/p/original', '/t/p/w780').replace('/t/p/w1280', '/t/p/w780');
+}
+
+function HeroBanner({ items = [] }) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
@@ -37,7 +44,7 @@ export default function HeroBanner({ items = [] }) {
   return (
     <View style={{ width, height: bannerH }}>
       <Image
-        source={{ uri: item.backdrop_url || item.poster_url }}
+        source={{ uri: tmdbImg(item.backdrop_url) || tmdbImg(item.poster_url) }}
         style={StyleSheet.absoluteFill}
         resizeMode="cover"
       />
@@ -75,6 +82,8 @@ export default function HeroBanner({ items = [] }) {
     </View>
   );
 }
+
+export default memo(HeroBanner);
 
 const styles = StyleSheet.create({
   content: {
