@@ -1,0 +1,29 @@
+.main { padding: 7rem 3rem 4rem; min-height: 100vh; }
+
+.header { margin-bottom: 2rem; }
+.title { font-size: 2rem; font-weight: 700; }
+.subtitle { color: var(--text-secondary); font-size: 0.95rem; margin-top: 0.4rem; }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1.5rem; }
+
+.card { display: block; text-decoration: none; color: inherit; }
+
+.cover {
+  position: relative; width: 100%; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden;
+  background: linear-gradient(135deg, #1a1a1a 0%, #252525 100%);
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.card:hover .cover { transform: scale(1.03); }
+
+.noImage {
+  width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+  font-size: 2.4rem; font-weight: 700; color: #444;
+}
+
+.cardTitle { margin-top: 0.6rem; font-size: 1rem; font-weight: 700; color: var(--text-primary); }
+.cardDesc {
+  margin-top: 0.2rem; font-size: 0.82rem; color: var(--text-muted);
+  overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+
+.loading, .empty { color: var(--text-secondary); font-size: 1rem; margin-top: 4rem; text-align: center; }

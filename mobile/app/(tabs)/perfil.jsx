@@ -125,6 +125,13 @@ export default function PerfilScreen() {
           />
           <View style={styles.divider} />
           <MenuItem
+            icon="albums-outline"
+            label="Cronologias"
+            desc="Coleções em ordem, como universos e franquias"
+            onPress={() => router.push('/cronologia')}
+          />
+          <View style={styles.divider} />
+          <MenuItem
             icon="time-outline"
             label="Histórico"
             desc="Continue de onde parou"

@@ -54,7 +54,16 @@ export default function SeriesScreen() {
       <Text style={styles.header}>Séries</Text>
 
       {genres.length > 0 && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.genreRow} style={styles.genreScroll}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.genreRow}
+          style={styles.genreScroll}
+          decelerationRate="fast"
+        >
+          <TouchableOpacity style={[styles.chip, !selectedGenre && styles.chipActive]} onPress={() => setSelectedGenre(null)}>
+            <Text style={[styles.chipText, !selectedGenre && styles.chipTextActive]}>Todos</Text>
+          </TouchableOpacity>
           {genres.map(g => (
             <TouchableOpacity key={g} style={[styles.chip, selectedGenre === g && styles.chipActive]} onPress={() => toggleGenre(g)}>
               <Text style={[styles.chipText, selectedGenre === g && styles.chipTextActive]}>{g}</Text>
@@ -93,14 +102,17 @@ const styles = StyleSheet.create({
   header: { fontSize: 24, fontWeight: '700', color: '#fff', paddingHorizontal: 16, paddingBottom: 6 },
   loader: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   emptyText: { color: '#555', fontSize: 15 },
-  genreScroll: { flexGrow: 0, marginBottom: 8 },
-  genreRow: { paddingHorizontal: 12, gap: 8 },
+  genreScroll: { flexGrow: 0, marginBottom: 10 },
+  genreRow: { paddingHorizontal: 12, gap: 8, alignItems: 'center' },
   chip: {
-    paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20,
+    paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20,
     backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: '#2a2a2a',
   },
-  chipActive: { backgroundColor: '#E50914', borderColor: '#E50914' },
-  chipText: { color: '#777', fontSize: 12, fontWeight: '500' },
+  chipActive: {
+    backgroundColor: '#E50914', borderColor: '#E50914',
+    shadowColor: '#E50914', shadowOpacity: 0.4, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 3,
+  },
+  chipText: { color: '#888', fontSize: 12.5, fontWeight: '600' },
   chipTextActive: { color: '#fff', fontWeight: '700' },
   grid: { paddingHorizontal: 12, paddingBottom: 16 },
 });

@@ -432,6 +432,163 @@ router.delete('/categories/:id', async (req, res) => {
   }
 });
 
+// ---- COLEÇÕES / CRONOLOGIA ----
+router.get('/collections', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('collections').select('*').order('order_index');
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/collections', async (req, res) => {
+  try {
+    const { name, slug, description, cover_url, order_index, is_active } = req.body;
+    if (!name?.trim() || !slug?.trim()) {
+      return res.status(400).json({ error: 'Nome e slug são obrigatórios' });
+    }
+    const { data, error } = await supabase
+      .from('collections')
+      .insert({
+        name: name.trim(),
+        slug: slug.trim(),
+        description: description || null,
+        cover_url: cover_url || null,
+        order_index: order_index || 0,
+        is_active: is_active !== false,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    res.status(201).json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/collections/:id', async (req, res) => {
+  try {
+    const { name, slug, description, cover_url, order_index, is_active } = req.body;
+    const updates = {};
+    if (name !== undefined) updates.name = name.trim();
+    if (slug !== undefined) updates.slug = slug.trim();
+    if (description !== undefined) updates.description = description;
+    if (cover_url !== undefined) updates.cover_url = cover_url;
+    if (order_index !== undefined) updates.order_index = order_index;
+    if (is_active !== undefined) updates.is_active = is_active;
+
+    const { data, error } = await supabase
+      .from('collections')
+      .update(updates)
+      .eq('id', req.params.id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/collections/:id', async (req, res) => {
+  try {
+    const { error } = await supabase.from('collections').delete().eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/collections/:id/items', async (req, res) => {
+  try {
+    const { data: items, error } = await supabase
+      .from('collection_items')
+      .select('*')
+      .eq('collection_id', req.params.id)
+      .order('position');
+    if (error) throw error;
+
+    const movieIds = (items || []).filter(i => i.content_type === 'movie').map(i => i.content_id);
+    const seriesIds = (items || []).filter(i => i.content_type === 'series').map(i => i.content_id);
+
+    const [moviesRes, seriesRes] = await Promise.all([
+      movieIds.length ? supabase.from('movies').select('id, title, poster_url, year').in('id', movieIds) : { data: [] },
+      seriesIds.length ? supabase.from('series').select('id, title, poster_url, year_start').in('id', seriesIds) : { data: [] },
+    ]);
+    const moviesMap = Object.fromEntries((moviesRes.data || []).map(m => [m.id, m]));
+    const seriesMap = Object.fromEntries((seriesRes.data || []).map(s => [s.id, s]));
+
+    const enriched = (items || []).map(item => ({
+      ...item,
+      ...(item.content_type === 'movie' ? moviesMap[item.content_id] : seriesMap[item.content_id]),
+    }));
+    res.json(enriched);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/collections/:id/items', async (req, res) => {
+  try {
+    const { content_type, content_id, position, note } = req.body;
+    if (!['movie', 'series'].includes(content_type) || !content_id) {
+      return res.status(400).json({ error: 'content_type e content_id são obrigatórios' });
+    }
+    const { data, error } = await supabase
+      .from('collection_items')
+      .insert({
+        collection_id: req.params.id,
+        content_type,
+        content_id,
+        position: position ?? 0,
+        note: note || null,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    res.status(201).json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/collections/:id/items/:itemId', async (req, res) => {
+  try {
+    const { position, note } = req.body;
+    const updates = {};
+    if (position !== undefined) updates.position = position;
+    if (note !== undefined) updates.note = note;
+    const { data, error } = await supabase
+      .from('collection_items')
+      .update(updates)
+      .eq('id', req.params.itemId)
+      .eq('collection_id', req.params.id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/collections/:id/items/:itemId', async (req, res) => {
+  try {
+    const { error } = await supabase
+      .from('collection_items')
+      .delete()
+      .eq('id', req.params.itemId)
+      .eq('collection_id', req.params.id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ---- LIKES STATS ----
 router.get('/likes/stats', async (req, res) => {
   try {

@@ -309,9 +309,22 @@ async function remuxToWebAac(input, outputPath) {
   }
 }
 
+const ALLOWED_EXT_BY_ROUTE = {
+  '/video': /\.(mp4|mkv|avi|mov|m4v|webm|ts|flv|wmv|mpg|mpeg)$/i,
+  '/subtitle': /\.(srt|vtt|ass|ssa|sub)$/i,
+  '/avatar': /\.(jpe?g|png|webp|gif)$/i,
+};
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 50 * 1024 * 1024 * 1024 }, // 50 GB
+  fileFilter: (req, file, cb) => {
+    const allowed = ALLOWED_EXT_BY_ROUTE[req.path];
+    if (allowed && !allowed.test(file.originalname || '')) {
+      return cb(new Error('Tipo de arquivo não permitido para esta rota'));
+    }
+    cb(null, true);
+  },
 });
 
 router.use(adminMiddleware);

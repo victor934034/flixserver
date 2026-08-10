@@ -23,6 +23,21 @@ const streamsRouter = require('./routes/streams');
 const likesRouter = require('./routes/likes');
 const iptvRouter = require('./routes/iptv');
 const remuxRouter = require('./routes/remux');
+const collectionsRouter = require('./routes/collections');
+
+const REQUIRED_ENV = ['JWT_SECRET', 'SUPABASE_URL', 'SUPABASE_SERVICE_KEY'];
+const missingEnv = REQUIRED_ENV.filter((key) => !process.env[key]);
+if (missingEnv.length > 0) {
+  console.error(`Variáveis de ambiente obrigatórias ausentes: ${missingEnv.join(', ')}`);
+  process.exit(1);
+}
+if (process.env.JWT_SECRET.length < 20) {
+  console.error('JWT_SECRET muito curto/fraco — use uma string aleatória com pelo menos 20 caracteres.');
+  process.exit(1);
+}
+if (process.env.NODE_ENV === 'production' && !process.env.FRONTEND_URL) {
+  console.warn('[aviso] FRONTEND_URL não definido em produção — CORS liberará qualquer origem.');
+}
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -54,6 +69,13 @@ app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/send-otp', authLimiter);
 app.use('/api/auth/verify-otp', authLimiter);
 
+const tvCodeLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  message: { error: 'Muitas tentativas. Aguarde um minuto.' },
+});
+app.use('/api/auth/tv/code', tvCodeLimiter);
+
 app.use('/api/movies', moviesRouter);
 app.use('/api/series', seriesRouter);
 app.use('/api/episodes', episodesRouter);
@@ -73,6 +95,7 @@ app.use('/api/streams', streamsRouter);
 app.use('/api/likes', likesRouter);
 app.use('/api/iptv', iptvRouter);
 app.use('/api/remux', remuxRouter);
+app.use('/api/collections', collectionsRouter);
 
 app.get('/api/preset-avatars', async (req, res) => {
   const { supabase } = require('./services/supabase');

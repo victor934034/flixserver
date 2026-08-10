@@ -14,6 +14,7 @@ const NAV = [
   { href: '/admin/importar', label: 'Importar TMDB' },
   { href: '/admin/usuarios', label: 'Usuários' },
   { href: '/admin/categorias', label: 'Categorias' },
+  { href: '/admin/colecoes', label: 'Cronologias' },
   { href: '/admin/sugestoes', label: 'Sugestões' },
   { href: '/admin/likes', label: 'Likes' },
   { href: '/admin/avatares', label: 'Avatares' },
