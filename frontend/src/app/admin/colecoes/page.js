@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import api from '../../../lib/api';
 import styles from './page.module.css';
 
@@ -12,6 +12,8 @@ export default function AdminColecoes() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [managing, setManaging] = useState(null); // coleção com itens sendo gerenciada
+  const [uploadingCover, setUploadingCover] = useState(false);
+  const coverInputRef = useRef(null);
 
   function load() {
     setLoading(true);
@@ -30,6 +32,23 @@ export default function AdminColecoes() {
   function handleInput(e) {
     const { name, value, type, checked } = e.target;
     setForm(f => ({ ...f, [name]: type === 'checkbox' ? checked : value }));
+  }
+
+  async function handleCoverUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingCover(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await api.post('/upload/avatar', formData);
+      setForm(f => ({ ...f, cover_url: res.data.cdnUrl }));
+    } catch (err) {
+      alert('Erro no upload: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setUploadingCover(false);
+      e.target.value = '';
+    }
   }
 
   function slugify(val) {
@@ -96,9 +115,36 @@ export default function AdminColecoes() {
               <span>Ordem</span>
               <input name="order_index" type="number" value={form.order_index} onChange={handleInput} className={styles.input} style={{ width: 80 }} />
             </label>
-            <label className={styles.field} style={{ flex: 1, minWidth: 240 }}>
-              <span>Capa (URL)</span>
-              <input name="cover_url" value={form.cover_url || ''} onChange={handleInput} className={styles.input} placeholder="https://..." />
+            <label className={styles.field} style={{ flex: 1, minWidth: 280 }}>
+              <span>Capa</span>
+              <div className={styles.coverRow}>
+                {form.cover_url && (
+                  <img src={form.cover_url} alt="" className={styles.coverPreview} />
+                )}
+                <input
+                  name="cover_url"
+                  value={form.cover_url || ''}
+                  onChange={handleInput}
+                  className={styles.input}
+                  style={{ flex: 1 }}
+                  placeholder="https://... ou envie uma imagem"
+                />
+                <input
+                  ref={coverInputRef}
+                  type="file"
+                  accept="image/*"
+                  style={{ display: 'none' }}
+                  onChange={handleCoverUpload}
+                />
+                <button
+                  type="button"
+                  className={styles.btnCancel}
+                  onClick={() => coverInputRef.current?.click()}
+                  disabled={uploadingCover}
+                >
+                  {uploadingCover ? 'Enviando...' : 'Enviar imagem'}
+                </button>
+              </div>
             </label>
             <label className={styles.field} style={{ flex: 1, minWidth: 240 }}>
               <span>Descrição</span>
