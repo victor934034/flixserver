@@ -90,12 +90,14 @@ function ContinueCard({ item }) {
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
+  const router = useRouter();
   const { activeProfile } = useProfile();
   const [featured, setFeatured] = useState([]);
   const [movies, setMovies] = useState([]);
   const [series, setSeries] = useState([]);
   const [continueItems, setContinueItems] = useState([]);
   const [popular, setPopular] = useState([]);
+  const [collections, setCollections] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const fetchHistory = useCallback(async () => {
@@ -118,7 +120,8 @@ export default function HomeScreen() {
       api.get('/series?limit=20').catch(() => ({ data: [] })),
       api.get('/movies/section/popular').catch(() => ({ data: [] })),
       api.get('/series/section/popular').catch(() => ({ data: [] })),
-    ]).then(([fRes, mRes, sRes, popMoviesRes, popSeriesRes]) => {
+      api.get('/collections').catch(() => ({ data: [] })),
+    ]).then(([fRes, mRes, sRes, popMoviesRes, popSeriesRes, colRes]) => {
       setFeatured(Array.isArray(fRes.data) ? fRes.data : []);
       setMovies(Array.isArray(mRes.data) ? mRes.data : (mRes.data?.data ?? []));
       setSeries(Array.isArray(sRes.data) ? sRes.data : (sRes.data?.data ?? []));
@@ -126,6 +129,7 @@ export default function HomeScreen() {
       const popS = Array.isArray(popSeriesRes.data) ? popSeriesRes.data : [];
       const merged = [...popM, ...popS].sort((a, b) => (b.views || 0) - (a.views || 0)).slice(0, 20);
       setPopular(merged);
+      setCollections(Array.isArray(colRes.data) ? colRes.data : []);
     }).finally(() => setLoading(false));
   }, []);
 
@@ -176,6 +180,31 @@ export default function HomeScreen() {
           <ContentRow title="Mais Assistidos" items={popular} type="mixed" />
         )}
 
+        {collections.length > 0 && (
+          <View style={styles.continueSection}>
+            <Text style={styles.sectionTitle}>Cronologias</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.collectionsRow}>
+              {collections.map(c => (
+                <TouchableOpacity
+                  key={c.id}
+                  style={styles.collectionCard}
+                  activeOpacity={0.8}
+                  onPress={() => router.push(`/cronologia/${c.slug}`)}
+                >
+                  {c.cover_url ? (
+                    <Image source={{ uri: c.cover_url }} style={styles.collectionCover} resizeMode="cover" />
+                  ) : (
+                    <View style={[styles.collectionCover, styles.collectionCoverPlaceholder]}>
+                      <Text style={styles.collectionCoverText}>{c.name?.[0]}</Text>
+                    </View>
+                  )}
+                  <Text style={styles.collectionTitle} numberOfLines={1}>{c.name}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+
         {isEmpty && (
           <View style={styles.empty}>
             <Text style={styles.emptyTitle}>Nenhum conteúdo disponível</Text>
@@ -198,6 +227,12 @@ const styles = StyleSheet.create({
   },
   continueRow: { paddingHorizontal: 16, gap: 10 },
   continueCard: { marginRight: 0 },
+  collectionsRow: { paddingHorizontal: 16, gap: 12 },
+  collectionCard: { width: 150 },
+  collectionCover: { width: 150, height: 90, borderRadius: 8, backgroundColor: '#1a1a1a' },
+  collectionCoverPlaceholder: { justifyContent: 'center', alignItems: 'center' },
+  collectionCoverText: { color: '#444', fontSize: 24, fontWeight: '700' },
+  collectionTitle: { color: '#ccc', fontSize: 12.5, fontWeight: '600', marginTop: 6 },
   continuePlaceholder: { borderRadius: 6, backgroundColor: '#1a1a1a' },
   progressTrack: {
     height: 3, backgroundColor: '#333', borderRadius: 1.5,

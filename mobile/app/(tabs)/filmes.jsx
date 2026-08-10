@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
-import { View, Text, FlatList, StyleSheet, ActivityIndicator, useWindowDimensions, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, FlatList, StyleSheet, ActivityIndicator, useWindowDimensions, TouchableOpacity, Modal, ScrollView } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MovieCard from '../../components/MovieCard';
 import api from '../../lib/api';
@@ -17,6 +18,7 @@ export default function FilmesScreen() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [genres, setGenres] = useState([]);
   const [selectedGenre, setSelectedGenre] = useState(null);
+  const [genreModal, setGenreModal] = useState(false);
 
   useEffect(() => {
     api.get('/genres').then(r => setGenres(Array.isArray(r.data) ? r.data : [])).catch(() => {});
@@ -44,30 +46,47 @@ export default function FilmesScreen() {
     load(page + 1);
   };
 
-  const toggleGenre = (g) => setSelectedGenre(prev => prev === g ? null : g);
+  const selectGenre = (g) => { setSelectedGenre(g); setGenreModal(false); };
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      <Text style={styles.header}>Filmes</Text>
-
-      {genres.length > 0 && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.genreRow}
-          style={styles.genreScroll}
-          decelerationRate="fast"
-        >
-          <TouchableOpacity style={[styles.chip, !selectedGenre && styles.chipActive]} onPress={() => setSelectedGenre(null)}>
-            <Text style={[styles.chipText, !selectedGenre && styles.chipTextActive]}>Todos</Text>
+      <View style={styles.headerRow}>
+        <Text style={styles.header}>Filmes</Text>
+        {genres.length > 0 && (
+          <TouchableOpacity style={styles.genreDropBtn} onPress={() => setGenreModal(true)} activeOpacity={0.7}>
+            <Text style={styles.genreDropTxt} numberOfLines={1}>{selectedGenre || 'Todos os gêneros'}</Text>
+            <Ionicons name="chevron-down" size={15} color="#fff" />
           </TouchableOpacity>
-          {genres.map(g => (
-            <TouchableOpacity key={g} style={[styles.chip, selectedGenre === g && styles.chipActive]} onPress={() => toggleGenre(g)}>
-              <Text style={[styles.chipText, selectedGenre === g && styles.chipTextActive]}>{g}</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      )}
+        )}
+      </View>
+
+      <Modal
+        visible={genreModal}
+        transparent
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={() => setGenreModal(false)}
+      >
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setGenreModal(false)}>
+          <View style={styles.modalSheet} onStartShouldSetResponder={() => true}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>Gêneros</Text>
+            <ScrollView style={{ maxHeight: '70%' }}>
+              <TouchableOpacity style={styles.modalItem} activeOpacity={0.7} onPress={() => selectGenre(null)}>
+                <Text style={[styles.modalItemTxt, !selectedGenre && styles.modalItemTxtActive]}>Todos os gêneros</Text>
+                {!selectedGenre && <Ionicons name="checkmark" size={20} color="#E50914" />}
+              </TouchableOpacity>
+              {genres.map(g => (
+                <TouchableOpacity key={g} style={styles.modalItem} activeOpacity={0.7} onPress={() => selectGenre(g)}>
+                  <Text style={[styles.modalItemTxt, selectedGenre === g && styles.modalItemTxtActive]}>{g}</Text>
+                  {selectedGenre === g && <Ionicons name="checkmark" size={20} color="#E50914" />}
+                </TouchableOpacity>
+              ))}
+              <View style={{ height: 12 }} />
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {loading ? (
         <View style={styles.loader}><ActivityIndicator size="large" color="#E50914" /></View>
@@ -94,19 +113,43 @@ export default function FilmesScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0a0a0a' },
-  header: { fontSize: 24, fontWeight: '700', color: '#fff', paddingHorizontal: 16, paddingBottom: 6 },
+  headerRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingBottom: 12, gap: 10,
+  },
+  header: { fontSize: 24, fontWeight: '700', color: '#fff' },
   loader: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  genreScroll: { flexGrow: 0, marginBottom: 10 },
-  genreRow: { paddingHorizontal: 12, gap: 8, alignItems: 'center' },
-  chip: {
-    paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20,
-    backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: '#2a2a2a',
+  genreDropBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    maxWidth: 170,
+    paddingHorizontal: 14, paddingVertical: 8,
+    borderRadius: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: 'rgba(255,255,255,0.07)',
   },
-  chipActive: {
-    backgroundColor: '#E50914', borderColor: '#E50914',
-    shadowColor: '#E50914', shadowOpacity: 0.4, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 3,
+  genreDropTxt: { color: '#fff', fontSize: 12.5, fontWeight: '700', flexShrink: 1 },
+  modalOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'flex-end',
   },
-  chipText: { color: '#888', fontSize: 12.5, fontWeight: '600' },
-  chipTextActive: { color: '#fff', fontWeight: '700' },
+  modalSheet: {
+    backgroundColor: '#141414', borderTopLeftRadius: 16, borderTopRightRadius: 16,
+    paddingTop: 12, paddingHorizontal: 0,
+  },
+  modalHandle: {
+    width: 36, height: 4, borderRadius: 2, backgroundColor: '#333',
+    alignSelf: 'center', marginBottom: 16,
+  },
+  modalTitle: {
+    color: 'rgba(255,255,255,0.45)', fontSize: 12, fontWeight: '700',
+    textTransform: 'uppercase', letterSpacing: 1.5,
+    paddingHorizontal: 20, marginBottom: 8,
+  },
+  modalItem: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingVertical: 16,
+    borderBottomWidth: 1, borderBottomColor: '#1e1e1e',
+  },
+  modalItemTxt: { color: '#b3b3b3', fontSize: 16 },
+  modalItemTxtActive: { color: '#fff', fontWeight: '700' },
   grid: { paddingHorizontal: 12, paddingBottom: 16 },
 });
