@@ -1,18 +1,79 @@
-.main { padding: 7rem 3rem 4rem; min-height: 100vh; }
+.main { min-height: 100vh; padding-bottom: 4rem; }
 
-.header { margin-bottom: 2rem; }
-.title { font-size: 2rem; font-weight: 700; }
-.subtitle { color: var(--text-secondary); font-size: 0.95rem; margin-top: 0.4rem; max-width: 60ch; }
+.hero {
+  position: relative;
+  padding: 9rem 3rem 3.5rem;
+  background-size: cover;
+  background-position: center;
+  background-color: #141414;
+}
+.heroOverlay {
+  position: absolute; inset: 0;
+  background: linear-gradient(180deg, rgba(10,10,10,0.55) 0%, rgba(10,10,10,0.75) 60%, var(--bg-primary) 100%);
+}
+.heroContent { position: relative; max-width: 60ch; }
 
-.list { display: flex; flex-direction: column; gap: 1.25rem; }
+.heroKicker {
+  display: inline-block; font-size: 0.75rem; font-weight: 700; letter-spacing: 1.5px;
+  text-transform: uppercase; color: var(--accent); margin-bottom: 0.6rem;
+}
+.title { font-size: 2.2rem; font-weight: 800; color: #fff; line-height: 1.15; }
+.subtitle { color: rgba(255,255,255,0.75); font-size: 1rem; margin-top: 0.7rem; line-height: 1.5; }
+.count { display: inline-block; margin-top: 1rem; font-size: 0.85rem; color: rgba(255,255,255,0.55); font-weight: 600; }
 
-.itemRow { display: flex; align-items: center; gap: 1.25rem; }
+.timeline { max-width: 900px; margin: 3rem auto 0; padding: 0 2rem; }
 
-.position {
-  flex-shrink: 0; width: 40px; height: 40px; border-radius: 50%;
-  background: rgba(255,255,255,0.06); border: 1px solid var(--border);
+.timelineRow { display: flex; gap: 1.5rem; }
+
+.markerCol { display: flex; flex-direction: column; align-items: center; flex-shrink: 0; width: 40px; }
+.marker {
+  width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0;
+  background: var(--bg-secondary); border: 2px solid var(--accent);
   display: flex; align-items: center; justify-content: center;
-  font-weight: 700; font-size: 1rem; color: var(--accent);
+  font-weight: 800; font-size: 1rem; color: var(--accent);
+}
+.connector { flex: 1; width: 2px; min-height: 24px; background: linear-gradient(var(--accent), rgba(255,255,255,0.08)); margin: 4px 0; }
+
+.card {
+  display: flex; gap: 1.1rem; text-decoration: none; color: inherit;
+  padding-bottom: 2rem; flex: 1;
+}
+
+.poster {
+  position: relative; width: 90px; height: 130px; border-radius: 6px; overflow: hidden;
+  flex-shrink: 0; background: #1a1a1a;
+  transition: transform 0.2s;
+}
+.card:hover .poster { transform: scale(1.04); }
+
+.noImage {
+  width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+  font-size: 1.8rem; font-weight: 700; color: #444;
+}
+
+.info { flex: 1; min-width: 0; padding-top: 2px; }
+.infoTop { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.typeBadge {
+  font-size: 0.62rem; font-weight: 800; letter-spacing: 1px; text-transform: uppercase;
+  background: var(--accent); color: #fff; padding: 2px 6px; border-radius: 3px;
+}
+.year { font-size: 0.78rem; color: var(--text-muted); }
+.rating { font-size: 0.78rem; color: #f5c518; font-weight: 600; }
+
+.cardTitle { font-size: 1.05rem; font-weight: 700; color: var(--text-primary); margin-bottom: 4px; }
+.note { font-size: 0.82rem; color: var(--accent); font-weight: 600; margin-bottom: 4px; }
+.synopsis {
+  font-size: 0.85rem; color: var(--text-muted); line-height: 1.5;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 
 .loading, .empty { color: var(--text-secondary); font-size: 1rem; margin-top: 4rem; text-align: center; }
+
+@media (max-width: 640px) {
+  .hero { padding: 7.5rem 1.25rem 2.5rem; }
+  .title { font-size: 1.6rem; }
+  .timeline { padding: 0 1rem; }
+  .timelineRow { gap: 0.9rem; }
+  .poster { width: 70px; height: 102px; }
+  .synopsis { -webkit-line-clamp: 3; }
+}

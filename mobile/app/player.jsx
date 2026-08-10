@@ -535,6 +535,7 @@ export default function PlayerScreen() {
         style={StyleSheet.absoluteFill}
         contentFit="contain"
         nativeControls={false}
+        surfaceType="textureView"
         fullscreenOptions={{ isFullscreenSupported: false }}
         allowsExternalPlayback={true}
         requiresLinearPlayback={false}

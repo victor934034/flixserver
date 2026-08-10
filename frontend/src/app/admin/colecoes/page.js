@@ -249,8 +249,12 @@ function CollectionItems({ collection, onClose }) {
   }
 
   async function removeItem(itemId) {
-    await api.delete(`/admin/collections/${collection.id}/items/${itemId}`);
-    load();
+    try {
+      await api.delete(`/admin/collections/${collection.id}/items/${itemId}`);
+      load();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Erro ao remover item');
+    }
   }
 
   async function moveItem(index, direction) {
@@ -258,11 +262,19 @@ function CollectionItems({ collection, onClose }) {
     if (target < 0 || target >= items.length) return;
     const a = items[index];
     const b = items[target];
-    await Promise.all([
-      api.put(`/admin/collections/${collection.id}/items/${a.id}`, { position: b.position }),
-      api.put(`/admin/collections/${collection.id}/items/${b.id}`, { position: a.position }),
-    ]);
-    load();
+    // Posições podem ser iguais (itens antigos criados com position=0) — garante
+    // que a troca sempre gere valores diferentes, senão a ordenação não muda.
+    const posA = b.position;
+    const posB = a.position !== b.position ? a.position : a.position + 1;
+    try {
+      await Promise.all([
+        api.put(`/admin/collections/${collection.id}/items/${a.id}`, { position: posA }),
+        api.put(`/admin/collections/${collection.id}/items/${b.id}`, { position: posB }),
+      ]);
+      load();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Erro ao reordenar item');
+    }
   }
 
   return (

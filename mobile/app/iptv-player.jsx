@@ -91,6 +91,7 @@ export default function IptvPlayerScreen() {
         style={StyleSheet.absoluteFill}
         contentFit="contain"
         nativeControls={false}
+        surfaceType="textureView"
       />
 
       {isBuffering && !isError && (
