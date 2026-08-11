@@ -571,7 +571,8 @@ router.put('/collections/:id/items/:itemId', async (req, res) => {
     if (error) throw error;
     res.json(data);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[admin] PUT collection item error:', err);
+    res.status(500).json({ error: err.message, details: err.details, hint: err.hint, code: err.code });
   }
 });
 
@@ -585,7 +586,8 @@ router.delete('/collections/:id/items/:itemId', async (req, res) => {
     if (error) throw error;
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[admin] DELETE collection item error:', err);
+    res.status(500).json({ error: err.message, details: err.details, hint: err.hint, code: err.code });
   }
 });
 

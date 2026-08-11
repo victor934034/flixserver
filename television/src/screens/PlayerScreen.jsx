@@ -3,7 +3,8 @@ import {
   View, Text, StyleSheet, Animated,
   Dimensions, BackHandler, Pressable,
 } from 'react-native';
-import { Video, ResizeMode } from 'expo-av';
+import { VideoView, useVideoPlayer } from 'expo-video';
+import { useEvent } from 'expo';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../lib/api';
@@ -16,9 +17,26 @@ const SEEK_MS    = 10_000;
 const HIDE_DELAY = 5_000;
 const ACCENT     = '#c91c2c';
 
-function toHlsUrl(url) {
-  if (!url) return url;
-  return url.replace(/\.(mp4|mkv|avi|mov|m4v|webm|ts|wmv)$/i, '.m3u8');
+// Parseia VTT externo para overlay manual de legenda (expo-video não tem seleção nativa de textTracks)
+function parseVtt(text) {
+  const cues = [];
+  const blocks = text.split(/\n{2,}/);
+  for (const block of blocks) {
+    const lines = block.trim().split('\n');
+    const tl = lines.find(l => l.includes('-->'));
+    if (!tl) continue;
+    function toSec(s) {
+      const p = s.trim().split(':');
+      return p.length === 3
+        ? Number(p[0]) * 3600 + Number(p[1]) * 60 + parseFloat(p[2])
+        : Number(p[0]) * 60 + parseFloat(p[1]);
+    }
+    const [s, e] = tl.split('-->').map(toSec);
+    const txt = lines.slice(lines.indexOf(tl) + 1).join('\n')
+      .replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ').trim();
+    if (txt && !isNaN(s) && !isNaN(e)) cues.push({ start: s, end: e, text: txt });
+  }
+  return cues;
 }
 
 const TRACK_META = {
@@ -166,16 +184,17 @@ export default function PlayerScreen({ navigation, route }) {
     };
   }, [seriesContext, contentMeta]);
 
+  const currentUrl   = tracks[trackKey] || initialUrl;
+
   // ── Refs ────────────────────────────────────────────────────────────────────
-  const videoRef       = useRef(null);
   const hideTimer      = useRef(null);
   const switchPosRef   = useRef(startAt && startAt > 5 ? startAt * 1000 : null);
   const wasLoadedRef   = useRef(false);
+  const endedRef       = useRef(false);
   const playingRef     = useRef(false);
   const panelRef       = useRef(null);
   const positionRef    = useRef(0);
   const durationRef    = useRef(0);
-  const lastTickRef    = useRef(0);
   const trackWRef      = useRef(W - r(88));
 
   // Animated values — atualizados via .setValue() sem causar re-render
@@ -183,15 +202,25 @@ export default function PlayerScreen({ navigation, route }) {
   const bufferAnim   = useRef(new Animated.Value(0)).current;
   const ctrlOp       = useRef(new Animated.Value(1)).current;
 
+  // ── expo-video player ──────────────────────────────────────────────────────
+  const initialSource = useRef({ uri: currentUrl }).current;
+  const player = useVideoPlayer(initialSource, p => {
+    p.play();
+    p.timeUpdateEventInterval = 1;
+  });
+  const { currentTime = 0 } = useEvent(player, 'timeUpdate', { currentTime: 0 });
+  const { isPlaying = false } = useEvent(player, 'playingChange', { isPlaying: false });
+  const { status = 'idle', error: playerError } = useEvent(player, 'statusChange', { status: 'idle' });
+
   // ── State ───────────────────────────────────────────────────────────────────
   const [trackKey,    setTrackKey]   = useState(initKey);
   const [subKey,      setSubKey]     = useState('off');
   const [panel,       setPanel]      = useState(null);
   const [loaded,      setLoaded]     = useState(false);
-  const [isPlaying,   setIsPlaying]  = useState(false);
   const [error,       setError]      = useState(null);
   const [displayPos,  setDisplayPos] = useState(0);  // 1Hz — para o texto de tempo
   const [displayDur,  setDisplayDur] = useState(0);
+  const [subtitleCues, setSubtitleCues] = useState([]);
   const [panelGrab,   setPanelGrab]  = useState(false);
   const [grabPlay,    setGrabPlay]   = useState(true);
   const [grabAudio,   setGrabAudio]  = useState(false);
@@ -200,17 +229,54 @@ export default function PlayerScreen({ navigation, route }) {
   const [grabNext,    setGrabNext]   = useState(false);
 
   panelRef.current = panel;
+  playingRef.current = isPlaying;
 
-  const currentUrl   = tracks[trackKey] || initialUrl;
-  const hlsFailedRef = useRef(false);
-  const [videoSrc, setVideoSrc] = useState(() => toHlsUrl(currentUrl));
-  const showSkip   = !!skipIntroTo && displayPos > 8000 && displayPos < skipIntroTo;
+  const showSkip = !!skipIntroTo && displayPos > 8000 && displayPos < skipIntroTo;
 
-  const textTracks = availSubs
-    .filter(k => k !== 'off' && subtitles[k])
-    .map(k => ({ title: SUB_META[k], language: k, type: 'text/vtt', uri: subtitles[k] }));
+  // Carrega e parseia VTT externo quando a legenda muda (overlay manual)
+  useEffect(() => {
+    if (subKey === 'off' || !subtitles[subKey]) { setSubtitleCues([]); return; }
+    let alive = true;
+    fetch(subtitles[subKey]).then(r => r.text()).then(parseVtt).then(cues => { if (alive) setSubtitleCues(cues); }).catch(() => { if (alive) setSubtitleCues([]); });
+    return () => { alive = false; };
+  }, [subKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const selectedTextTrack = subKey === 'off' ? { type: 'disabled' } : { type: 'language', value: subKey };
+  // Progresso e duração — dirigido pelo evento timeUpdate (1x/s)
+  useEffect(() => {
+    const posMs = currentTime * 1000;
+    const durMs = (player.duration || 0) * 1000;
+    positionRef.current = posMs;
+    durationRef.current = durMs;
+    if (durMs > 0) progressAnim.setValue(Math.min(1, posMs / durMs));
+    setDisplayPos(posMs);
+    setDisplayDur(prev => (durMs > 0 && prev !== durMs ? durMs : prev));
+  }, [currentTime]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Detecção de fim de vídeo — reativa a isPlaying, sem closures obsoletas
+  const isEnded = displayDur > 0 && displayPos > 0 && !isPlaying && (displayDur - displayPos) < 1200;
+  useEffect(() => {
+    if (isEnded && !endedRef.current) {
+      endedRef.current = true;
+      if (nextEp) navigation.replace('Player', nextEp);
+      else navigation.goBack();
+    }
+  }, [isEnded]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fica pronto para tocar — marca carregado e restaura posição salva (troca de faixa / retomar)
+  useEffect(() => {
+    if (status === 'readyToPlay' && !wasLoadedRef.current) {
+      wasLoadedRef.current = true;
+      setLoaded(true);
+      setError(null);
+      if (switchPosRef.current !== null) {
+        player.currentTime = switchPosRef.current / 1000;
+        switchPosRef.current = null;
+      }
+    }
+    if (status === 'error') {
+      setError(playerError?.message || 'Erro ao carregar o vídeo');
+    }
+  }, [status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Controls show / hide ────────────────────────────────────────────────────
   const showControls = useCallback(() => {
@@ -265,97 +331,19 @@ export default function PlayerScreen({ navigation, route }) {
     return () => { clearInterval(id); save(); };
   }, [contentMeta, currentUrl]);
 
-  // ── Playback status ──────────────────────────────────────────────────────────
-  const onPlaybackStatus = useCallback((st) => {
-    if (!st.isLoaded) {
-      if (st.error) {
-        // HLS não gerado ainda — cai para URL direto automaticamente
-        if (!hlsFailedRef.current && videoSrc !== currentUrl) {
-          hlsFailedRef.current = true;
-          wasLoadedRef.current = false;
-          setLoaded(false);
-          setError(null);
-          setVideoSrc(currentUrl);
-        } else {
-          setError(st.error);
-        }
-      }
-      if (wasLoadedRef.current) wasLoadedRef.current = false;
-      return;
-    }
-
-    const pos = st.positionMillis || 0;
-    const dur = st.durationMillis || 0;
-    const buf = st.playableDurationMillis || 0;
-
-    positionRef.current = pos;
-    durationRef.current = dur;
-
-    // Atualiza a barra de progresso diretamente — zero re-renders
-    if (dur > 0) {
-      progressAnim.setValue(pos / dur);
-      bufferAnim.setValue(Math.min(buf / dur, 1));
-    }
-
-    // Restore position após troca de faixa de áudio
-    if (!wasLoadedRef.current) {
-      wasLoadedRef.current = true;
-      if (switchPosRef.current !== null) {
-        videoRef.current?.setPositionAsync(switchPosRef.current, { toleranceMillisBefore: 300, toleranceMillisAfter: 300 }).catch(() => {});
-        switchPosRef.current = null;
-      }
-      setLoaded(true);
-      setDisplayDur(dur);
-    }
-
-    // Só atualiza estado de playing quando muda
-    if (st.isPlaying !== playingRef.current) {
-      playingRef.current = st.isPlaying;
-      setIsPlaying(st.isPlaying);
-    }
-
-    // Texto de tempo: throttled a 1 Hz
-    const now = Date.now();
-    if (now - lastTickRef.current >= 1000) {
-      lastTickRef.current = now;
-      setDisplayPos(pos);
-    }
-
-    if (st.didJustFinish) {
-      if (nextEp) navigation.replace('Player', nextEp);
-      else navigation.goBack();
-    }
-  }, [nextEp]);
-
-  // ── Reset ao mudar URL ───────────────────────────────────────────────────────
-  useEffect(() => {
-    hlsFailedRef.current = false;
-    setVideoSrc(toHlsUrl(currentUrl)); // tenta HLS primeiro
-    wasLoadedRef.current = false;
-    setLoaded(false);
-    setError(null);
-    setDisplayPos(0);
-    progressAnim.setValue(0);
-    bufferAnim.setValue(0);
-  }, [currentUrl]);
-
   // ── Seek ────────────────────────────────────────────────────────────────────
-  const seekBy = useCallback(async (deltaMs) => {
-    if (!videoRef.current) return;
+  const seekBy = useCallback((deltaMs) => {
     const target = Math.max(0, Math.min(durationRef.current, positionRef.current + deltaMs));
-    try {
-      await videoRef.current.setPositionAsync(target, { toleranceMillisBefore: 300, toleranceMillisAfter: 300 });
-    } catch {}
-  }, []);
+    try { player.currentTime = target / 1000; } catch {}
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Toggle play ──────────────────────────────────────────────────────────────
-  const togglePlay = useCallback(async () => {
-    if (!videoRef.current) return;
+  const togglePlay = useCallback(() => {
     try {
-      if (playingRef.current) await videoRef.current.pauseAsync();
-      else await videoRef.current.playAsync();
+      if (playingRef.current) player.pause();
+      else player.play();
     } catch {}
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Panel helpers ────────────────────────────────────────────────────────────
   function openPanel(type, returnGrab) {
@@ -377,7 +365,11 @@ export default function PlayerScreen({ navigation, route }) {
     if (key !== trackKey) {
       switchPosRef.current = positionRef.current;
       wasLoadedRef.current = false;
+      endedRef.current = false;
+      setLoaded(false);
+      setError(null);
       setTrackKey(key);
+      player.replace({ uri: tracks[key] });
     }
     closePanel('audio');
   }
@@ -391,15 +383,12 @@ export default function PlayerScreen({ navigation, route }) {
   return (
     <View style={s.root}>
 
-      <Video
-        ref={videoRef}
-        source={{ uri: videoSrc }}
+      <VideoView
+        player={player}
         style={StyleSheet.absoluteFill}
-        resizeMode={ResizeMode.CONTAIN}
-        shouldPlay
-        textTracks={textTracks.length > 0 ? textTracks : undefined}
-        selectedTextTrack={textTracks.length > 0 ? selectedTextTrack : undefined}
-        onPlaybackStatusUpdate={onPlaybackStatus}
+        contentFit="contain"
+        nativeControls={false}
+        surfaceType="textureView"
       />
 
       {/* Loading */}
@@ -419,6 +408,16 @@ export default function PlayerScreen({ navigation, route }) {
           <Text style={s.errHint}>Pressione Voltar para sair</Text>
         </View>
       )}
+
+      {/* Legenda (VTT externo parseado — expo-video não seleciona textTracks nativamente) */}
+      {subtitleCues.length > 0 && (() => {
+        const cue = subtitleCues.find(c => currentTime >= c.start && currentTime <= c.end);
+        return cue ? (
+          <View style={s.subtitleOverlay} pointerEvents="none">
+            <Text style={s.subtitleText}>{cue.text}</Text>
+          </View>
+        ) : null;
+      })()}
 
       {/* Controls overlay */}
       <Animated.View style={[StyleSheet.absoluteFill, { opacity: ctrlOp }]} pointerEvents="box-none">
@@ -619,6 +618,13 @@ const s = StyleSheet.create({
   errTitle: { color: '#fff', fontSize: r(22), fontWeight: '800' },
   errMsg:   { color: '#888', fontSize: r(13), textAlign: 'center', maxWidth: W * 0.45 },
   errHint:  { color: '#444', fontSize: r(12), marginTop: r(4) },
+
+  subtitleOverlay: { position: 'absolute', bottom: r(140), left: r(80), right: r(80), alignItems: 'center', zIndex: 10 },
+  subtitleText: {
+    color: '#fff', fontSize: r(20), fontWeight: '600', textAlign: 'center',
+    backgroundColor: 'rgba(0,0,0,0.65)', paddingHorizontal: r(16), paddingVertical: r(6),
+    borderRadius: r(6), overflow: 'hidden', lineHeight: r(28),
+  },
 
   // Top bar
   topBar: {

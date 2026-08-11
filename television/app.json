@@ -23,7 +23,7 @@
       ]
     },
     "plugins": [
-      "expo-av",
+      "expo-video",
       [
         "expo-notifications",
         {

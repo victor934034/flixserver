@@ -5,6 +5,12 @@ import styles from './page.module.css';
 
 const BLANK = { name: '', slug: '', description: '', cover_url: '', is_active: true, order_index: 0 };
 
+function describeError(err) {
+  const d = err.response?.data;
+  if (!d) return err.message;
+  return [d.error, d.details, d.hint].filter(Boolean).join(' — ');
+}
+
 export default function AdminColecoes() {
   const [collections, setCollections] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -253,7 +259,7 @@ function CollectionItems({ collection, onClose }) {
       await api.delete(`/admin/collections/${collection.id}/items/${itemId}`);
       load();
     } catch (err) {
-      alert(err.response?.data?.error || 'Erro ao remover item');
+      alert(describeError(err) || 'Erro ao remover item');
     }
   }
 
@@ -273,7 +279,7 @@ function CollectionItems({ collection, onClose }) {
       ]);
       load();
     } catch (err) {
-      alert(err.response?.data?.error || 'Erro ao reordenar item');
+      alert(describeError(err) || 'Erro ao reordenar item');
     }
   }
 
