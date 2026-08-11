@@ -521,9 +521,12 @@ router.get('/collections/:id/items', async (req, res) => {
     const moviesMap = Object.fromEntries((moviesRes.data || []).map(m => [m.id, m]));
     const seriesMap = Object.fromEntries((seriesRes.data || []).map(s => [s.id, s]));
 
+    // item primeiro é espalhado por cima (não o contrário): filmes/séries também
+    // têm campo "id" próprio, e ele não pode sobrescrever o id da linha de collection_items
+    // (é esse id que os botões de mover/remover usam para identificar o item).
     const enriched = (items || []).map(item => ({
-      ...item,
       ...(item.content_type === 'movie' ? moviesMap[item.content_id] : seriesMap[item.content_id]),
+      ...item,
     }));
     res.json(enriched);
   } catch (err) {
