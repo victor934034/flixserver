@@ -10,12 +10,6 @@ const ACCENT             = '#c91c2c';
 const INITIAL_BUFFER_S   = 2;  // segundos de buffer antes do primeiro play
 const MID_BUFFER_S       = 12; // segundos de buffer para retomar após stall mid-playback
 
-// Deriva URL HLS (.m3u8) de qualquer URL de vídeo — abre em < 1s
-function toHlsUrl(url) {
-  if (!url) return url;
-  return url.replace(/\.(mp4|mkv|avi|mov|m4v|webm|ts|wmv)$/i, '.m3u8');
-}
-
 const TRACK_META = {
   dubbing:   { label: 'Dublado',   sub: 'Áudio em português' },
   subtitled: { label: 'Legendado', sub: 'Áudio original' },
@@ -245,8 +239,6 @@ export default function PlayerScreen() {
   const [focusedPanel, setFocusedPanel] = useState(0);
 
   const currentUrl    = tracks[trackKey] || initialUrl;
-  const hlsFailedRef  = useRef(false);
-  const [videoSrc, setVideoSrc] = useState(() => toHlsUrl(currentUrl));
 
   // Inicia o primeiro play quando há INITIAL_BUFFER_S disponível (ou no timeout)
   const startInitialPlay = useCallback(() => {
@@ -470,8 +462,6 @@ export default function PlayerScreen() {
   }
 
   useEffect(() => {
-    hlsFailedRef.current = false;
-    setVideoSrc(toHlsUrl(currentUrl)); // tenta HLS primeiro
     resetPlayerState();
     return () => {
       clearTimeout(stallTimerRef.current);
@@ -479,14 +469,8 @@ export default function PlayerScreen() {
     };
   }, [currentUrl]);
 
-  // HLS indisponível: volta para URL direta sem bloquear o usuário
   function onVideoError() {
-    if (!hlsFailedRef.current && videoSrc !== currentUrl) {
-      console.warn('[player] HLS não encontrado, usando URL direto:', currentUrl);
-      hlsFailedRef.current = true;
-      resetPlayerState();
-      setVideoSrc(currentUrl);
-    }
+    setError('Não foi possível reproduzir o vídeo');
   }
 
   useEffect(() => {
@@ -564,7 +548,7 @@ export default function PlayerScreen() {
     >
       <video
         ref={videoRef}
-        src={videoSrc}
+        src={currentUrl}
         playsInline
         preload="auto"
         style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
@@ -593,7 +577,6 @@ export default function PlayerScreen() {
           stallTimerRef.current = setTimeout(checkBuffer, 300);
         }}
         onPlaying={() => { forcedPauseRef.current = false; bufferingRef.current = false; setBuffering(false); }}
-        onError={() => setError('Não foi possível reproduzir o vídeo')}
         onEnded={() => { if (nextEp) navigate('/player', { state: nextEp, replace: true }); else navigate(-1); }}
       >
         {subTracks.map(lang => (
