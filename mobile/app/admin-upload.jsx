@@ -4,6 +4,7 @@ import {
   Alert, AppState,
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as KeepAwake from 'expo-keep-awake';
 
@@ -16,6 +17,7 @@ import { useRouter } from 'expo-router';
 import api from '../lib/api';
 
 const RESUME_KEY = 'admin_upload_pending';
+const VIDEO_EXT = ['mp4', 'mkv', 'avi', 'mov', 'm4v', 'webm', 'ts', 'wmv', 'flv', 'mpg', 'mpeg'];
 
 function formatSize(bytes) {
   if (!bytes) return '—';
@@ -44,12 +46,32 @@ export default function AdminUploadScreen() {
     });
   }, []);
 
-  const pickFile = async () => {
+  // Aplica o arquivo escolhido (por qualquer origem) ao estado da tela
+  const applyPickedAsset = (asset) => {
+    const ext = (asset.name || '').split('.').pop()?.toLowerCase();
+    if (ext && !VIDEO_EXT.includes(ext)) {
+      Alert.alert(
+        'Arquivo não parece ser um vídeo',
+        `"${asset.name}" tem extensão .${ext}. Selecione o arquivo de vídeo correto.`,
+      );
+      return;
+    }
+
+    // Registra URI do cache para deletar após upload
+    if (asset.uri.startsWith('file://') || asset.uri.startsWith('/')) {
+      cacheUriRef.current = asset.uri;
+    }
+
+    setFile(asset);
+    setStatus('idle');
+    setProgress(0);
+    setError(null);
+    setResult(null);
+  };
+
+  // Arquivos — navegador de armazenamento (Downloads, Este dispositivo, nuvem, etc.)
+  const pickFromFiles = async () => {
     try {
-      // type: '*/*' — com 'video/*' o Android costuma abrir direto a Galeria/Fotos
-      // (provedor de mídia), escondendo a opção de navegar pelos Arquivos/Downloads
-      // onde ficam os arquivos de filme/série. Com '*/*' o seletor de Arquivos abre
-      // normalmente, com Galeria apenas como uma das origens possíveis.
       // copyToCacheDirectory: true garante URI file:// válida em qualquer Android
       // O Expo usa os ContentResolver nativos para copiar — único jeito confiável
       // Para arquivos grandes, o picker pode travar alguns minutos após a seleção (normal)
@@ -58,32 +80,48 @@ export default function AdminUploadScreen() {
         copyToCacheDirectory: true,
       });
       if (res.canceled || !res.assets?.[0]) return;
-      const asset = res.assets[0];
-
-      const ext = (asset.name || '').split('.').pop()?.toLowerCase();
-      const VIDEO_EXT = ['mp4', 'mkv', 'avi', 'mov', 'm4v', 'webm', 'ts', 'wmv', 'flv', 'mpg', 'mpeg'];
-      if (ext && !VIDEO_EXT.includes(ext)) {
-        Alert.alert(
-          'Arquivo não parece ser um vídeo',
-          `"${asset.name}" tem extensão .${ext}. Selecione o arquivo de vídeo correto.`,
-        );
-        return;
-      }
-
-      // Registra URI do cache para deletar após upload
-      if (asset.uri.startsWith('file://') || asset.uri.startsWith('/')) {
-        cacheUriRef.current = asset.uri;
-      }
-
-      setFile(asset);
-      setStatus('idle');
-      setProgress(0);
-      setError(null);
-      setResult(null);
+      applyPickedAsset(res.assets[0]);
     } catch (e) {
-      setStatus('idle');
       Alert.alert('Erro', 'Não foi possível selecionar o arquivo.');
     }
+  };
+
+  // Galeria — vídeos salvos no dispositivo (câmera, downloads de apps, etc.)
+  const pickFromGallery = async () => {
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('Permissão necessária', 'Autorize o acesso à galeria para selecionar vídeos.');
+        return;
+      }
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+        quality: 1,
+      });
+      if (res.canceled || !res.assets?.[0]) return;
+      const a = res.assets[0];
+      applyPickedAsset({
+        uri: a.uri,
+        name: a.fileName || a.uri.split('/').pop() || `video_${Date.now()}.mp4`,
+        size: a.fileSize,
+        mimeType: a.mimeType || 'video/mp4',
+      });
+    } catch (e) {
+      Alert.alert('Erro', 'Não foi possível selecionar o vídeo da galeria.');
+    }
+  };
+
+  // Abre a escolha de origem (Arquivos ou Galeria) antes de disparar o seletor certo
+  const pickFile = () => {
+    Alert.alert(
+      'Selecionar vídeo',
+      'De onde você quer escolher o arquivo?',
+      [
+        { text: 'Arquivos', onPress: pickFromFiles },
+        { text: 'Galeria', onPress: pickFromGallery },
+        { text: 'Cancelar', style: 'cancel' },
+      ],
+    );
   };
 
   const startUpload = async (overrideFile) => {
