@@ -237,7 +237,11 @@ export default function UploadPage() {
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    accept: { 'video/*': ['.mp4', '.mkv', '.avi', '.mov', '.m4v'] },
+    // '*/*' em vez de 'video/*': no Android/Chrome mobile, um accept restrito a
+    // video/imagem faz o navegador abrir direto o seletor de mídia (Galeria),
+    // que não enxerga arquivos baixados fora da galeria (ex: filmes em Downloads).
+    // Com '*/*' o seletor de arquivos padrão abre, com a Galeria só como opção.
+    accept: { '*/*': ['.mp4', '.mkv', '.avi', '.mov', '.m4v'] },
     multiple: true,
   });
 

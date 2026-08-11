@@ -515,7 +515,7 @@ export default function UploadDesenhosPage() {
                           {/* Hidden file input per episode */}
                           <input
                             type="file"
-                            accept="video/*,.mkv"
+                            accept="*/*,.mp4,.mkv,.avi,.mov,.m4v"
                             style={{ display: 'none' }}
                             ref={el => { fileInputRefs.current[ep.episode_number] = el; }}
                             onChange={e => {
