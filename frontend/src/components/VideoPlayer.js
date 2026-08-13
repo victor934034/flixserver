@@ -34,6 +34,7 @@ export default function VideoPlayer({ content, onProgress }) {
   const hideTimer    = useRef(null);
   const progressRef  = useRef(null);
   const lastReportRef = useRef(0); // throttle do onProgress (timeupdate dispara várias vezes/s)
+  const autoRemuxTriedRef = useRef(false); // evita loop se o remux também falhar
 
   const [version,      setVersion]      = useState('dubbing');
   const [subtitle,     setSubtitle]     = useState('none');
@@ -110,7 +111,15 @@ export default function VideoPlayer({ content, onProgress }) {
     const onEnded  = () => setPlaying(false);
     const onError  = () => {
       // code 4 = MEDIA_ERR_SRC_NOT_SUPPORTED (codec de áudio ou vídeo incompatível)
-      if (video.error?.code === 4 || video.error?.code === 3) setAudioWarning(true);
+      if (video.error?.code === 4 || video.error?.code === 3) {
+        setAudioWarning(true);
+        // Troca sozinho para a versão com áudio corrigido, sem precisar clicar —
+        // só tenta uma vez por vídeo pra não entrar em loop se o remux também falhar
+        if (!remuxActive && !autoRemuxTriedRef.current) {
+          autoRemuxTriedRef.current = true;
+          activateRemux();
+        }
+      }
     };
     // Salva mesmo fora do intervalo de 10s — ao pausar/sair não perde o progresso recente
     const onPause = () => onProgress?.(video.currentTime, video.duration);
@@ -232,6 +241,7 @@ export default function VideoPlayer({ content, onProgress }) {
     setVersion(key);
     setRemuxActive(false);
     setAudioWarning(false);
+    autoRemuxTriedRef.current = false; // versão nova — deixa tentar auto-corrigir de novo se precisar
     setTimeout(() => {
       videoRef.current?.addEventListener('loadedmetadata', function onReady() {
         const v = videoRef.current;
