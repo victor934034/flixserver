@@ -33,6 +33,7 @@ export default function VideoPlayer({ content, onProgress }) {
   const containerRef = useRef(null);
   const hideTimer    = useRef(null);
   const progressRef  = useRef(null);
+  const lastReportRef = useRef(0); // throttle do onProgress (timeupdate dispara várias vezes/s)
 
   const [version,      setVersion]      = useState('dubbing');
   const [subtitle,     setSubtitle]     = useState('none');
@@ -94,7 +95,13 @@ export default function VideoPlayer({ content, onProgress }) {
       if (video.buffered.length > 0) {
         setBuffered(video.duration ? (video.buffered.end(video.buffered.length - 1) / video.duration) * 100 : 0);
       }
-      onProgress?.(video.currentTime, video.duration);
+      // timeupdate dispara várias vezes por segundo — sem isso, o histórico era
+      // salvo (e a API chamada) nessa frequência, estourando o rate limit em minutos
+      const now = Date.now();
+      if (now - lastReportRef.current >= 10000) {
+        lastReportRef.current = now;
+        onProgress?.(video.currentTime, video.duration);
+      }
     };
     const onLoaded = () => {
       setDuration(video.duration);
@@ -105,16 +112,21 @@ export default function VideoPlayer({ content, onProgress }) {
       // code 4 = MEDIA_ERR_SRC_NOT_SUPPORTED (codec de áudio ou vídeo incompatível)
       if (video.error?.code === 4 || video.error?.code === 3) setAudioWarning(true);
     };
+    // Salva mesmo fora do intervalo de 10s — ao pausar/sair não perde o progresso recente
+    const onPause = () => onProgress?.(video.currentTime, video.duration);
 
     video.addEventListener('timeupdate', onTimeUpdate);
     video.addEventListener('loadedmetadata', onLoaded);
     video.addEventListener('ended', onEnded);
     video.addEventListener('error', onError);
+    video.addEventListener('pause', onPause);
     return () => {
       video.removeEventListener('timeupdate', onTimeUpdate);
       video.removeEventListener('loadedmetadata', onLoaded);
       video.removeEventListener('ended', onEnded);
       video.removeEventListener('error', onError);
+      video.removeEventListener('pause', onPause);
+      onProgress?.(video.currentTime, video.duration);
     };
   }, [onProgress]);
 

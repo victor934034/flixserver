@@ -53,7 +53,10 @@ app.use(express.json({ limit: '10mb' }));
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 500,
+  // 500 era baixo para uma casa com vários dispositivos (TV + celular + web)
+  // atrás do mesmo IP, todos com heartbeat/history rodando ao mesmo tempo —
+  // um deles travando e reconectando em loop já estourava e derrubava os outros.
+  max: 2000,
   message: { error: 'Muitas requisições, tente novamente em alguns minutos.' },
   // Exclui auth (tem limiter próprio) e upload (admin autenticado, muitas requisições de partes)
   skip: (req) => req.path.startsWith('/auth/') || req.path.startsWith('/upload/'),
