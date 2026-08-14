@@ -15,7 +15,9 @@ router.get('/', async (req, res) => {
       .order('last_watched', { ascending: false })
       .limit(50);
 
-    if (profileId) query = query.eq('profile_id', profileId);
+    // Sem isso, quando profileId não vem, a query retorna o histórico de TODOS os
+    // perfis da conta misturado (inclusive teria mostrado o de outro perfil).
+    query = profileId ? query.eq('profile_id', profileId) : query.is('profile_id', null);
 
     const { data: items, error } = await query;
 
@@ -89,7 +91,9 @@ router.post('/', async (req, res) => {
       .eq('user_id', req.user.id)
       .eq('content_id', content_id)
       .eq('episode_id', episode_id || null);
-    if (profile_id) findQ = findQ.eq('profile_id', profile_id);
+    // Sem isso (quando profile_id não vem), a busca ignorava profile_id por completo
+    // e podia achar/atualizar a linha de OUTRO perfil da mesma conta.
+    findQ = profile_id ? findQ.eq('profile_id', profile_id) : findQ.is('profile_id', null);
 
     const { data: existing } = await findQ.single();
 
@@ -109,8 +113,30 @@ router.post('/', async (req, res) => {
         .insert({ user_id: req.user.id, content_type, content_id, episode_id, series_id, progress, duration, completed, profile_id: profile_id || null })
         .select()
         .single();
-      if (error) throw error;
-      result = data;
+      if (error && error.code === '23505') {
+        // Corrida rara: outra requisição inseriu entre o find e o insert acima —
+        // ao invés de falhar, atualiza a linha que acabou de aparecer.
+        let retryQ = supabase.from('watch_history').select('id')
+          .eq('user_id', req.user.id).eq('content_id', content_id).eq('episode_id', episode_id || null);
+        retryQ = profile_id ? retryQ.eq('profile_id', profile_id) : retryQ.is('profile_id', null);
+        const { data: justInserted } = await retryQ.single();
+        if (justInserted) {
+          const { data: updated, error: updErr } = await supabase
+            .from('watch_history')
+            .update({ progress, duration, completed, last_watched: new Date().toISOString() })
+            .eq('id', justInserted.id)
+            .select()
+            .single();
+          if (updErr) throw updErr;
+          result = updated;
+        } else {
+          throw error;
+        }
+      } else if (error) {
+        throw error;
+      } else {
+        result = data;
+      }
     }
 
     res.json(result);

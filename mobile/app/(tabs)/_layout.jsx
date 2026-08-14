@@ -1,11 +1,26 @@
-import { View, TouchableOpacity, StyleSheet } from 'react-native';
+import { useEffect } from 'react';
+import { View, TouchableOpacity, StyleSheet, AppState } from 'react-native';
 import { Tabs, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as ScreenOrientation from 'expo-screen-orientation';
 
 export default function TabsLayout() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+
+  // Rede de segurança: as abas principais são sempre retrato. Se o player
+  // deixou a orientação travada em paisagem (ex: app morto em background),
+  // força retrato aqui — tanto ao montar quanto ao voltar de background.
+  useEffect(() => {
+    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') {
+        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   return (
     <View style={{ flex: 1 }}>

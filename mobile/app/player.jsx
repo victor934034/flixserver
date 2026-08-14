@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, PanResponder,
   ActivityIndicator, StatusBar, useWindowDimensions,
-  Animated, FlatList, Image, Share, Platform, Linking,
+  Animated, FlatList, Image, Share, Platform, Linking, AppState,
 } from 'react-native';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { useEvent } from 'expo';
@@ -173,7 +173,21 @@ export default function PlayerScreen() {
     KeepAwake.activateKeepAwakeAsync('player');
     schedHide();
     Brightness?.getBrightnessAsync?.()?.then(b => { brightnessRef.current = b; setBrightness(b); }).catch(() => {});
+
+    // Se o app for pro background (home, troca de app) enquanto assistindo e o
+    // Android matar o processo, o cleanup abaixo nunca roda — a orientação
+    // paisagem fica "travada" e o próximo launch abre torto em outra tela.
+    // Destrava assim que sai de foreground; relock se voltar ainda no player.
+    const appStateSub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') {
+        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
+      } else {
+        ScreenOrientation.unlockAsync().catch(() => {});
+      }
+    });
+
     return () => {
+      appStateSub.remove();
       StatusBar.setHidden(false, 'fade');
       ScreenOrientation.unlockAsync();
       KeepAwake.deactivateKeepAwake('player');

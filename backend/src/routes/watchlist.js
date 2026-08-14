@@ -14,7 +14,7 @@ router.get('/', async (req, res) => {
       .eq('user_id', req.user.id)
       .order('added_at', { ascending: false });
 
-    if (profileId) query = query.eq('profile_id', profileId);
+    query = profileId ? query.eq('profile_id', profileId) : query.is('profile_id', null);
 
     const { data: items, error } = await query;
 
@@ -59,7 +59,7 @@ router.post('/', async (req, res) => {
       .select('id')
       .eq('user_id', req.user.id)
       .eq('content_id', content_id);
-    if (profile_id) findQ = findQ.eq('profile_id', profile_id);
+    findQ = profile_id ? findQ.eq('profile_id', profile_id) : findQ.is('profile_id', null);
 
     const { data: existing } = await findQ.single();
 
