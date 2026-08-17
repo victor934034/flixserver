@@ -1,0 +1,40 @@
+.main { padding: 7rem 1.5rem 4rem; min-height: 100vh; }
+
+.loading { text-align: center; margin-top: 5rem; color: var(--text-secondary); }
+
+.header { max-width: 900px; margin: 0 auto 2rem; text-align: center; }
+.title { font-size: 2rem; font-weight: 800; color: var(--text-primary); }
+.current { color: var(--text-muted); font-size: 0.9rem; margin-top: 0.5rem; }
+.current strong { color: var(--text-primary); }
+
+.disabled { text-align: center; color: var(--text-muted); margin-top: 3rem; }
+.error { max-width: 900px; margin: 0 auto 1rem; text-align: center; color: var(--accent); font-size: 0.85rem; }
+
+.grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1.5rem; max-width: 900px; margin: 0 auto;
+}
+
+.card {
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px; padding: 1.75rem; display: flex; flex-direction: column; gap: 0.6rem;
+  transition: transform 0.2s, border-color 0.2s;
+}
+.card:hover { transform: translateY(-4px); border-color: var(--accent); }
+
+.planName { font-size: 1.15rem; font-weight: 700; color: var(--text-primary); }
+
+.priceWrap { display: flex; align-items: baseline; gap: 0.4rem; margin: 0.3rem 0 0.6rem; }
+.oldPrice { color: var(--text-muted); font-size: 0.85rem; text-decoration: line-through; }
+.price { font-size: 1.7rem; font-weight: 800; color: var(--accent); }
+.priceUnit { color: var(--text-muted); font-size: 0.8rem; }
+
+.feature { color: var(--text-secondary); font-size: 0.85rem; }
+.desc { color: var(--text-muted); font-size: 0.82rem; line-height: 1.5; flex: 1; }
+
+.btnSubscribe {
+  background: var(--accent); color: #fff; border: none; padding: 0.8rem; border-radius: 8px;
+  font-size: 0.9rem; font-weight: 700; cursor: pointer; margin-top: 0.5rem;
+}
+.btnSubscribe:hover:not(:disabled) { background: var(--accent-hover); }
+.btnSubscribe:disabled { opacity: 0.6; cursor: default; }

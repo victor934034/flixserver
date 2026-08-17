@@ -76,7 +76,7 @@ export default function PerfilPage() {
             <a href="/autorizar-tv" className={styles.link}>
               <span className={styles.linkIcon}>📺</span> Autorizar TV
             </a>
-            <a href="/assinatura" className={styles.link}>
+            <a href="/subscription" className={styles.link}>
               <span className={styles.linkIcon}>💳</span> Assinatura
             </a>
             <a href="/iptv" className={styles.link}>
