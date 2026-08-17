@@ -66,13 +66,14 @@ function doUploadXHR(item, presign, b2FileName, onProgress, signal) {
   });
 }
 
-// Qualquer arquivo > 200 MB usa upload em partes (mais resiliente a quedas de conexão).
-// Abaixo disso, um único XHR é suficiente e mais simples.
-const LARGE_FILE_THRESHOLD = 200 * 1024 * 1024;
-const PART_SIZE = 100 * 1024 * 1024;
-// 6 streams simultâneos direto ao B2 (não passa pelo backend).
+// Qualquer arquivo > 60 MB usa upload em partes (mais resiliente a quedas de conexão
+// E MUITO mais rápido - uma única conexão TCP não satura conexões rápidas por causa
+// da latência até o servidor da B2, não importa a banda contratada).
+const LARGE_FILE_THRESHOLD = 60 * 1024 * 1024;
+const PART_SIZE = 40 * 1024 * 1024;
+// Streams simultâneos direto ao B2 (não passa pelo backend).
 // Janela deslizante: quando uma parte termina, a próxima começa imediatamente.
-const PARALLEL_PARTS = 6;
+const PARALLEL_PARTS = 12;
 
 async function doLargeUploadXHR(item, onProgress, signal, resumeState) {
   const file = item.file;

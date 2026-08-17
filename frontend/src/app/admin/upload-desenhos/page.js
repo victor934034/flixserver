@@ -18,9 +18,9 @@ function formatSpeed(bps) {
   return `${(bps / 1024 / 1024).toFixed(1)} MB/s`;
 }
 
-const LARGE_FILE_THRESHOLD = 200 * 1024 * 1024;
-const PART_SIZE = 100 * 1024 * 1024;
-const PARALLEL_PARTS = 6;
+const LARGE_FILE_THRESHOLD = 60 * 1024 * 1024;
+const PART_SIZE = 40 * 1024 * 1024;
+const PARALLEL_PARTS = 12;
 
 function doUploadXHR(file, presign, b2FileName, onProgress, signal) {
   let _bps = 0, _t = Date.now(), _b = 0;
