@@ -5,10 +5,12 @@ import HeroBanner from '../components/HeroBanner';
 import ContentRow from '../components/ContentRow';
 import api from '../lib/api';
 import { getToken } from '../lib/auth';
+import { useProfile } from '../contexts/ProfileContext';
 import styles from './page.module.css';
 
 export default function Home() {
   const [data, setData] = useState(null);
+  const { activeProfile } = useProfile();
 
   useEffect(() => {
     const fetches = [
@@ -19,8 +21,9 @@ export default function Home() {
     ];
 
     if (getToken()) {
+      const params = activeProfile ? { profile_id: activeProfile.id } : undefined;
       fetches.push(
-        api.get('/history').then(r =>
+        api.get('/history', { params }).then(r =>
           (r.data || [])
             .filter(h => h.progress > 0 && h.duration > 0 && !h.completed)
             .slice(0, 12)
@@ -33,7 +36,7 @@ export default function Home() {
     Promise.all(fetches).then(([featured, newMovies, newSeries, popularMovies, history]) => {
       setData({ featured, newMovies, newSeries, popularMovies, history });
     });
-  }, []);
+  }, [activeProfile]);
 
   return (
     <>

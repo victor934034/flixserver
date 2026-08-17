@@ -4,18 +4,21 @@ import Link from 'next/link';
 import Image from 'next/image';
 import Navbar from '../../components/Navbar';
 import api from '../../lib/api';
+import { useProfile } from '../../contexts/ProfileContext';
 import styles from './page.module.css';
 
 export default function ContinuarAssistindoPage() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const { activeProfile } = useProfile();
 
   useEffect(() => {
-    api.get('/history')
+    const params = activeProfile ? { profile_id: activeProfile.id } : undefined;
+    api.get('/history', { params })
       .then(r => setItems((r.data || []).filter(i => !i.completed)))
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [activeProfile]);
 
   function pct(item) {
     if (!item.duration || !item.progress) return 0;

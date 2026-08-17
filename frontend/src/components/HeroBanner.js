@@ -5,6 +5,7 @@ import Link from 'next/link';
 import styles from './HeroBanner.module.css';
 import api from '../lib/api';
 import { getToken } from '../lib/auth';
+import { useProfile } from '../contexts/ProfileContext';
 
 const INTERVAL = 8000;
 
@@ -14,17 +15,19 @@ export default function HeroBanner({ items = [] }) {
   const [toggling, setToggling] = useState(false);
   const timerRef = useRef(null);
   const keyRef   = useRef(0); // force re-mount animation
+  const { activeProfile } = useProfile();
 
   useEffect(() => {
     if (!getToken()) return;
-    api.get('/watchlist')
+    const params = activeProfile ? { profile_id: activeProfile.id } : undefined;
+    api.get('/watchlist', { params })
       .then(r => {
         const map = {};
         (r.data || []).forEach(w => { map[w.content_id] = w.id; });
         setWatchlistMap(map);
       })
       .catch(() => {});
-  }, []);
+  }, [activeProfile]);
 
   useEffect(() => {
     if (items.length <= 1) return;
@@ -64,7 +67,7 @@ export default function HeroBanner({ items = [] }) {
         await api.delete(`/watchlist/${watchlistId}`);
         setWatchlistMap(prev => { const n = { ...prev }; delete n[item.id]; return n; });
       } else {
-        const r = await api.post('/watchlist', { content_type: item.type || 'movie', content_id: item.id });
+        const r = await api.post('/watchlist', { content_type: item.type || 'movie', content_id: item.id, profile_id: activeProfile?.id || null });
         setWatchlistMap(prev => ({ ...prev, [item.id]: r.data.id }));
       }
     } catch {}

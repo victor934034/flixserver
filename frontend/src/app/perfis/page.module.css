@@ -1,0 +1,120 @@
+.page {
+  min-height: 100vh;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 3rem 1.5rem;
+  background: var(--bg-primary);
+  background-image: radial-gradient(ellipse at center, #1a0000 0%, #0a0a0a 70%);
+}
+
+.loaderPage { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--bg-primary); }
+.spinner {
+  width: 44px; height: 44px; border-radius: 50%;
+  border: 3px solid rgba(255,255,255,0.1); border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.header { text-align: center; margin-bottom: 2.5rem; animation: fadeUp 0.5s ease both; }
+.logo { font-size: 1.5rem; font-weight: 900; color: var(--accent); letter-spacing: 2px; margin-bottom: 1.5rem; }
+.title { font-size: 1.8rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.5rem; }
+.hint { color: var(--text-muted); font-size: 0.85rem; }
+
+.grid {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 1.75rem;
+  max-width: 720px;
+  animation: fadeUp 0.6s ease both;
+  animation-delay: 0.08s;
+}
+
+.card {
+  background: none; border: none; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; gap: 0.6rem;
+  width: 128px; padding: 0.5rem;
+  position: relative;
+  transition: transform 0.2s;
+}
+.card:hover { transform: scale(1.06); }
+.card:hover .avatarWrap, .card:hover .addAvatar { box-shadow: 0 0 0 3px #fff; }
+
+.avatarWrap { position: relative; border-radius: 22px; overflow: hidden; transition: box-shadow 0.2s; }
+.kidsOverlay {
+  position: absolute; bottom: -2px; right: -2px; background: #111;
+  border-radius: 50%; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
+  font-size: 13px; border: 2px solid var(--bg-primary);
+}
+
+.addAvatar {
+  width: 96px; height: 96px; border-radius: 22px;
+  background: rgba(255,255,255,0.06); border: 2px dashed rgba(255,255,255,0.15);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 2.2rem; color: rgba(255,255,255,0.35); transition: box-shadow 0.2s;
+}
+
+.cardName { color: var(--text-secondary); font-size: 0.95rem; font-weight: 600; }
+.kidsTag { color: #4caf50; font-size: 0.7rem; font-weight: 700; margin-top: -0.4rem; }
+
+.editBtn {
+  position: absolute; top: -6px; right: 10px;
+  width: 26px; height: 26px; border-radius: 50%;
+  background: rgba(0,0,0,0.7); border: 1px solid rgba(255,255,255,0.15); color: #fff;
+  font-size: 0.75rem; cursor: pointer; opacity: 0; transition: opacity 0.2s;
+}
+.card:hover .editBtn { opacity: 1; }
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Modal ── */
+.modalOverlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.8);
+  display: flex; align-items: center; justify-content: center; padding: 1.5rem; z-index: 1000;
+  animation: fadeIn 0.15s ease;
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+.modalBox {
+  background: #141414; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px;
+  padding: 2rem; width: 100%; max-width: 460px; max-height: 88vh; overflow-y: auto;
+  animation: popIn 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes popIn { from { opacity: 0; transform: scale(0.94) translateY(8px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+
+.modalTitle { color: #fff; font-size: 1.2rem; font-weight: 700; margin-bottom: 1.2rem; text-align: center; }
+.error { color: var(--accent); font-size: 0.85rem; text-align: center; margin-bottom: 1rem; }
+
+.previewWrap { display: flex; justify-content: center; margin-bottom: 1.3rem; }
+
+.nameInput {
+  width: 100%; background: #1e1e1e; border: 1px solid #2a2a2a; border-radius: 8px;
+  padding: 0.75rem 1rem; color: #fff; font-size: 0.95rem; outline: none; margin-bottom: 1rem;
+}
+.nameInput:focus { border-color: var(--accent); }
+
+.kidsToggle { display: flex; align-items: center; gap: 0.75rem; cursor: pointer; margin-bottom: 1.3rem; }
+.toggleTrack { width: 42px; height: 24px; border-radius: 12px; background: #2a2a2a; position: relative; transition: background 0.2s; flex-shrink: 0; }
+.toggleTrackOn { background: #2e7d32; }
+.toggleThumb { position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: transform 0.2s; }
+.toggleThumbOn { transform: translateX(18px); }
+.kidsLabel { color: #ccc; font-size: 0.9rem; }
+
+.tabs { display: flex; gap: 1.5rem; margin-bottom: 0.9rem; border-bottom: 1px solid #222; }
+.tab { background: none; border: none; color: #666; font-size: 0.85rem; font-weight: 600; padding: 0.5rem 0; cursor: pointer; border-bottom: 2px solid transparent; }
+.tabActive { color: #fff; border-bottom-color: var(--accent); }
+
+.avatarRow { display: flex; gap: 0.75rem; overflow-x: auto; padding-bottom: 0.5rem; margin-bottom: 1.3rem; min-height: 64px; }
+.emptyAvatars { color: #444; font-size: 0.85rem; padding: 1rem 0; }
+
+.avatarOpt {
+  background: none; border: 2px solid transparent; border-radius: 12px; padding: 2px; cursor: pointer; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; transition: border-color 0.15s;
+}
+.avatarOptSelected { border-color: var(--accent); }
+.avatarOptImg { width: 56px; height: 56px; border-radius: 10px; object-fit: cover; }
+
+.actions { display: flex; gap: 0.75rem; align-items: center; }
+.btnDelete { background: none; border: 1px solid rgba(229,9,20,0.35); color: #ff6b6b; border-radius: 8px; padding: 0.7rem 0.9rem; cursor: pointer; }
+.btnCancel { flex: 1; background: none; border: 1px solid #2a2a2a; color: #aaa; border-radius: 8px; padding: 0.75rem; cursor: pointer; }
+.btnSave { flex: 1; background: var(--accent); border: none; color: #fff; font-weight: 700; border-radius: 8px; padding: 0.75rem; cursor: pointer; }
+.btnSave:disabled { opacity: 0.6; cursor: default; }

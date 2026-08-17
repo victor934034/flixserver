@@ -6,15 +6,20 @@ import Navbar from '../../../components/Navbar';
 import VideoPlayer from '../../../components/VideoPlayer';
 import api from '../../../lib/api';
 import { getToken } from '../../../lib/auth';
+import { useProfile } from '../../../contexts/ProfileContext';
+import { useParental } from '../../../contexts/ParentalContext';
 import styles from './page.module.css';
 
 export default function FilmePage() {
   const { id } = useParams();
+  const { activeProfile } = useProfile();
+  const { checkAccess } = useParental();
   const [movie, setMovie] = useState(null);
   const [playing, setPlaying] = useState(false);
   const [error, setError] = useState(null);
   const [watchlistId, setWatchlistId] = useState(null);
   const [listLoading, setListLoading] = useState(false);
+  const [resumeAt, setResumeAt] = useState(0);
 
   useEffect(() => {
     api.get(`/movies/${id}`)
@@ -22,14 +27,21 @@ export default function FilmePage() {
       .catch(() => setError('Filme não encontrado'));
 
     if (getToken()) {
-      api.get('/watchlist')
+      const params = activeProfile ? { profile_id: activeProfile.id } : undefined;
+      api.get('/watchlist', { params })
         .then(r => {
           const entry = (r.data || []).find(w => w.content_id === id);
           if (entry) setWatchlistId(entry.id);
         })
         .catch(() => {});
+      api.get('/history', { params })
+        .then(r => {
+          const h = (r.data || []).find(item => item.content_id === id && item.content_type === 'movie' && !item.completed && item.progress > 5);
+          if (h) setResumeAt(h.progress);
+        })
+        .catch(() => {});
     }
-  }, [id]);
+  }, [id, activeProfile]);
 
   function saveProgress(current, total) {
     if (!current || !total) return;
@@ -38,6 +50,7 @@ export default function FilmePage() {
       content_id: id,
       progress: Math.floor(current),
       duration: Math.floor(total),
+      profile_id: activeProfile?.id || null,
     }).catch(() => {});
   }
 
@@ -53,11 +66,16 @@ export default function FilmePage() {
         await api.delete(`/watchlist/${watchlistId}`);
         setWatchlistId(null);
       } else {
-        const r = await api.post('/watchlist', { content_type: 'movie', content_id: id });
+        const r = await api.post('/watchlist', { content_type: 'movie', content_id: id, profile_id: activeProfile?.id || null });
         setWatchlistId(r.data.id);
       }
     } catch {}
     setListLoading(false);
+  }
+
+  async function handlePlay() {
+    const allowed = await checkAccess(movie);
+    if (allowed) setPlaying(true);
   }
 
   if (error) return <div className={styles.error}>{error}</div>;
@@ -76,7 +94,7 @@ export default function FilmePage() {
       <main className={styles.main}>
         {playing ? (
           <div className={styles.playerWrap}>
-            <VideoPlayer content={movie} onProgress={saveProgress} />
+            <VideoPlayer content={movie} onProgress={saveProgress} startAt={resumeAt} />
             <button className={styles.closePlayer} onClick={() => setPlaying(false)}>✕ Fechar Player</button>
           </div>
         ) : (
@@ -101,7 +119,9 @@ export default function FilmePage() {
               <p className={styles.synopsis}>{movie.synopsis}</p>
               <div className={styles.actions}>
                 {(movie.file_dubbing || movie.file_subtitled || movie.file_cinema || movie.file_4k) ? (
-                  <button className={styles.btnPlay} onClick={() => setPlaying(true)}>▶ Assistir</button>
+                  <button className={styles.btnPlay} onClick={handlePlay}>
+                    ▶ {resumeAt > 5 ? 'Continuar Assistindo' : 'Assistir'}
+                  </button>
                 ) : (
                   <span className={styles.noVideo}>Vídeo não disponível</span>
                 )}

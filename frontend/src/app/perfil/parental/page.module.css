@@ -1,0 +1,53 @@
+.main { padding: 7rem 1.5rem 4rem; min-height: 100vh; display: flex; justify-content: center; }
+
+.card {
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px; padding: 2.5rem; width: 100%; max-width: 480px; height: fit-content;
+}
+
+.title { font-size: 1.4rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.4rem; }
+.subtitle { color: var(--text-muted); font-size: 0.85rem; line-height: 1.5; margin-bottom: 1.75rem; }
+
+.form { display: flex; flex-direction: column; gap: 1.5rem; }
+
+.toggleRow { display: flex; align-items: center; justify-content: space-between; gap: 1rem; cursor: pointer; }
+.rowLabel { display: block; color: var(--text-primary); font-size: 0.95rem; font-weight: 600; }
+.rowDesc { display: block; color: var(--text-muted); font-size: 0.78rem; margin-top: 0.2rem; }
+
+.toggleTrack { width: 44px; height: 26px; border-radius: 13px; background: #2a2a2a; position: relative; transition: background 0.2s; flex-shrink: 0; }
+.toggleTrackOn { background: var(--accent); }
+.toggleThumb { position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; border-radius: 50%; background: #fff; transition: transform 0.2s; }
+.toggleThumbOn { transform: translateX(18px); }
+
+.section { display: flex; flex-direction: column; gap: 0.6rem; }
+.sectionLabel { color: var(--text-secondary); font-size: 0.82rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+
+.ratingsRow { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.ratingBtn {
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); color: var(--text-secondary);
+  padding: 0.45rem 0.9rem; border-radius: 20px; font-size: 0.82rem; font-weight: 600; cursor: pointer;
+}
+.ratingBtn:hover { background: rgba(255,255,255,0.12); }
+.ratingBtnActive { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+.changePinBtn {
+  align-self: flex-start; background: none; border: 1px solid rgba(255,255,255,0.15); color: var(--text-secondary);
+  padding: 0.55rem 1rem; border-radius: 8px; font-size: 0.85rem; cursor: pointer;
+}
+.changePinBtn:hover { color: #fff; border-color: rgba(255,255,255,0.3); }
+
+.input {
+  background: var(--bg-hover); border: 1px solid var(--border); border-radius: 6px;
+  padding: 0.75rem 1rem; color: var(--text-primary); font-size: 1.1rem; letter-spacing: 4px;
+  outline: none; text-align: center;
+}
+.input:focus { border-color: var(--accent); }
+
+.error { color: var(--accent); font-size: 0.85rem; }
+.success { color: #4caf50; font-size: 0.85rem; }
+
+.btnSave {
+  background: var(--accent); color: #fff; border: none; padding: 0.85rem; border-radius: 6px;
+  font-size: 0.95rem; font-weight: 700; cursor: pointer;
+}
+.btnSave:hover { background: var(--accent-hover); }

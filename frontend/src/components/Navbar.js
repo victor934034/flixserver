@@ -5,7 +5,10 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { getMe, logout } from '../lib/auth';
 import api from '../lib/api';
+import { useProfile, getAvatar } from '../contexts/ProfileContext';
 import styles from './Navbar.module.css';
+
+const isUrl = (s) => typeof s === 'string' && s.startsWith('http');
 
 export default function Navbar() {
   const [user, setUser] = useState(() => {
@@ -19,6 +22,7 @@ export default function Navbar() {
   const router = useRouter();
   const debounce = useRef(null);
   const wrapRef = useRef(null);
+  const { activeProfile } = useProfile();
 
   useEffect(() => {
     getMe().then(setUser).catch(() => setUser(null));
@@ -119,6 +123,18 @@ export default function Navbar() {
 
         {isLoggedIn ? (
           <div className={styles.userMenu}>
+            {activeProfile && (
+              <Link href="/perfis" className={styles.profileSwitch} title="Trocar perfil">
+                {isUrl(activeProfile.avatar) ? (
+                  <img src={activeProfile.avatar} alt="" className={styles.profileAvatarImg} />
+                ) : (
+                  <span className={styles.profileAvatarEmoji} style={{ background: getAvatar(activeProfile.avatar).color }}>
+                    {getAvatar(activeProfile.avatar).emoji}
+                  </span>
+                )}
+                <span className={styles.profileSwitchName}>{activeProfile.name}</span>
+              </Link>
+            )}
             {isPending
               ? <span className={styles.userNamePending} />
               : <Link href="/perfil" className={styles.userName}>{user.name?.split(' ')[0]}</Link>

@@ -1,0 +1,25 @@
+.overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.85);
+  display: flex; align-items: center; justify-content: center;
+  padding: 1.5rem; z-index: 1000;
+}
+.box {
+  background: #111; border-radius: 16px; padding: 2rem;
+  width: 100%; max-width: 360px; text-align: center;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.title { color: #fff; font-size: 1.15rem; font-weight: 800; margin-bottom: 0.5rem; }
+.sub { color: #aaa; font-size: 0.85rem; line-height: 1.5; margin-bottom: 1.3rem; }
+.label { display: block; color: #666; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.5px; margin-bottom: 0.6rem; text-align: left; }
+.input {
+  width: 100%; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px;
+  padding: 0.85rem; color: #fff; font-size: 1.3rem; text-align: center;
+  letter-spacing: 10px; margin-bottom: 0.4rem; outline: none;
+}
+.input:focus { border-color: var(--accent); }
+.inputError { border-color: var(--accent); }
+.error { color: var(--accent); font-size: 0.8rem; margin-bottom: 0.6rem; }
+.btns { display: flex; gap: 0.75rem; margin-top: 0.8rem; }
+.btnCancel, .btnOk { flex: 1; padding: 0.8rem; border-radius: 10px; font-size: 0.9rem; cursor: pointer; }
+.btnCancel { background: none; border: 1px solid #2a2a2a; color: #aaa; }
+.btnOk { background: var(--accent); border: none; color: #fff; font-weight: 700; }

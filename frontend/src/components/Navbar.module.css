@@ -71,6 +71,19 @@
 
 .userName { font-size: 0.9rem; color: var(--text-secondary); }
 
+.profileSwitch {
+  display: flex; align-items: center; gap: 0.45rem; text-decoration: none;
+  padding: 0.25rem 0.5rem 0.25rem 0.25rem; border-radius: 20px;
+  transition: background 0.2s;
+}
+.profileSwitch:hover { background: rgba(255,255,255,0.08); }
+.profileAvatarImg { width: 28px; height: 28px; border-radius: 7px; object-fit: cover; }
+.profileAvatarEmoji {
+  width: 28px; height: 28px; border-radius: 7px;
+  display: flex; align-items: center; justify-content: center; font-size: 15px;
+}
+.profileSwitchName { font-size: 0.85rem; color: var(--text-secondary); font-weight: 600; }
+
 .userNamePending {
   display: inline-block;
   width: 60px;

@@ -28,13 +28,14 @@ function fmt(s) {
   return `${m}:${String(sec).padStart(2,'0')}`;
 }
 
-export default function VideoPlayer({ content, onProgress }) {
+export default function VideoPlayer({ content, onProgress, startAt = 0 }) {
   const videoRef     = useRef(null);
   const containerRef = useRef(null);
   const hideTimer    = useRef(null);
   const progressRef  = useRef(null);
   const lastReportRef = useRef(0); // throttle do onProgress (timeupdate dispara várias vezes/s)
   const autoRemuxTriedRef = useRef(false); // evita loop se o remux também falhar
+  const resumeAppliedRef = useRef(false); // aplica startAt só na primeira carga do vídeo
 
   const [version,      setVersion]      = useState('dubbing');
   const [subtitle,     setSubtitle]     = useState('none');
@@ -107,6 +108,10 @@ export default function VideoPlayer({ content, onProgress }) {
     const onLoaded = () => {
       setDuration(video.duration);
       if (video.audioTracks && video.audioTracks.length === 0) setAudioWarning(true);
+      if (!resumeAppliedRef.current && startAt > 5 && video.duration > startAt) {
+        resumeAppliedRef.current = true;
+        video.currentTime = startAt;
+      }
     };
     const onEnded  = () => setPlaying(false);
     const onError  = () => {

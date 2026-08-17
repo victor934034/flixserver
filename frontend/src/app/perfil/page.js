@@ -55,11 +55,32 @@ export default function PerfilPage() {
           <div className={styles.divider} />
 
           <div className={styles.links}>
+            <a href="/perfis" className={styles.link}>
+              <span className={styles.linkIcon}>👤</span> Trocar Perfil
+            </a>
             <a href="/minha-lista" className={styles.link}>
               <span className={styles.linkIcon}>🎬</span> Minha Lista
             </a>
             <a href="/continuar-assistindo" className={styles.link}>
               <span className={styles.linkIcon}>▶</span> Continuar Assistindo
+            </a>
+            <a href="/cronologias" className={styles.link}>
+              <span className={styles.linkIcon}>📽</span> Cronologias
+            </a>
+            <a href="/perfil/parental" className={styles.link}>
+              <span className={styles.linkIcon}>🔒</span> Controle Parental
+            </a>
+            <a href="/sugestao" className={styles.link}>
+              <span className={styles.linkIcon}>💬</span> Sugerir Conteúdo
+            </a>
+            <a href="/autorizar-tv" className={styles.link}>
+              <span className={styles.linkIcon}>📺</span> Autorizar TV
+            </a>
+            <a href="/assinatura" className={styles.link}>
+              <span className={styles.linkIcon}>💳</span> Assinatura
+            </a>
+            <a href="/iptv" className={styles.link}>
+              <span className={styles.linkIcon}>📡</span> IPTV
             </a>
             {user.is_admin && (
               <a href="/admin" className={styles.link}>

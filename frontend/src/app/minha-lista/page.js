@@ -4,18 +4,21 @@ import Link from 'next/link';
 import Image from 'next/image';
 import Navbar from '../../components/Navbar';
 import api from '../../lib/api';
+import { useProfile } from '../../contexts/ProfileContext';
 import styles from './page.module.css';
 
 export default function MinhaListaPage() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const { activeProfile } = useProfile();
 
   useEffect(() => {
-    api.get('/watchlist')
+    const params = activeProfile ? { profile_id: activeProfile.id } : undefined;
+    api.get('/watchlist', { params })
       .then(r => setItems(r.data || []))
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [activeProfile]);
 
   function remove(id) {
     api.delete(`/watchlist/${id}`)
