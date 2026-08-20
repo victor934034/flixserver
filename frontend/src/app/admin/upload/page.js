@@ -335,10 +335,12 @@ export default function UploadPage() {
   async function startAll() {
     setUploading(true);
     const pending = files.filter(f => f.status === 'pending');
-    const chunks = [];
-    for (let i = 0; i < pending.length; i += 3) chunks.push(pending.slice(i, i + 3));
-    for (const chunk of chunks) {
-      await Promise.all(chunk.map(uploadFile));
+    // Um arquivo por vez: cada arquivo já abre PARALLEL_PARTS conexões simultâneas
+    // ao B2. Enviar vários arquivos ao mesmo tempo multiplicava as conexões
+    // (ex: 3 arquivos x 12 partes = 36 conexões brigando pela mesma internet),
+    // o que derrubava a velocidade de todo mundo em vez de somar.
+    for (const item of pending) {
+      await uploadFile(item);
     }
     setUploading(false);
   }
