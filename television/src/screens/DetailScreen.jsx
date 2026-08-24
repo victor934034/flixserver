@@ -261,6 +261,7 @@ export default function DetailScreen({ navigation, route }) {
         en: detail.subtitle_en || null,
         es: detail.subtitle_es || null,
       },
+      contentMeta: { content_type: 'movie', content_id: detail.id },
     });
   }
 
@@ -290,6 +291,7 @@ export default function DetailScreen({ navigation, route }) {
         episodes:    currentEps,
         currentEpId: ep.id,
       },
+      contentMeta: { content_type: 'episode', content_id: ep.id, episode_id: ep.id, series_id: detail.id },
     });
   }
 

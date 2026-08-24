@@ -523,7 +523,14 @@ export default function HomeScreen({ navigation }) {
   function playFeatured() {
     if (!heroItem) return;
     const url = heroItem.file_dubbing || heroItem.file_subtitled || heroItem.file_cinema || heroItem.file_4k;
-    if (url) navigation.navigate('Player', { url, title: heroItem.title || heroItem.name, poster: heroItem.backdrop_url });
+    if (url) {
+      navigation.navigate('Player', {
+        url,
+        title: heroItem.title || heroItem.name,
+        poster: heroItem.backdrop_url,
+        contentMeta: { content_type: 'movie', content_id: heroItem.id },
+      });
+    }
   }
 
   const isSeries = item => item?.total_seasons !== undefined || item?.content_type === 'series';
