@@ -145,6 +145,7 @@ router.post('/', async (req, res) => {
 
     res.json(result);
   } catch (err) {
+    console.error('[history] POST error:', { body: req.body, message: err.message, code: err.code, details: err.details, hint: err.hint });
     res.status(500).json({ error: err.message });
   }
 });

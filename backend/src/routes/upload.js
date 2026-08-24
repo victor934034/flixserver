@@ -518,12 +518,11 @@ router.post('/finish-large', async (req, res) => {
     // Gera HLS em background (abre em < 1s em qualquer dispositivo)
     generateHLS(filename).catch(e => console.warn('[hls-auto]', filename, e.message?.slice(0, 80)));
 
-    // Push notification para todos os usuários (fire-and-forget)
-    const { sendPushToAll } = require('../services/notifications');
-    const { supabase } = require('../services/supabase');
-    const title = filename.replace(/\.[^.]+$/, '').replace(/[._]/g, ' ');
-    sendPushToAll(supabase, 'Novo conteúdo adicionado!', `"${title}" já está disponível no FlixHome.`, { screen: 'home' })
-      .catch(e => console.warn('[push] upload-complete:', e.message));
+    // Notificação "novo conteúdo" NÃO é enviada aqui — nesse ponto o arquivo só
+    // terminou de subir pro B2, ainda não virou filme/série/episódio de verdade
+    // (isso só acontece na importação, que já notifica corretamente em
+    // admin.js e tmdb.js). Notificar aqui avisava o usuário antes da hora,
+    // às vezes pra conteúdo que nem chegava a ser importado.
 
     res.json({ cdnUrl });
   } catch (err) {

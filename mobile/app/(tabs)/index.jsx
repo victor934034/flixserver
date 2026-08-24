@@ -98,6 +98,7 @@ export default function HomeScreen() {
   const [continueItems, setContinueItems] = useState([]);
   const [popular, setPopular] = useState([]);
   const [collections, setCollections] = useState([]);
+  const [recentEpisodes, setRecentEpisodes] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const fetchHistory = useCallback(async () => {
@@ -121,7 +122,8 @@ export default function HomeScreen() {
       api.get('/movies/section/popular').catch(() => ({ data: [] })),
       api.get('/series/section/popular').catch(() => ({ data: [] })),
       api.get('/collections').catch(() => ({ data: [] })),
-    ]).then(([fRes, mRes, sRes, popMoviesRes, popSeriesRes, colRes]) => {
+      api.get('/episodes/section/recent?limit=20').catch(() => ({ data: [] })),
+    ]).then(([fRes, mRes, sRes, popMoviesRes, popSeriesRes, colRes, recentEpRes]) => {
       setFeatured(Array.isArray(fRes.data) ? fRes.data : []);
       setMovies(Array.isArray(mRes.data) ? mRes.data : (mRes.data?.data ?? []));
       setSeries(Array.isArray(sRes.data) ? sRes.data : (sRes.data?.data ?? []));
@@ -130,6 +132,7 @@ export default function HomeScreen() {
       const merged = [...popM, ...popS].sort((a, b) => (b.views || 0) - (a.views || 0)).slice(0, 20);
       setPopular(merged);
       setCollections(Array.isArray(colRes.data) ? colRes.data : []);
+      setRecentEpisodes(Array.isArray(recentEpRes.data) ? recentEpRes.data : []);
     }).finally(() => setLoading(false));
   }, []);
 
@@ -176,6 +179,36 @@ export default function HomeScreen() {
 
         <ContentRow title="Filmes" items={movies} type="movie" />
         <ContentRow title="Séries" items={series} type="series" />
+
+        {recentEpisodes.length > 0 && (
+          <View style={styles.continueSection}>
+            <Text style={styles.sectionTitle}>Episódios Adicionados Recentemente</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.collectionsRow}>
+              {recentEpisodes.map(ep => (
+                <TouchableOpacity
+                  key={ep.id}
+                  style={styles.recentEpCard}
+                  activeOpacity={0.8}
+                  onPress={() => router.push(`/serie/${ep.series_id}`)}
+                >
+                  <View style={{ width: 150, height: 90 }}>
+                    {ep.poster_url ? (
+                      <Image source={{ uri: ep.poster_url }} style={styles.recentEpThumb} resizeMode="cover" />
+                    ) : (
+                      <View style={[styles.recentEpThumb, styles.collectionCoverPlaceholder]} />
+                    )}
+                    <View style={styles.recentEpBadge}>
+                      <Text style={styles.recentEpBadgeText}>T{ep.season_number}E{String(ep.episode_number).padStart(2, '0')}</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.collectionTitle} numberOfLines={1}>{ep.series_title}</Text>
+                  {ep.title ? <Text style={styles.recentEpSub} numberOfLines={1}>{ep.title}</Text> : null}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+
         {popular.length > 0 && (
           <ContentRow title="Mais Assistidos" items={popular} type="mixed" />
         )}
@@ -233,6 +266,14 @@ const styles = StyleSheet.create({
   collectionCoverPlaceholder: { justifyContent: 'center', alignItems: 'center' },
   collectionCoverText: { color: '#444', fontSize: 24, fontWeight: '700' },
   collectionTitle: { color: '#ccc', fontSize: 12.5, fontWeight: '600', marginTop: 6 },
+  recentEpCard: { width: 150 },
+  recentEpThumb: { width: 150, height: 90, borderRadius: 8, backgroundColor: '#1a1a1a' },
+  recentEpBadge: {
+    position: 'absolute', bottom: 6, right: 6, backgroundColor: 'rgba(0,0,0,0.75)',
+    borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2,
+  },
+  recentEpBadgeText: { color: '#fff', fontSize: 10, fontWeight: '700' },
+  recentEpSub: { color: '#666', fontSize: 11, marginTop: 1 },
   continuePlaceholder: { borderRadius: 6, backgroundColor: '#1a1a1a' },
   progressTrack: {
     height: 3, backgroundColor: '#333', borderRadius: 1.5,

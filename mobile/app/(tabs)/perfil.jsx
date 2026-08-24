@@ -186,6 +186,16 @@ export default function PerfilScreen() {
             label="Sobre o App"
             onPress={() => Alert.alert('Sobre', `Flixhome v${APP_VERSION}\nSua plataforma de streaming.`)}
           />
+          <View style={styles.divider} />
+          <MenuItem
+            icon="star-outline"
+            label="Apoie o Projeto"
+            desc="Gosta do Flixhome? Deixe seu apoio"
+            onPress={() => Alert.alert(
+              '⭐ Apoie o Flixhome',
+              'Se você gosta do app e quer ajudar a manter o projeto no ar, considere fazer uma doação de qualquer valor. Todo apoio é bem-vindo e ajuda muito!\n\nObrigado por fazer parte da comunidade 💛',
+            )}
+          />
         </View>
       </View>
 
