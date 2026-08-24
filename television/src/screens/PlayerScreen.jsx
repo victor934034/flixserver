@@ -40,6 +40,7 @@ function parseVtt(text) {
   return cues;
 }
 
+const VER_SHORT = { dubbing: 'DUB', subtitled: 'LEG', cinema: 'CAM', '4k': '4K', color: 'COR', bw: 'P&B' };
 const TRACK_META = {
   dubbing:   { label: 'Dublado',   sub: 'Áudio em português' },
   subtitled: { label: 'Legendado', sub: 'Áudio original' },
@@ -450,6 +451,11 @@ export default function PlayerScreen({ navigation, route }) {
               );
             })()}
           </View>
+          {!!VER_SHORT[trackKey] && (
+            <View style={s.verBadge} pointerEvents="none">
+              <Text style={s.verBadgeTxt}>{VER_SHORT[trackKey]}</Text>
+            </View>
+          )}
           {!!nextEp && (
             <View style={s.nextBadge} pointerEvents="none">
               <Text style={s.nextBadgeTxt}>Próximo ep. disponível</Text>
@@ -649,6 +655,11 @@ const s = StyleSheet.create({
     textShadowOffset: { width: 0, height: 1 }, textShadowRadius: r(4),
   },
   topSub:   { color: 'rgba(255,255,255,0.5)', fontSize: r(12), marginTop: r(2) },
+  verBadge: {
+    backgroundColor: 'rgba(201,28,44,0.85)',
+    borderRadius: r(6), paddingHorizontal: r(12), paddingVertical: r(6), marginRight: r(10),
+  },
+  verBadgeTxt: { color: '#fff', fontSize: r(12), fontWeight: '800', letterSpacing: 0.5 },
   nextBadge: {
     backgroundColor: 'rgba(255,255,255,0.08)',
     borderRadius: r(6), paddingHorizontal: r(14), paddingVertical: r(6),
