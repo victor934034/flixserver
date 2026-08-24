@@ -595,6 +595,72 @@ router.delete('/collections/:id/items/:itemId', async (req, res) => {
 });
 
 // ---- LIKES STATS ----
+// ---- ATIVIDADE (quem assistiu o que) ----
+router.get('/activity', async (req, res) => {
+  try {
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 50;
+    const offset = (page - 1) * limit;
+
+    const { data: items, error, count } = await supabase
+      .from('watch_history')
+      .select('*', { count: 'exact' })
+      .order('last_watched', { ascending: false })
+      .range(offset, offset + limit - 1);
+    if (error) throw error;
+
+    const userIds = [...new Set((items || []).map(i => i.user_id).filter(Boolean))];
+    const movieIds = (items || []).filter(i => i.content_type === 'movie').map(i => i.content_id);
+    const episodeIds = (items || []).filter(i => i.content_type === 'episode').map(i => i.content_id);
+
+    const [usersRes, moviesRes, episodesRes] = await Promise.all([
+      userIds.length ? supabase.from('users').select('id, name, email').in('id', userIds) : { data: [] },
+      movieIds.length ? supabase.from('movies').select('id, title').in('id', movieIds) : { data: [] },
+      episodeIds.length ? supabase.from('episodes').select('id, title, season_number, episode_number, series_id').in('id', episodeIds) : { data: [] },
+    ]);
+    const usersMap = Object.fromEntries((usersRes.data || []).map(u => [u.id, u]));
+    const moviesMap = Object.fromEntries((moviesRes.data || []).map(m => [m.id, m]));
+    const episodesMap = Object.fromEntries((episodesRes.data || []).map(e => [e.id, e]));
+
+    const seriesIds = [...new Set((episodesRes.data || []).map(e => e.series_id).filter(Boolean))];
+    const { data: seriesData } = seriesIds.length
+      ? await supabase.from('series').select('id, title').in('id', seriesIds)
+      : { data: [] };
+    const seriesMap = Object.fromEntries((seriesData || []).map(s => [s.id, s]));
+
+    const enriched = (items || []).map(item => {
+      const user = usersMap[item.user_id] || {};
+      let title = '(removido)';
+      let subtitle = null;
+      if (item.content_type === 'movie') {
+        title = moviesMap[item.content_id]?.title || '(filme removido)';
+      } else {
+        const ep = episodesMap[item.content_id];
+        if (ep) {
+          title = seriesMap[ep.series_id]?.title || '(série removida)';
+          subtitle = `T${ep.season_number}E${String(ep.episode_number).padStart(2, '0')}${ep.title ? ` · ${ep.title}` : ''}`;
+        }
+      }
+      return {
+        id: item.id,
+        user_name: user.name || null,
+        user_email: user.email || null,
+        content_type: item.content_type,
+        title,
+        subtitle,
+        progress: item.progress,
+        duration: item.duration,
+        completed: item.completed,
+        last_watched: item.last_watched,
+      };
+    });
+
+    res.json({ data: enriched, total: count || 0 });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/likes/stats', async (req, res) => {
   try {
     const { data: likes, error } = await supabase.from('likes').select('content_type, content_id, is_like');

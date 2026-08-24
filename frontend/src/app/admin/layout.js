@@ -17,6 +17,7 @@ const NAV = [
   { href: '/admin/colecoes', label: 'Cronologias' },
   { href: '/admin/sugestoes', label: 'Sugestões' },
   { href: '/admin/likes', label: 'Likes' },
+  { href: '/admin/atividade', label: 'Atividade' },
   { href: '/admin/avatares', label: 'Avatares' },
   { href: '/admin/iptv', label: 'IPTV' },
   { href: '/admin/configuracoes', label: 'Configurações' },
