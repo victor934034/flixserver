@@ -89,8 +89,11 @@ router.post('/', async (req, res) => {
       .from('watch_history')
       .select('id')
       .eq('user_id', req.user.id)
-      .eq('content_id', content_id)
-      .eq('episode_id', episode_id || null);
+      .eq('content_id', content_id);
+    // .eq(col, null) NÃO funciona no PostgREST (nunca casa com linhas NULL) —
+    // precisa ser .is(). Sem isso, filme (episode_id sempre null) nunca achava
+    // o registro existente e toda atualização virava tentativa de inserir de novo.
+    findQ = episode_id ? findQ.eq('episode_id', episode_id) : findQ.is('episode_id', null);
     // Sem isso (quando profile_id não vem), a busca ignorava profile_id por completo
     // e podia achar/atualizar a linha de OUTRO perfil da mesma conta.
     findQ = profile_id ? findQ.eq('profile_id', profile_id) : findQ.is('profile_id', null);
@@ -117,7 +120,8 @@ router.post('/', async (req, res) => {
         // Corrida rara: outra requisição inseriu entre o find e o insert acima —
         // ao invés de falhar, atualiza a linha que acabou de aparecer.
         let retryQ = supabase.from('watch_history').select('id')
-          .eq('user_id', req.user.id).eq('content_id', content_id).eq('episode_id', episode_id || null);
+          .eq('user_id', req.user.id).eq('content_id', content_id);
+        retryQ = episode_id ? retryQ.eq('episode_id', episode_id) : retryQ.is('episode_id', null);
         retryQ = profile_id ? retryQ.eq('profile_id', profile_id) : retryQ.is('profile_id', null);
         const { data: justInserted } = await retryQ.single();
         if (justInserted) {
