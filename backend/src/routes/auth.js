@@ -200,12 +200,29 @@ router.get('/me', authMiddleware, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('users')
-      .select('id, email, name, avatar_url, plan, plan_expires_at, is_admin, created_at')
+      .select('id, email, name, avatar_url, plan, plan_expires_at, is_admin, created_at, notification_prefs')
       .eq('id', req.user.id)
       .single();
 
     if (error || !data) return res.status(404).json({ error: 'Usuário não encontrado' });
     res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /auth/notification-prefs — liga/desliga tipos de notificação push
+router.put('/notification-prefs', authMiddleware, async (req, res) => {
+  const { new_content, billing } = req.body;
+  const prefs = {};
+  if (new_content !== undefined) prefs.new_content = !!new_content;
+  if (billing !== undefined) prefs.billing = !!billing;
+  try {
+    const { data: current } = await supabase.from('users').select('notification_prefs').eq('id', req.user.id).single();
+    const merged = { new_content: true, billing: true, ...(current?.notification_prefs || {}), ...prefs };
+    const { error } = await supabase.from('users').update({ notification_prefs: merged }).eq('id', req.user.id);
+    if (error) throw error;
+    res.json(merged);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -19,16 +19,19 @@ async function sendPush(tokens, title, body, data = {}) {
   }
 }
 
-async function sendPushToAll(supabase, title, body, data = {}) {
+// category: 'new_content' (novo filme/série/episódio) ou 'billing' (assinatura/IPTV) —
+// respeita users.notification_prefs, que por padrão vem tudo habilitado.
+async function sendPushToAll(supabase, title, body, data = {}, category = 'new_content') {
   try {
     const { data: users } = await supabase
       .from('users')
-      .select('push_token')
+      .select('push_token, notification_prefs')
       .not('push_token', 'is', null);
     const tokens = (users || [])
+      .filter(u => u.notification_prefs?.[category] !== false) // default true se ausente
       .map(u => u.push_token)
       .filter(t => t && t.startsWith('ExponentPushToken'));
-    console.log(`[push] sendPushToAll: ${tokens.length} token(s) encontrado(s)`);
+    console.log(`[push] sendPushToAll (${category}): ${tokens.length} token(s) encontrado(s)`);
     if (tokens.length) await sendPush(tokens, title, body, data);
     return tokens.length;
   } catch (e) {
@@ -52,13 +55,14 @@ async function sendExpiryWarnings(supabase) {
 
     // ── Assinatura do app ─────────────────────────────────────────────────────
     try {
-      const { data: users } = await supabase
+      const { data: usersRaw } = await supabase
         .from('users')
-        .select('push_token')
+        .select('push_token, notification_prefs')
         .not('push_token', 'is', null)
         .not('plan_expires_at', 'is', null)
         .gte('plan_expires_at', winStart.toISOString())
         .lte('plan_expires_at', winEnd.toISOString());
+      const users = (usersRaw || []).filter(u => u.notification_prefs?.billing !== false);
 
       for (const u of users || []) {
         await sendPush(
@@ -75,13 +79,14 @@ async function sendExpiryWarnings(supabase) {
 
     // ── Assinatura IPTV ───────────────────────────────────────────────────────
     try {
-      const { data: users } = await supabase
+      const { data: usersRaw } = await supabase
         .from('users')
-        .select('push_token')
+        .select('push_token, notification_prefs')
         .not('push_token', 'is', null)
         .not('iptv_expires_at', 'is', null)
         .gte('iptv_expires_at', winStart.toISOString())
         .lte('iptv_expires_at', winEnd.toISOString());
+      const users = (usersRaw || []).filter(u => u.notification_prefs?.billing !== false);
 
       for (const u of users || []) {
         await sendPush(

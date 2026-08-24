@@ -1450,8 +1450,8 @@ router.put('/users/:id/subscription', async (req, res) => {
     if (error) throw error;
 
     if (update.plan && data) {
-      const { data: u } = await supabase.from('users').select('push_token').eq('id', req.params.id).single();
-      if (u?.push_token) {
+      const { data: u } = await supabase.from('users').select('push_token, notification_prefs').eq('id', req.params.id).single();
+      if (u?.push_token && u.notification_prefs?.billing !== false) {
         const { sendPush } = require('../services/notifications');
         sendPush([u.push_token], '🎉 Assinatura ativada!', 'Sua assinatura FlixHome está ativa. Bom filme!', { screen: 'home' }).catch(() => {});
       }
@@ -1591,9 +1591,9 @@ router.patch('/iptv/orders/:id/activate', async (req, res) => {
           .eq('id', order.user_id);
 
         const { data: user } = await supabase
-          .from('users').select('push_token').eq('id', order.user_id).single();
+          .from('users').select('push_token, notification_prefs').eq('id', order.user_id).single();
 
-        if (user?.push_token) {
+        if (user?.push_token && user.notification_prefs?.billing !== false) {
           const { sendPush } = require('../services/notifications');
           const label = plan.duration_months === 1 ? '1 mês' : `${plan.duration_months} meses`;
           sendPush(

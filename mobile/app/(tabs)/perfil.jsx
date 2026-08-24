@@ -153,7 +153,8 @@ export default function PerfilScreen() {
           <MenuItem
             icon="notifications-outline"
             label="Notificações"
-            onPress={() => Linking.openSettings()}
+            desc="Escolher quais avisos você quer receber"
+            onPress={() => router.push('/notificacoes')}
           />
           <View style={styles.divider} />
           <MenuItem

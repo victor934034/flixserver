@@ -19,6 +19,104 @@ import api from '../lib/api';
 const RESUME_KEY = 'admin_upload_pending';
 const VIDEO_EXT = ['mp4', 'mkv', 'avi', 'mov', 'm4v', 'webm', 'ts', 'wmv', 'flv', 'mpg', 'mpeg'];
 
+// O upload direto (presign único) usa a API simples do B2, que tem limite
+// rígido de 5GB por arquivo — filme grande falhava sem aviso claro. Acima
+// disso (e para ganhar velocidade via paralelismo, igual o site já faz),
+// usa upload em partes.
+const LARGE_FILE_THRESHOLD = 300 * 1024 * 1024;
+const PART_SIZE = 40 * 1024 * 1024;
+const PARALLEL_PARTS = 4; // mais conservador que o site: memória/CPU do celular são mais limitadas
+
+// Sobe um arquivo grande em partes paralelas direto ao B2 (mesma estratégia do site).
+// Cada parte é lida em base64 (posição/tamanho) e gravada num arquivo temporário,
+// porque createUploadTask precisa de um URI de arquivo — não existe Blob.slice() no RN.
+async function uploadLargeMobile(target, uploadUri, onProgress, isCancelled) {
+  const totalParts = Math.ceil(target.size / PART_SIZE);
+  const partProgress = new Array(totalParts).fill(0);
+
+  function report() {
+    const done = partProgress.reduce((a, b) => a + b, 0);
+    onProgress(Math.round((done / totalParts) * 88));
+  }
+
+  const { data: { fileId, filename: serverFilename } } = await api.post('/upload/start-large', {
+    filename: target.name,
+    contentType: target.mimeType || 'video/mp4',
+  });
+
+  let queueIdx = 0;
+  async function worker() {
+    while (true) {
+      if (isCancelled()) throw new Error('cancelled');
+      const i = queueIdx++;
+      if (i >= totalParts) break;
+
+      const start = i * PART_SIZE;
+      const length = Math.min(PART_SIZE, target.size - start);
+      const partNumber = i + 1;
+      const partUri = `${FileSystem.cacheDirectory}part_${partNumber}_${Date.now()}_${Math.random().toString(36).slice(2)}.bin`;
+
+      let attempts = 0;
+      while (true) {
+        try {
+          const base64 = await FileSystem.readAsStringAsync(uploadUri, {
+            encoding: FileSystem.EncodingType.Base64,
+            position: start,
+            length,
+          });
+          await FileSystem.writeAsStringAsync(partUri, base64, { encoding: FileSystem.EncodingType.Base64 });
+
+          const { data: partUrl } = await api.post('/upload/part-url', { fileId });
+
+          const task = FileSystem.createUploadTask(
+            partUrl.uploadUrl,
+            partUri,
+            {
+              httpMethod: 'POST',
+              uploadType: BINARY_CONTENT,
+              headers: {
+                Authorization: partUrl.authorizationToken,
+                'X-Bz-Part-Number': String(partNumber),
+                'X-Bz-Content-Sha1': 'do_not_verify',
+              },
+            },
+            (prog) => {
+              partProgress[i] = prog.totalBytesExpectedToSend > 0 ? prog.totalBytesSent / prog.totalBytesExpectedToSend : 0;
+              report();
+            }
+          );
+          const result = await task.uploadAsync();
+          await FileSystem.deleteAsync(partUri, { idempotent: true });
+
+          if (!result || result.status >= 300) throw new Error(`Parte ${partNumber} falhou: HTTP ${result?.status || '?'}`);
+          partProgress[i] = 1;
+          report();
+          break; // sucesso
+        } catch (err) {
+          await FileSystem.deleteAsync(partUri, { idempotent: true }).catch(() => {});
+          if (err.message === 'cancelled') throw err;
+          if (attempts < 3) {
+            attempts++;
+            partProgress[i] = 0;
+            await new Promise(r => setTimeout(r, 1500 * attempts));
+          } else {
+            throw err;
+          }
+        }
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(PARALLEL_PARTS, totalParts) }, () => worker()));
+
+  const { data: finish } = await api.post('/upload/finish-large', {
+    fileId,
+    filename: serverFilename,
+    partSha1Array: [],
+  });
+  return finish.cdnUrl;
+}
+
 function formatSize(bytes) {
   if (!bytes) return '—';
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
@@ -31,6 +129,7 @@ export default function AdminUploadScreen() {
   const router = useRouter();
   const taskRef = useRef(null);
   const cacheUriRef = useRef(null); // rastrea arquivo copiado para cache (Android)
+  const cancelledRef = useRef(false); // cancelamento do upload em partes (multiplas uploadTasks paralelas)
 
   const [file, setFile] = useState(null);
   const [version, setVersion] = useState('dubbing');
@@ -172,47 +271,52 @@ export default function AdminUploadScreen() {
         version,
       }));
 
-      const { data: presign } = await api.get('/upload/presign');
-
       let cdnUrl;
 
-      const encodedName = encodeURIComponent(target.name);
+      if (target.size >= LARGE_FILE_THRESHOLD) {
+        cancelledRef.current = false;
+        cdnUrl = await uploadLargeMobile(target, uploadUri, setProgress, () => cancelledRef.current);
+        setProgress(90);
+      } else {
+        const { data: presign } = await api.get('/upload/presign');
+        const encodedName = encodeURIComponent(target.name);
 
-      taskRef.current = FileSystem.createUploadTask(
-        presign.uploadUrl,
-        uploadUri,
-        {
-          httpMethod: 'POST',
-          uploadType: BINARY_CONTENT,
-          headers: {
-            Authorization: presign.authorizationToken,
-            'X-Bz-File-Name': encodedName,
-            'Content-Type': target.mimeType || 'video/mp4',
-            'X-Bz-Content-Sha1': 'do_not_verify',
+        taskRef.current = FileSystem.createUploadTask(
+          presign.uploadUrl,
+          uploadUri,
+          {
+            httpMethod: 'POST',
+            uploadType: BINARY_CONTENT,
+            headers: {
+              Authorization: presign.authorizationToken,
+              'X-Bz-File-Name': encodedName,
+              'Content-Type': target.mimeType || 'video/mp4',
+              'X-Bz-Content-Sha1': 'do_not_verify',
+            },
           },
-        },
-        (prog) => {
-          const pct = prog.totalBytesExpectedToSend > 0
-            ? Math.round((prog.totalBytesSent / prog.totalBytesExpectedToSend) * 88)
-            : 0;
-          setProgress(pct);
+          (prog) => {
+            const pct = prog.totalBytesExpectedToSend > 0
+              ? Math.round((prog.totalBytesSent / prog.totalBytesExpectedToSend) * 88)
+              : 0;
+            setProgress(pct);
+          }
+        );
+
+        const uploadResult = await taskRef.current.uploadAsync();
+
+        if (!uploadResult || uploadResult.status >= 300) {
+          let errMsg = `Upload falhou: HTTP ${uploadResult?.status || '?'}`;
+          try {
+            const body = JSON.parse(uploadResult?.body || '{}');
+            if (body.message) errMsg = body.message;
+          } catch {}
+          throw new Error(errMsg);
         }
-      );
 
-      const uploadResult = await taskRef.current.uploadAsync();
-
-      if (!uploadResult || uploadResult.status >= 300) {
-        let errMsg = `Upload falhou: HTTP ${uploadResult?.status || '?'}`;
-        try {
-          const body = JSON.parse(uploadResult?.body || '{}');
-          if (body.message) errMsg = body.message;
-        } catch {}
-        throw new Error(errMsg);
+        setProgress(90);
+        // encodedName garante URL válida para nomes com espaços ou acentos
+        cdnUrl = `${presign.cdnBase}/${encodedName}`;
       }
-
-      setProgress(90);
-      // encodedName garante URL válida para nomes com espaços ou acentos
-      cdnUrl = `${presign.cdnBase}/${encodedName}`;
 
       const { data: tmdbResult } = await api.post('/tmdb/detect', {
         fileUrl: cdnUrl,
@@ -230,7 +334,7 @@ export default function AdminUploadScreen() {
         cacheUriRef.current = null;
       }
     } catch (err) {
-      if (err.message !== 'Upload cancelled') {
+      if (err.message !== 'Upload cancelled' && err.message !== 'cancelled') {
         const msg = err.response?.data?.error || err.message;
         setError(msg);
         setStatus('error');
@@ -245,6 +349,7 @@ export default function AdminUploadScreen() {
   };
 
   const cancelUpload = () => {
+    cancelledRef.current = true;
     taskRef.current?.cancelAsync?.();
     taskRef.current = null;
     setStatus('idle');
