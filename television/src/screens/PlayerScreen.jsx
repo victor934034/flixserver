@@ -8,6 +8,7 @@ import { useEvent } from 'expo';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../lib/api';
+import { useProfile } from '../contexts/ProfileContext';
 
 const { width: W, height: H } = Dimensions.get('window');
 const S = Math.min(W / 1920, H / 1080);
@@ -128,6 +129,7 @@ function PlayBtn({ isPlaying, onPress, onFocus, grabFocus }) {
 
 // ── PlayerScreen ───────────────────────────────────────────────────────────────
 export default function PlayerScreen({ navigation, route }) {
+  const { activeProfile } = useProfile();
   const {
     url:          initialUrl  = '',
     title                     = '',
@@ -325,11 +327,12 @@ export default function PlayerScreen({ navigation, route }) {
         ...contentMeta,
         progress: Math.floor(pos / 1000),
         duration: Math.floor(dur / 1000),
+        profile_id: activeProfile?.id || null,
       }).catch(() => {});
     };
     const id = setInterval(save, 30000);
     return () => { clearInterval(id); save(); };
-  }, [contentMeta, currentUrl]);
+  }, [contentMeta, currentUrl, activeProfile]);
 
   // ── Seek ────────────────────────────────────────────────────────────────────
   const seekBy = useCallback((deltaMs) => {

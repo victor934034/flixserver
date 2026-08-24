@@ -6,6 +6,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../lib/api';
+import { useProfile } from '../contexts/ProfileContext';
 
 // ─── Scale ────────────────────────────────────────────────────────────────────
 const { width: W, height: H } = Dimensions.get('window');
@@ -202,14 +203,42 @@ export default function DetailScreen({ navigation, route }) {
   const [episodes, setEpisodes] = useState([]);
   const [season, setSeason]     = useState(null);
   const [loading, setLoading]   = useState(true);
+  const [watchlistId, setWatchlistId] = useState(null);
   const epListRef  = useRef(null);
   const firstEpRef = useRef(null);
   const [firstEpHandle, setFirstEpHandle] = useState(null);
+  const { activeProfile } = useProfile();
 
   useEffect(() => {
     const h = BackHandler.addEventListener('hardwareBackPress', () => { navigation.goBack(); return true; });
     return () => h.remove();
   }, []);
+
+  useEffect(() => {
+    const params = activeProfile?.id ? { profile_id: activeProfile.id } : undefined;
+    api.get('/watchlist', { params })
+      .then(r => {
+        const entry = (Array.isArray(r.data) ? r.data : []).find(w => w.content_id === item.id);
+        setWatchlistId(entry ? entry.id : null);
+      })
+      .catch(() => {});
+  }, [item.id, activeProfile]);
+
+  async function toggleWatchlist() {
+    try {
+      if (watchlistId) {
+        await api.delete(`/watchlist/${watchlistId}`);
+        setWatchlistId(null);
+      } else {
+        const { data } = await api.post('/watchlist', {
+          content_type: isSeries ? 'series' : 'movie',
+          content_id: item.id,
+          profile_id: activeProfile?.id || null,
+        });
+        setWatchlistId(data.id);
+      }
+    } catch {}
+  }
 
   useEffect(() => {
     const endpoint = isSeries ? `/series/${item.id}` : `/movies/${item.id}`;
@@ -394,6 +423,11 @@ export default function DetailScreen({ navigation, route }) {
                     onPress={() => playMovie(v.key)}
                   />
                 ))}
+                <ActionBtn
+                  label={watchlistId ? 'Na Minha Lista' : 'Minha Lista'}
+                  icon={watchlistId ? 'checkmark' : 'add'}
+                  onPress={toggleWatchlist}
+                />
               </View>
             )}
 
@@ -408,6 +442,11 @@ export default function DetailScreen({ navigation, route }) {
                   hasTVPreferredFocus
                   nextFocusRight={firstEpHandle}
                   onPress={() => playEpisode(firstEp)}
+                />
+                <ActionBtn
+                  label={watchlistId ? 'Na Minha Lista' : 'Minha Lista'}
+                  icon={watchlistId ? 'checkmark' : 'add'}
+                  onPress={toggleWatchlist}
                 />
               </View>
             )}

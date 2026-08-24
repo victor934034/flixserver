@@ -7,6 +7,7 @@ import { useFonts } from 'expo-font';
 import { Ionicons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
+import { ProfileProvider, useProfile } from './src/contexts/ProfileContext';
 
 // Exibe notificações mesmo com o app em primeiro plano
 Notifications.setNotificationHandler({
@@ -22,6 +23,7 @@ import DetailScreen from './src/screens/DetailScreen';
 import PlayerScreen from './src/screens/PlayerScreen';
 import SubscriptionScreen from './src/screens/SubscriptionScreen';
 import IptvScreen from './src/screens/IptvScreen';
+import ProfileSelectScreen from './src/screens/ProfileSelectScreen';
 
 const Stack = createStackNavigator();
 
@@ -29,6 +31,20 @@ const navTheme = {
   ...DefaultTheme,
   colors: { ...DefaultTheme.colors, background: '#000' },
 };
+
+// Garante que, uma vez logado, sempre exista um perfil ativo antes de
+// deixar navegar pro resto do app — mesmo comportamento do app mobile.
+function ProfileGate({ navigation }) {
+  const { activeProfile } = useProfile();
+
+  React.useEffect(() => {
+    if (!activeProfile) {
+      navigation.reset({ index: 0, routes: [{ name: 'ProfileSelect' }] });
+    }
+  }, [activeProfile]);
+
+  return null;
+}
 
 function AppNavigator() {
   const { user, loading } = useAuth();
@@ -45,7 +61,10 @@ function AppNavigator() {
         initialRouteName={user ? 'Home' : 'Login'}
       >
         <Stack.Screen name="Login" component={LoginScreen} />
-        <Stack.Screen name="Home" component={HomeScreen} />
+        <Stack.Screen name="ProfileSelect" component={ProfileSelectScreen} />
+        <Stack.Screen name="Home">
+          {props => <><ProfileGate {...props} /><HomeScreen {...props} /></>}
+        </Stack.Screen>
         <Stack.Screen name="Detail" component={DetailScreen} />
         <Stack.Screen name="Player" component={PlayerScreen} />
         <Stack.Screen name="Subscription" component={SubscriptionScreen} />
@@ -69,7 +88,9 @@ export default function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <AuthProvider>
-        <AppNavigator />
+        <ProfileProvider>
+          <AppNavigator />
+        </ProfileProvider>
       </AuthProvider>
     </GestureHandlerRootView>
   );

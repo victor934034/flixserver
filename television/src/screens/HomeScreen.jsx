@@ -8,6 +8,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
+import { useProfile } from '../contexts/ProfileContext';
 
 // ─── Screen scale ─────────────────────────────────────────────────────────────
 const { width: W, height: H } = Dimensions.get('window');
@@ -366,6 +367,7 @@ function EmptyState({ icon, title, desc }) {
 // ─── HomeScreen ───────────────────────────────────────────────────────────────
 export default function HomeScreen({ navigation }) {
   const { logout, user } = useAuth();
+  const { activeProfile } = useProfile();
 
   const [activeNav, setActiveNav]       = useState(0);
   const [featured, setFeatured]         = useState(null);
@@ -460,21 +462,34 @@ export default function HomeScreen({ navigation }) {
   useEffect(() => {
     loadData();
     return () => { clearTimeout(blurTimer.current); clearTimeout(searchTimer.current); };
-  }, []);
+  }, [activeProfile]);
 
   async function loadData() {
     try {
-      const [feat, nm, ns, pm, ps] = await Promise.all([
+      const historyReq = activeProfile?.id
+        ? api.get('/history', { params: { profile_id: activeProfile.id } }).catch(() => ({ data: [] }))
+        : Promise.resolve({ data: [] });
+      const [feat, nm, ns, pm, ps, hist] = await Promise.all([
         api.get('/featured').catch(() => ({ data: [] })),
         api.get('/movies/section/new').catch(() => ({ data: [] })),
         api.get('/series/section/new').catch(() => ({ data: [] })),
         api.get('/movies/section/popular').catch(() => ({ data: [] })),
         api.get('/series/section/popular').catch(() => ({ data: [] })),
+        historyReq,
       ]);
       const a = d => (Array.isArray(d.data) ? d.data : []);
-      const [fl, nm2, ns2, pm2, ps2] = [feat, nm, ns, pm, ps].map(a);
+      const [fl, nm2, ns2, pm2, ps2, hist2] = [feat, nm, ns, pm, ps, hist].map(a);
       setFeatured(fl[0] || nm2[0] || pm2[0] || null);
+
+      const continuing = hist2
+        .filter(h => !h.completed && h.progress > 0 && h.duration > 0 && h.title)
+        .map(h => ({
+          id: h.content_id, title: h.title, poster_url: h.poster_url,
+          content_type: h.content_type === 'episode' ? 'series' : 'movie',
+        }));
+
       setSections([
+        ...(continuing.length > 0 ? [{ title: 'Continuar Assistindo', data: continuing, type: 'mixed' }] : []),
         { title: 'Lançamentos — Filmes', data: nm2, type: 'movie'  },
         { title: 'Lançamentos — Séries', data: ns2, type: 'series' },
         { title: 'Populares — Filmes',   data: pm2, type: 'movie'  },
@@ -486,7 +501,8 @@ export default function HomeScreen({ navigation }) {
   async function loadWatchlist() {
     setWatchLoading(true);
     try {
-      const { data } = await api.get('/watchlist');
+      const params = activeProfile?.id ? { profile_id: activeProfile.id } : undefined;
+      const { data } = await api.get('/watchlist', { params });
       setWatchlist(Array.isArray(data) ? data : []);
     } catch {
       setWatchlist([]);
@@ -704,7 +720,7 @@ export default function HomeScreen({ navigation }) {
                     key={i}
                     title={sec.title}
                     data={sec.data}
-                    onSelect={item => openDetail(item, sec.type || item.content_type || 'movie')}
+                    onSelect={item => openDetail(item, item.content_type || sec.type || 'movie')}
                     onFocus={onContentFoc}
                   />
                 ))}
