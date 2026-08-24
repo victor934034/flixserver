@@ -198,11 +198,24 @@ router.post('/register-with-otp', async (req, res) => {
 // GET /auth/me
 router.get('/me', authMiddleware, async (req, res) => {
   try {
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('users')
       .select('id, email, name, avatar_url, plan, plan_expires_at, is_admin, created_at, notification_prefs')
       .eq('id', req.user.id)
       .single();
+
+    // Coluna notification_prefs pode ainda nao existir se a migracao
+    // 20260824_notification_prefs.sql nao rodou em producao — sem esse
+    // fallback, TODO login quebra (Navbar chama /me em toda pagina e
+    // trata qualquer erro como deslogado).
+    if (error && error.code === '42703') {
+      ({ data, error } = await supabase
+        .from('users')
+        .select('id, email, name, avatar_url, plan, plan_expires_at, is_admin, created_at')
+        .eq('id', req.user.id)
+        .single());
+      if (data) data.notification_prefs = { new_content: true, billing: true };
+    }
 
     if (error || !data) return res.status(404).json({ error: 'Usuário não encontrado' });
     res.json(data);
