@@ -5,12 +5,27 @@ import { useRouter } from 'expo-router';
 const DEFAULT_CARD_W = 110;
 const DEFAULT_CARD_H = 165;
 
+// Series so mostra badge quando P&B (audio DUB/LEG/CAM varia por episodio,
+// nao faz sentido resumir num card so). Filme mostra a versao mais notavel
+// disponivel.
+function getVersionBadge(item, isSeries) {
+  if (isSeries) return item.has_bw ? 'P&B' : null;
+  if (item.file_bw) return 'P&B';
+  if (item.file_cinema) return 'CAM';
+  if (item.file_dubbing) return 'DUB';
+  if (item.file_subtitled) return 'LEG';
+  if (item.file_4k) return '4K';
+  if (item.file_color) return 'COR';
+  return null;
+}
+
 function MovieCard({ item, type, compact = false, cardWidth, progress }) {
   const router = useRouter();
   // useWindowDimensions só é necessário no modo compact — manter a chamada
   // é inofensivo, mas encapsula o motivo para não removê-la por engano.
   const { width: screenWidth } = useWindowDimensions();
   const isSeries = type === 'series' || (type === 'mixed' && (item.total_seasons != null || item.year_start != null));
+  const versionBadge = getVersionBadge(item, isSeries);
   const route = isSeries ? `/serie/${item.id}` : `/filme/${item.id}`;
   const name = item.title || item.name || '';
 
@@ -39,6 +54,12 @@ function MovieCard({ item, type, compact = false, cardWidth, progress }) {
         {item.rating > 0 && !compact && (
           <View style={styles.ratingBadge}>
             <Text style={styles.ratingText}>★ {Number(item.rating).toFixed(1)}</Text>
+          </View>
+        )}
+
+        {versionBadge && (
+          <View style={styles.verBadge}>
+            <Text style={styles.verBadgeText}>{versionBadge}</Text>
           </View>
         )}
       </View>
@@ -71,6 +92,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6,
   },
   ratingText: { color: '#ffa500', fontSize: 10, fontWeight: '700' },
+  verBadge: {
+    position: 'absolute', top: 6, right: 6,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    paddingHorizontal: 6, paddingVertical: 3, borderRadius: 5,
+  },
+  verBadgeText: { color: '#fff', fontSize: 9, fontWeight: '700' },
   progressTrack: {
     height: 3, backgroundColor: '#222', borderRadius: 1.5, marginTop: 5,
   },

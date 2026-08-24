@@ -113,6 +113,48 @@ router.post('/subscribe', authMiddleware, async (req, res) => {
   }
 });
 
+// POST /api/payments/donate — apoio/doacao com valor livre escolhido pelo usuario
+router.post('/donate', authMiddleware, async (req, res) => {
+  const amount = Number(req.body?.amount);
+  if (!amount || amount <= 0) return res.status(400).json({ error: 'Valor inválido' });
+
+  try {
+    const userEmail = req.user.email || '';
+    const backBase = process.env.FRONTEND_URL || 'https://movies0-movie.mgf7wb.easypanel.host';
+    const notifUrl = process.env.BACKEND_URL
+      ? `${process.env.BACKEND_URL}/api/payments/webhook/mp`
+      : 'https://movies0-movie.mgf7wb.easypanel.host/api/payments/webhook/mp';
+
+    const { data: pref } = await axios.post(
+      `${MP_API}/checkout/preferences`,
+      {
+        items: [{
+          id: 'donate',
+          title: 'Apoio ao FlixHome',
+          quantity: 1,
+          unit_price: amount,
+          currency_id: 'BRL',
+        }],
+        payer: { email: userEmail },
+        back_urls: {
+          success: `${backBase}/subscription/sucesso`,
+          failure: `${backBase}/subscription/falha`,
+          pending: `${backBase}/subscription/pendente`,
+        },
+        notification_url: notifUrl,
+        external_reference: `donate|${req.user.id}`,
+        auto_return: 'approved',
+      },
+      { headers: { ...mpHeader(), 'Content-Type': 'application/json' } }
+    );
+
+    res.json({ init_point: pref.init_point });
+  } catch (e) {
+    console.error('[MP] donate error:', e.response?.data || e.message);
+    res.status(500).json({ error: e.response?.data?.message || e.message });
+  }
+});
+
 // POST /api/payments/webhook/mp — notificação do Mercado Pago
 router.post('/webhook/mp', async (req, res) => {
   res.sendStatus(200); // responde imediatamente
@@ -131,6 +173,14 @@ router.post('/webhook/mp', async (req, res) => {
     if (payment.status !== 'approved') return;
 
     const extRef = payment.external_reference || '';
+
+    // --- Doacao/apoio (valor livre) --- nao tem plano/assinatura pra ativar,
+    // so registra no log pra nao cair no parse de assinatura abaixo (que
+    // trataria "donate" como se fosse um userId).
+    if (extRef.startsWith('donate|')) {
+      console.log(`[MP] Doação recebida: user=${extRef.slice(7)} valor=${payment.transaction_amount}`);
+      return;
+    }
 
     // --- Pagamento de plano IPTV ---
     if (extRef.startsWith('iptv|')) {

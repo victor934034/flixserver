@@ -35,11 +35,26 @@ function smoothScroll(el, prop, target, rafRef) {
   rafRef.current = requestAnimationFrame(step);
 }
 
+// Series so mostra selo quando P&B (audio DUB/LEG/CAM varia por episodio,
+// nao faz sentido resumir num card so). Filme mostra a versao mais notavel.
+function getVersionBadge(item) {
+  const isSeries = item.total_seasons !== undefined;
+  if (isSeries) return item.has_bw ? 'P&B' : null;
+  if (item.file_bw) return 'P&B';
+  if (item.file_cinema) return 'CAM';
+  if (item.file_dubbing) return 'DUB';
+  if (item.file_subtitled) return 'LEG';
+  if (item.file_4k) return '4K';
+  if (item.file_color) return 'COR';
+  return null;
+}
+
 // ── Portrait card (172×208) ───────────────────────────────────────────────────
 const PortraitCard = React.memo(function PortraitCard({ item, focused, hovered, onClick, onEnter, onLeave }) {
   const img   = item.poster_url || item.backdrop_url || item.thumbnail_url;
   const title = item.title || item.name || item.episode_title || '';
   const isHighlit = focused || hovered;
+  const versionBadge = getVersionBadge(item);
 
   return (
     <div
@@ -82,6 +97,18 @@ const PortraitCard = React.memo(function PortraitCard({ item, focused, hovered, 
             color: 'rgba(255,255,255,0.7)', letterSpacing: 0.5,
             }}>
             {item.genres[0]}
+          </div>
+        )}
+
+        {/* Selo DUB/LEG/CAM/P&B */}
+        {versionBadge && (
+          <div style={{
+            position: 'absolute', top: 8, right: 8,
+            background: 'rgba(0,0,0,0.72)', borderRadius: 4,
+            padding: '3px 7px', fontSize: 10, fontWeight: 800,
+            color: '#fff', letterSpacing: 0.5,
+            }}>
+            {versionBadge}
           </div>
         )}
 

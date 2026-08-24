@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import HeroBanner from '../../components/HeroBanner';
 import ContentRow from '../../components/ContentRow';
+import SupportBanner from '../../components/SupportBanner';
 import api from '../../lib/api';
 import { useProfile } from '../../contexts/ProfileContext';
 
@@ -244,6 +245,8 @@ export default function HomeScreen() {
             <Text style={styles.emptyDesc}>Adicione filmes e séries pelo painel admin.</Text>
           </View>
         )}
+
+        <SupportBanner />
       </View>
     </ScrollView>
   );

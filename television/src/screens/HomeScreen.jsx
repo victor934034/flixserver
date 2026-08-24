@@ -83,12 +83,27 @@ function NavItem({ icon, label, labelOp, active, danger, onFocus, onBlur, onPres
   );
 }
 
+// Series so mostra selo quando P&B (audio DUB/LEG/CAM varia por episodio,
+// nao faz sentido resumir num card so). Filme mostra a versao mais notavel.
+function getVersionBadge(item) {
+  const isSeries = item.total_seasons !== undefined;
+  if (isSeries) return item.has_bw ? 'P&B' : null;
+  if (item.file_bw) return 'P&B';
+  if (item.file_cinema) return 'CAM';
+  if (item.file_dubbing) return 'DUB';
+  if (item.file_subtitled) return 'LEG';
+  if (item.file_4k) return '4K';
+  if (item.file_color) return 'COR';
+  return null;
+}
+
 // ─── ContentCard ──────────────────────────────────────────────────────────────
 function ContentCard({ item, onPress, onFocus: notifyRow }) {
   const [foc, setFoc] = useState(false);
 
   const img   = item.backdrop_url || item.poster_url;
   const title = item.title || item.name || '';
+  const versionBadge = getVersionBadge(item);
 
   return (
     <TVPressable
@@ -103,6 +118,11 @@ function ContentCard({ item, onPress, onFocus: notifyRow }) {
             ? <Image source={{ uri: img }} style={StyleSheet.absoluteFill} resizeMode="cover" />
             : <View style={[StyleSheet.absoluteFill, { backgroundColor: '#1f1f1f' }]} />
           }
+          {versionBadge && (
+            <View style={s.cardVerBadge}>
+              <Text style={s.cardVerBadgeTxt}>{versionBadge}</Text>
+            </View>
+          )}
           {foc && (
             <View style={s.cardOverlay}>
               <Ionicons name="play-circle" size={r(46)} color="rgba(255,255,255,0.95)" />
@@ -236,6 +256,7 @@ function GridCard({ item, onPress, onFocus: notifyRow }) {
   const [foc, setFoc] = useState(false);
   const img   = item.backdrop_url || item.poster_url;
   const title = item.title || item.name || '';
+  const versionBadge = getVersionBadge(item);
   return (
     <TVPressable
       onFocus={() => { setFoc(true); notifyRow?.(); }}
@@ -249,6 +270,11 @@ function GridCard({ item, onPress, onFocus: notifyRow }) {
             ? <Image source={{ uri: img }} style={StyleSheet.absoluteFill} resizeMode="cover" />
             : <View style={[StyleSheet.absoluteFill, { backgroundColor: '#1a1a1a' }]} />
           }
+          {versionBadge && (
+            <View style={s.cardVerBadge}>
+              <Text style={s.cardVerBadgeTxt}>{versionBadge}</Text>
+            </View>
+          )}
           {foc && (
             <View style={s.cardOverlay}>
               <Ionicons name="play-circle" size={r(42)} color="rgba(255,255,255,0.95)" />
@@ -916,6 +942,12 @@ const s = StyleSheet.create({
     borderRadius: r(6), overflow: 'hidden', backgroundColor: '#1a1a1a',
   },
   cardOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' },
+  cardVerBadge: {
+    position: 'absolute', top: r(6), right: r(6),
+    backgroundColor: 'rgba(0,0,0,0.75)', borderRadius: r(4),
+    paddingHorizontal: r(6), paddingVertical: r(3), zIndex: 2,
+  },
+  cardVerBadgeTxt: { color: '#fff', fontSize: r(10), fontWeight: '800' },
   cardTitle:    { marginTop: r(5), fontSize: r(13), color: '#999', fontWeight: '500', width: CARD_W - r(6), paddingHorizontal: r(2) },
   cardTitleFoc: { color: '#fff', fontWeight: '700' },
 });

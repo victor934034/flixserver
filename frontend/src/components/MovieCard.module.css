@@ -57,11 +57,11 @@
   transform: translateY(0);
 }
 
-/* Rating badge top-right */
+/* Rating badge bottom-left (canto superior direito agora eh do selo de versao) */
 .ratingBadge {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  bottom: 8px;
+  left: 8px;
   font-size: 0.68rem;
   font-weight: 700;
   color: #f5c518;
@@ -69,17 +69,24 @@
   padding: 2px 6px;
   border-radius: 3px;
   z-index: 2;
-  opacity: 0;
-  transform: translateY(-4px);
-  transition: opacity 0.2s, transform 0.2s;
   display: flex;
   align-items: center;
   gap: 3px;
 }
 
-.poster:hover .ratingBadge {
-  opacity: 1;
-  transform: translateY(0);
+/* Selo DUB/LEG/CAM/P&B, sempre visivel no canto superior direito */
+.verBadge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  color: #fff;
+  background: rgba(0,0,0,0.75);
+  padding: 2px 6px;
+  border-radius: 3px;
+  z-index: 2;
 }
 
 /* Dark gradient overlay */

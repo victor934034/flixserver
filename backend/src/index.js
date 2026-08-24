@@ -249,13 +249,20 @@ app.get('/api/featured', async (req, res) => {
   const { supabase } = require('./services/supabase');
   try {
     const [moviesResult, seriesResult] = await Promise.all([
-      supabase.from('movies').select('id, title, synopsis, year, poster_url, backdrop_url, trailer_url, rating, genres').eq('is_featured', true).eq('is_active', true).order('featured_order').limit(10),
+      supabase.from('movies').select('id, title, synopsis, year, poster_url, backdrop_url, trailer_url, rating, genres, file_dubbing, file_subtitled, file_cinema, file_4k, file_color, file_bw').eq('is_featured', true).eq('is_active', true).order('featured_order').limit(10),
       supabase.from('series').select('id, title, synopsis, year_start, poster_url, backdrop_url, trailer_url, rating, genres').eq('is_featured', true).eq('is_active', true).order('featured_order').limit(10),
     ]);
 
+    const seriesIds = (seriesResult.data || []).map(s => s.id);
+    let bwSet = new Set();
+    if (seriesIds.length) {
+      const { data: bwEps } = await supabase.from('episodes').select('series_id').in('series_id', seriesIds).not('file_bw', 'is', null);
+      bwSet = new Set((bwEps || []).map(e => e.series_id));
+    }
+
     const items = [
       ...(moviesResult.data || []).map(m => ({ ...m, type: 'movie' })),
-      ...(seriesResult.data || []).map(s => ({ ...s, type: 'series' })),
+      ...(seriesResult.data || []).map(s => ({ ...s, type: 'series', has_bw: bwSet.has(s.id) })),
     ].sort((a, b) => (a.featured_order || 99) - (b.featured_order || 99));
 
     res.json(items);

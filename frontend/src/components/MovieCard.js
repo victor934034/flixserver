@@ -3,10 +3,25 @@ import Image from 'next/image';
 import Link from 'next/link';
 import styles from './MovieCard.module.css';
 
+// Series so mostra selo quando P&B (audio DUB/LEG/CAM varia por episodio,
+// nao faz sentido resumir num card so). Filme mostra a versao mais notavel.
+function getVersionBadge(item, isSeries) {
+  if (isSeries) return item.has_bw ? 'P&B' : null;
+  if (item.file_bw) return 'P&B';
+  if (item.file_cinema) return 'CAM';
+  if (item.file_dubbing) return 'DUB';
+  if (item.file_subtitled) return 'LEG';
+  if (item.file_4k) return '4K';
+  if (item.file_color) return 'COR';
+  return null;
+}
+
 export default function MovieCard({ item }) {
-  const href  = item.type === 'series' ? `/serie/${item.id}` : `/filme/${item.id}`;
+  const isSeries = item.type === 'series';
+  const href  = isSeries ? `/serie/${item.id}` : `/filme/${item.id}`;
   const year  = item.year || item.year_start;
-  const label = item.type === 'series' ? 'SÉRIE' : 'FILME';
+  const label = isSeries ? 'SÉRIE' : 'FILME';
+  const versionBadge = getVersionBadge(item, isSeries);
 
   return (
     <Link href={href} className={styles.card}>
@@ -31,6 +46,8 @@ export default function MovieCard({ item }) {
             {Number(item.rating).toFixed(1)}
           </div>
         )}
+
+        {versionBadge && <div className={styles.verBadge}>{versionBadge}</div>}
 
         <div className={styles.overlay}>
           <div className={styles.playBtn}>
