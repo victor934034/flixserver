@@ -25,6 +25,7 @@ const TIMER_OPTS = [
   { label: '1 hora', ms: 60 * 60000 },
 ];
 const VER_LABELS = { dubbing: 'Dublado', subtitled: 'Legendado', cinema: 'Cinema / Original', '4k': '4K UHD', color: 'Colorido', bw: 'P&B' };
+const VER_SHORT = { dubbing: 'DUB', subtitled: 'LEG', cinema: 'CAM', '4k': '4K', color: 'COR', bw: 'P&B' };
 const SUB_LABELS = { pt: 'Português 🇧🇷', en: 'English 🇺🇸', es: 'Español 🇪🇸' };
 const AUDIO_LANG = {
   por: 'Português 🇧🇷', pt: 'Português 🇧🇷',
@@ -117,7 +118,7 @@ export default function PlayerScreen() {
 
   const { currentTime = 0 } = useEvent(player, 'timeUpdate', { currentTime: 0 });
   const { isPlaying = false } = useEvent(player, 'playingChange', { isPlaying: false });
-  const { status = 'idle' } = useEvent(player, 'statusChange', { status: 'idle' });
+  const { status = 'idle', error: playerError } = useEvent(player, 'statusChange', { status: 'idle' });
 
   // Derived values (seconds)
   const durSec = player.duration || 0;
@@ -412,6 +413,13 @@ export default function PlayerScreen() {
     setSheet(null);
   };
 
+  // Tenta recarregar a mesma fonte — alguns dispositivos falham na decodificação
+  // de vídeo (tela preta com áudio tocando) em falhas transitórias que um reload resolve.
+  const retryPlayback = () => {
+    setSavedPosSec(currentTime);
+    player.replace({ uri: versions[activeVer] });
+  };
+
   const startTimer = (ms) => {
     clearInterval(sleepRef.current);
     timerEndRef.current = Date.now() + ms;
@@ -566,9 +574,28 @@ export default function PlayerScreen() {
       />
 
       {/* Buffering */}
-      {isBuffering && (
+      {isBuffering && status !== 'error' && (
         <View style={styles.buffering}>
           <ActivityIndicator size="large" color="#fff" />
+        </View>
+      )}
+
+      {/* Erro de reprodução — antes ficava tela preta com só o áudio, sem nenhum aviso */}
+      {status === 'error' && (
+        <View style={styles.errorOverlay}>
+          <Ionicons name="alert-circle-outline" size={44} color="#E50914" />
+          <Text style={styles.errorTitle}>Não foi possível reproduzir o vídeo</Text>
+          {!!playerError?.message && <Text style={styles.errorMsg} numberOfLines={2}>{playerError.message}</Text>}
+          <View style={styles.errorBtnRow}>
+            <TouchableOpacity style={styles.errorBtn} onPress={retryPlayback}>
+              <Text style={styles.errorBtnText}>Tentar novamente</Text>
+            </TouchableOpacity>
+            {availVer.length > 1 && (
+              <TouchableOpacity style={[styles.errorBtn, styles.errorBtnOutline]} onPress={() => openSheet('audio')}>
+                <Text style={styles.errorBtnText}>Trocar versão</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
       )}
 
@@ -597,6 +624,11 @@ export default function PlayerScreen() {
               <Ionicons name="arrow-back" size={22} color="#fff" />
             </TouchableOpacity>
             <Text style={styles.titleText} numberOfLines={1}>{title}</Text>
+            {!!VER_SHORT[activeVer] && (
+              <View style={styles.verBadge}>
+                <Text style={styles.verBadgeText}>{VER_SHORT[activeVer]}</Text>
+              </View>
+            )}
             <TouchableOpacity style={styles.timerBtn} onPress={() => openSheet('timer')}>
               <Ionicons name="timer-outline" size={18} color="#fff" />
               <Text style={styles.timerBtnText}>
@@ -1094,12 +1126,27 @@ export default function PlayerScreen() {
 
 const styles = StyleSheet.create({
   buffering: { ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center' },
+  errorOverlay: {
+    ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center',
+    backgroundColor: '#000', gap: 10, paddingHorizontal: 40,
+  },
+  errorTitle: { color: '#fff', fontSize: 16, fontWeight: '700', textAlign: 'center' },
+  errorMsg: { color: '#888', fontSize: 12, textAlign: 'center' },
+  errorBtnRow: { flexDirection: 'row', gap: 12, marginTop: 14 },
+  errorBtn: { backgroundColor: '#E50914', paddingHorizontal: 18, paddingVertical: 10, borderRadius: 8 },
+  errorBtnOutline: { backgroundColor: 'transparent', borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)' },
+  errorBtnText: { color: '#fff', fontSize: 13, fontWeight: '700' },
 
   topBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingBottom: 8 },
   iconPad: { padding: 10 },
   titleText: { flex: 1, color: '#fff', fontSize: 16, fontWeight: '700', textAlign: 'center', paddingHorizontal: 6 },
   timerBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 7 },
   timerBtnText: { color: '#fff', fontSize: 13 },
+  verBadge: {
+    backgroundColor: 'rgba(229,9,20,0.85)', borderRadius: 4,
+    paddingHorizontal: 7, paddingVertical: 3, marginRight: 4,
+  },
+  verBadgeText: { color: '#fff', fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
 
   middleRow: { flex: 1, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12 },
 
