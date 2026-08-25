@@ -149,7 +149,10 @@ function RemoteLogin({ onSuccess }) {
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, []);
 
-  async function requestCode() {
+  // Retry automatico em erro de rede (sem resposta do servidor) - TV as
+  // vezes tem uma falha de conexao passageira logo ao ligar/trocar de Wi-Fi,
+  // nao precisa jogar o usuario pra tela de erro por isso.
+  async function requestCode(attempt = 0) {
     setStatus('loading');
     try {
       const { data } = await api.post('/auth/tv/code');
@@ -158,7 +161,11 @@ function RemoteLogin({ onSuccess }) {
       setStatus('waiting');
       startPolling();
     } catch (e) {
-      console.error('[tv-code] falha ao gerar codigo:', e.message, e.code, e.response?.status, e.response?.data);
+      const isNetworkError = !e.response;
+      if (isNetworkError && attempt < 2) {
+        setTimeout(() => requestCode(attempt + 1), 1500);
+        return;
+      }
       setStatus('error');
     }
   }
