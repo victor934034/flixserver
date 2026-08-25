@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableHighlight,
-  StyleSheet, ActivityIndicator, Dimensions,
+  StyleSheet, ActivityIndicator, Dimensions, findNodeHandle,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,7 +11,7 @@ import api from '../lib/api';
 const { width: W } = Dimensions.get('window');
 
 // ── Tab button ────────────────────────────────────────────────────────────────
-function TabBtn({ label, active, onPress, onFocus, onBlur }) {
+function TabBtn({ label, active, onPress, onFocus, onBlur, hasTVPreferredFocus }) {
   const [focused, setFocused] = useState(false);
   return (
     <TouchableHighlight
@@ -19,6 +19,7 @@ function TabBtn({ label, active, onPress, onFocus, onBlur }) {
       onPress={onPress}
       onFocus={() => { setFocused(true); onFocus?.(); }}
       onBlur={() => { setFocused(false); onBlur?.(); }}
+      hasTVPreferredFocus={hasTVPreferredFocus}
       style={[styles.tabBtn, active && styles.tabBtnActive, focused && styles.tabBtnFocused]}
     >
       <Text style={[styles.tabText, active && styles.tabTextActive]}>{label}</Text>
@@ -34,7 +35,9 @@ function DirectLogin({ onSuccess }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [focused, setFocused] = useState('email');
+  const emailRef = useRef(null);
   const passwordRef = useRef(null);
+  const btnRef = useRef(null);
 
   async function handleLogin() {
     if (!email.trim() || !password.trim()) {
@@ -56,6 +59,7 @@ function DirectLogin({ onSuccess }) {
   return (
     <View>
       <TextInput
+        ref={emailRef}
         style={[styles.input, focused === 'email' && styles.inputFocused]}
         placeholder="Email"
         placeholderTextColor="#444"
@@ -67,6 +71,7 @@ function DirectLogin({ onSuccess }) {
         onFocus={() => setFocused('email')}
         onBlur={() => setFocused('')}
         onSubmitEditing={() => passwordRef.current?.focus()}
+        nextFocusDown={findNodeHandle(passwordRef.current)}
         hasTVPreferredFocus
       />
 
@@ -82,16 +87,25 @@ function DirectLogin({ onSuccess }) {
         onFocus={() => setFocused('password')}
         onBlur={() => setFocused('')}
         onSubmitEditing={handleLogin}
+        // Em alguns teclados virtuais de Android TV, o botao "Enter" do
+        // controle manda um KEYCODE_ENTER cru em vez da acao de IME que
+        // onSubmitEditing escuta - sem isso, digitar e apertar Enter na
+        // senha parecia nao fazer nada.
+        onKeyPress={({ nativeEvent }) => { if (nativeEvent.key === 'Enter') handleLogin(); }}
+        nextFocusUp={findNodeHandle(emailRef.current)}
+        nextFocusDown={findNodeHandle(btnRef.current)}
       />
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <TouchableHighlight
+        ref={btnRef}
         onPress={handleLogin}
         underlayColor="#c50911"
         style={[styles.btn, focused === 'btn' && styles.btnFocused]}
         onFocus={() => setFocused('btn')}
         onBlur={() => setFocused('')}
+        nextFocusUp={findNodeHandle(passwordRef.current)}
         disabled={loading}
       >
         {loading
@@ -216,7 +230,9 @@ function RemoteLogin({ onSuccess }) {
 
 // ── Main screen ───────────────────────────────────────────────────────────────
 export default function LoginScreen({ navigation }) {
-  const [tab, setTab] = useState('direct'); // 'direct' | 'remote'
+  // "remote" (codigo) e o padrao — digitar email/senha com controle remoto
+  // é sempre ruim, o LG nem oferece essa opcao, so o login por codigo.
+  const [tab, setTab] = useState('remote'); // 'direct' | 'remote'
 
   function onSuccess() {
     navigation.replace('Home');
@@ -237,14 +253,15 @@ export default function LoginScreen({ navigation }) {
         {/* Tabs */}
         <View style={styles.tabs}>
           <TabBtn
-            label="Email e Senha"
-            active={tab === 'direct'}
-            onPress={() => setTab('direct')}
-          />
-          <TabBtn
             label="Login via Código"
             active={tab === 'remote'}
             onPress={() => setTab('remote')}
+            hasTVPreferredFocus
+          />
+          <TabBtn
+            label="Email e Senha"
+            active={tab === 'direct'}
+            onPress={() => setTab('direct')}
           />
         </View>
 
