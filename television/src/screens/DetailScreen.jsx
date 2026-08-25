@@ -375,6 +375,9 @@ export default function DetailScreen({ navigation, route }) {
             </View>
 
             <Text style={s.title} numberOfLines={2}>{detail.title || detail.name}</Text>
+            {!!detail.original_title && detail.original_title !== (detail.title || detail.name) && (
+              <Text style={s.originalTitle} numberOfLines={1}>Título original: {detail.original_title}</Text>
+            )}
 
             <View style={s.metaRow}>
               {!!(detail.year || detail.year_start) && (
@@ -402,10 +405,42 @@ export default function DetailScreen({ navigation, route }) {
             )}
           </View>
 
-          {/* Flexible middle: synopsis */}
-          {!!detail.synopsis && (
-            <Text style={s.synopsis} numberOfLines={4}>{detail.synopsis}</Text>
-          )}
+          {/* Flexible middle: synopsis + info extra */}
+          <View style={s.synopsisBlock}>
+            {!!detail.synopsis && (
+              <Text style={s.synopsis} numberOfLines={8}>{detail.synopsis}</Text>
+            )}
+
+            {/* Ficha tecnica — usa dados que ja existem mas nunca apareciam aqui */}
+            <View style={s.infoGrid}>
+              {!isSeries && versions.length > 0 && (
+                <View style={s.infoRow}>
+                  <Text style={s.infoLabel}>Versões disponíveis</Text>
+                  <Text style={s.infoValue}>{versions.map(v => v.label).join(' · ')}</Text>
+                </View>
+              )}
+              {isSeries && !!detail.total_seasons && (
+                <View style={s.infoRow}>
+                  <Text style={s.infoLabel}>Temporadas</Text>
+                  <Text style={s.infoValue}>{detail.total_seasons}</Text>
+                </View>
+              )}
+              {!!detail.year_start && (
+                <View style={s.infoRow}>
+                  <Text style={s.infoLabel}>Estreia</Text>
+                  <Text style={s.infoValue}>
+                    {detail.year_start}{detail.year_end && detail.year_end !== detail.year_start ? ` – ${detail.year_end}` : detail.status === 'ongoing' ? ' – presente' : ''}
+                  </Text>
+                </View>
+              )}
+              {detail.views > 0 && (
+                <View style={s.infoRow}>
+                  <Text style={s.infoLabel}>Visualizações</Text>
+                  <Text style={s.infoValue}>{detail.views.toLocaleString('pt-BR')}</Text>
+                </View>
+              )}
+            </View>
+          </View>
 
           {/* Fixed bottom: buttons + season selector */}
           <View style={s.infoBottom}>
@@ -558,10 +593,16 @@ const s = StyleSheet.create({
   },
   genreTxt: { color: '#888', fontSize: r(12) },
 
+  synopsisBlock: { marginBottom: r(20), gap: r(16) },
   synopsis: {
     color: '#aaa', fontSize: r(15), lineHeight: r(24),
-    marginBottom: r(20),
   },
+  originalTitle: { color: '#666', fontSize: r(13), fontStyle: 'italic', marginBottom: r(10) },
+
+  infoGrid: { gap: r(10) },
+  infoRow: { flexDirection: 'row', gap: r(10) },
+  infoLabel: { color: '#555', fontSize: r(12.5), fontWeight: '700', width: r(150), flexShrink: 0 },
+  infoValue: { color: '#bbb', fontSize: r(13), flex: 1, lineHeight: r(19) },
 
   infoBottom: { marginTop: r(4) },
 
