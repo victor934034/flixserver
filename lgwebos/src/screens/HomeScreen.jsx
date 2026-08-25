@@ -323,13 +323,26 @@ const CATALOG_COLS = 8;
 const CATALOG_CARD_W = 206;
 const CATALOG_CARD_H = Math.round(CATALOG_CARD_W * PORT_H / PORT_W);
 
-function CatalogGrid({ data, colFocus, isActive, onSelect }) {
+function CatalogGrid({ data, colFocus, isActive, onSelect, scrollRef, vertRafRef }) {
   const itemRefs = useRef([]);
+  // Usa o mesmo smoothScroll manual (com cancelAnimationFrame) que o resto
+  // do app ja usa pra rolar as fileiras - scrollIntoView() nativo NAO
+  // cancela direito quando voce navega rapido (varias chamadas brigando
+  // entre si), e era exatamente isso que travava a pagina ao se mover rapido.
   useEffect(() => {
     if (!isActive) return;
     const el = itemRefs.current[colFocus];
-    if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  }, [colFocus, isActive]);
+    const sc = scrollRef?.current;
+    if (!el || !sc) return;
+    const elT = el.offsetTop;
+    const elB = elT + el.offsetHeight;
+    const scT = sc.scrollTop;
+    const scB = scT + sc.clientHeight;
+    let target = sc.scrollTop;
+    if (elT < scT + 20)      target = elT - 20;
+    else if (elB > scB - 20) target = elB - sc.clientHeight + 20;
+    if (target !== sc.scrollTop) smoothScroll(sc, 'scrollTop', target, vertRafRef);
+  }, [colFocus, isActive, scrollRef, vertRafRef]);
 
   return (
     <div style={{
@@ -1153,6 +1166,14 @@ export default function HomeScreen() {
       if (hasBanner && rowFocus === 0) {
         if (bannerBtn > 0) { setBannerBtn(f => f - 1); }
         else { setFocusArea('sidebar'); setSideExpanded(true); setNavFocus(Math.max(0, NAV.indexOf(activeNav))); }
+      } else if (isCatalogRow && colFocus % CATALOG_COLS === 0) {
+        // Borda esquerda VISUAL da grade (nao so colFocus===0) - senao LEFT
+        // no inicio de qualquer linha "voltava" pro ultimo item da linha de
+        // cima em vez de ir pra sidebar, ja que colFocus e um indice unico
+        // corrido por cima de varias linhas.
+        setFocusArea('sidebar');
+        setSideExpanded(true);
+        setNavFocus(Math.max(0, NAV.indexOf(activeNav)));
       } else {
         if (colFocus > 0) {
           setColFocus(f => f - 1);
@@ -1334,6 +1355,8 @@ export default function HomeScreen() {
                         colFocus={colFocus}
                         isActive={isActive}
                         onSelect={openDetail}
+                        scrollRef={scrollRef}
+                        vertRafRef={vertRafRef}
                       />
                     ) : (
                       <CardRow
