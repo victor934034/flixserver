@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
-import { moviesAPI, seriesAPI, watchlistAPI, genresAPI } from '../api/index.js';
+import { moviesAPI, seriesAPI, watchlistAPI } from '../api/index.js';
 import api from '../api/index.js';
 import { prefetchCache } from '../App.jsx';
 import Sidebar from '../components/Sidebar.jsx';
@@ -50,7 +50,9 @@ function getVersionBadge(item) {
 }
 
 // ── Portrait card (172×208) ───────────────────────────────────────────────────
-const PortraitCard = React.memo(function PortraitCard({ item, focused, hovered, onClick, onEnter, onLeave }) {
+const PortraitCard = React.memo(function PortraitCard({ item, focused, hovered, onClick, onEnter, onLeave, width, height }) {
+  const W = width || PORT_W;
+  const H = height || PORT_H;
   const img   = item.poster_url || item.backdrop_url || item.thumbnail_url;
   const title = item.title || item.name || item.episode_title || '';
   const isHighlit = focused || hovered;
@@ -62,13 +64,13 @@ const PortraitCard = React.memo(function PortraitCard({ item, focused, hovered, 
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
       style={{
-        flexShrink: 0, width: PORT_W, cursor: 'pointer',
+        flexShrink: 0, width: W, cursor: 'pointer',
         position: 'relative',
       }}
     >
       {/* Image */}
       <div style={{
-        width: PORT_W, height: PORT_H, position: 'relative',
+        width: W, height: H, position: 'relative',
         borderRadius: 8, background: '#0a0a0a', overflow: 'hidden',
         boxShadow: isHighlit ? 'inset 0 0 0 3px #fff' : 'none',
       }}>
@@ -76,6 +78,8 @@ const PortraitCard = React.memo(function PortraitCard({ item, focused, hovered, 
           <img
             src={img}
             alt=""
+            loading="lazy"
+            decoding="async"
             style={{
               width: '100%', height: '100%', objectFit: 'contain',
               display: 'block',
@@ -141,7 +145,7 @@ const PortraitCard = React.memo(function PortraitCard({ item, focused, hovered, 
         marginTop: 9, fontSize: 13, fontWeight: isHighlit ? 700 : 400,
         color: isHighlit ? '#fff' : 'rgba(255,255,255,0.5)',
         lineHeight: 1.35,
-        width: PORT_W,
+        width: W,
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
       }}>
         {title}
@@ -312,8 +316,13 @@ function CardRow({ data, colFocus, isActive, isLandscape, onSelect }) {
 }
 
 // ── Catalog grid (Filmes/Series completo) — quebra linha em vez de fileira unica,
-// senao navegar 100+ itens so de LEFT/RIGHT e inviavel.
+// senao navegar 100+ itens so de LEFT/RIGHT e inviavel. Cards um pouco maiores
+// que o padrao das fileiras pra preencher a largura disponivel (sem sidebar
+// expandida do lado) em vez de sobrar espaco vazio.
 const CATALOG_COLS = 8;
+const CATALOG_CARD_W = 206;
+const CATALOG_CARD_H = Math.round(CATALOG_CARD_W * PORT_H / PORT_W);
+
 function CatalogGrid({ data, colFocus, isActive, onSelect }) {
   const itemRefs = useRef([]);
   useEffect(() => {
@@ -325,16 +334,23 @@ function CatalogGrid({ data, colFocus, isActive, onSelect }) {
   return (
     <div style={{
       display: 'grid',
-      gridTemplateColumns: 'repeat(' + CATALOG_COLS + ', ' + PORT_W + 'px)',
+      gridTemplateColumns: 'repeat(' + CATALOG_COLS + ', ' + CATALOG_CARD_W + 'px)',
       gap: CARD_GAP,
       paddingLeft: PAD_L, paddingRight: PAD_L, paddingBottom: 24, paddingTop: 16,
     }}>
       {data.map((item, ci) => {
         const focused = isActive && ci === colFocus;
         return (
-          <div key={item.id} ref={el => { itemRefs.current[ci] = el; }}>
+          <div
+            key={item.id}
+            ref={el => { itemRefs.current[ci] = el; }}
+            // content-visibility deixa o navegador pular o render de cards
+            // fora da tela — catalogo com 100+ itens sem isso ficava pesado.
+            style={{ contentVisibility: 'auto', containIntrinsicSize: CATALOG_CARD_W + 'px ' + (CATALOG_CARD_H + 30) + 'px' }}
+          >
             <PortraitCard
               item={item} focused={focused} hovered={false}
+              width={CATALOG_CARD_W} height={CATALOG_CARD_H}
               onClick={() => onSelect(item)}
               onEnter={() => {}} onLeave={() => {}}
             />
@@ -869,11 +885,15 @@ export default function HomeScreen() {
   const [colFocus,     setColFocus]     = useState(0);
   const [bannerBtn,    setBannerBtn]    = useState(0); // 0=Assistir, 1=Mais Info
 
-  // Filtro de categoria — só pras páginas Filmes/Séries.
-  const [genres,         setGenres]         = useState([]);
+  // Filtro de categoria — só pras páginas Filmes/Séries. Genero especifico de
+  // cada tipo (Filme x Serie tem catalogos de genero diferentes, nao pode
+  // misturar), derivado do proprio catalogo sem filtro (senao a lista de
+  // opcoes encolhe pro genero atual assim que voce filtra uma vez).
+  const [catalogGenres,  setCatalogGenres]  = useState({}); // { movies: [...], series: [...] }
   const [genreFilter,    setGenreFilter]    = useState(null);
-  const [genreRowActive, setGenreRowActive] = useState(false);
+  const [genreZone,      setGenreZone]      = useState('off'); // 'off' | 'button' | 'open'
   const [genreIdx,       setGenreIdx]       = useState(0); // 0 = "Todos"
+  const genres = catalogGenres[activeNav] || [];
 
   const dataCache     = useRef({});
   const prevProfileId = useRef(undefined);
@@ -881,11 +901,7 @@ export default function HomeScreen() {
   const rowEls     = useRef([]);
   const vertRafRef = useRef(null);
   const st         = useRef({});
-  st.current = { focusArea, navFocus, rowFocus, colFocus, sections, featured, activeNav, bannerBtn, genres, genreFilter, genreRowActive, genreIdx };
-
-  useEffect(() => {
-    genresAPI.list().then(r => setGenres(Array.isArray(r.data) ? r.data : [])).catch(() => {});
-  }, []);
+  st.current = { focusArea, navFocus, rowFocus, colFocus, sections, featured, activeNav, bannerBtn, genres, genreFilter, genreZone, genreIdx };
 
   const showSidebar = sideExpanded || sideHovered || focusArea === 'sidebar';
 
@@ -925,7 +941,7 @@ export default function HomeScreen() {
     setColFocus(0);
     setBannerBtn(0);
     setGenreFilter(null);
-    setGenreRowActive(false);
+    setGenreZone('off');
     setGenreIdx(0);
   }, [logout, navigate, setActiveProfile]);
 
@@ -983,19 +999,29 @@ export default function HomeScreen() {
       return;
     }
     setLoadingData(true);
+    // Limpa o conteudo da pagina anterior imediatamente - sem isso o spinner
+    // so aparecia se "sections" ja estivesse vazio, entao trocar de aba
+    // deixava a listagem VELHA na tela (com o layout errado, tipo CardRow
+    // em vez de CatalogGrid) ate a nova busca terminar, parecendo bugado.
+    setSections([]);
+    setFeatured(null);
     const profileId = activeProfile && activeProfile.id;
     const catalogParams = { limit: 500, sort: 'title', order: 'asc', ...(genreFilter ? { genre: genreFilter } : {}) };
+    const isCatalogPage = activeNav === 'movies' || activeNav === 'series';
     const fullCatalogReq = activeNav === 'movies'
       ? moviesAPI.list(catalogParams).then(r => r.data?.data || []).catch(() => [])
       : activeNav === 'series'
         ? seriesAPI.list(catalogParams).then(r => r.data?.data || []).catch(() => [])
         : Promise.resolve(null);
+    // Filmes/Series nao usa "populares"/"lançamentos" nem historico (so o
+    // catalogo completo) - pular essas 4 chamadas corta boa parte do tempo
+    // de carregamento nessas paginas.
     Promise.all([
-      moviesAPI.popular().then(r => r.data || []),
-      moviesAPI.newReleases().then(r => r.data || []),
-      seriesAPI.popular().then(r => r.data || []),
-      seriesAPI.newReleases().then(r => r.data || []),
-      activeProfile
+      isCatalogPage ? Promise.resolve([]) : moviesAPI.popular().then(r => r.data || []),
+      isCatalogPage ? Promise.resolve([]) : moviesAPI.newReleases().then(r => r.data || []),
+      isCatalogPage ? Promise.resolve([]) : seriesAPI.popular().then(r => r.data || []),
+      isCatalogPage ? Promise.resolve([]) : seriesAPI.newReleases().then(r => r.data || []),
+      (activeProfile && !isCatalogPage)
         ? api.get('/api/history' + (profileId ? '?profile_id=' + profileId : '')).then(r => r.data || []).catch(() => [])
         : Promise.resolve([]),
       fullCatalogReq,
@@ -1010,6 +1036,13 @@ export default function HomeScreen() {
       dataCache.current[cacheKey] = { featured: built.featured, sections: secs };
       setFeatured(built.featured);
       setSections(secs);
+      // Deriva a lista de generos so a partir do catalogo SEM filtro - senao
+      // filtrar uma vez faz as outras opcoes desaparecerem da lista.
+      if (!genreFilter && (activeNav === 'movies' || activeNav === 'series') && fullCatalog) {
+        const set = new Set();
+        fullCatalog.forEach(it => (it.genres || []).forEach(g => g && set.add(g)));
+        setCatalogGenres(prev => ({ ...prev, [activeNav]: [...set].sort() }));
+      }
     }).catch(() => {}).finally(() => setLoadingData(false));
   }, [activeNav, activeProfile, genreFilter]);
 
@@ -1029,12 +1062,7 @@ export default function HomeScreen() {
   }, [rowFocus]);
 
   useKeyDown(e => {
-    const { focusArea, navFocus, rowFocus, colFocus, sections, featured, activeNav, bannerBtn, genres, genreIdx, genreRowActive, genreFilter } = st.current;
-    const openGenreDropdown = () => {
-      const idx = genreFilter ? genres.indexOf(genreFilter) + 1 : 0;
-      setGenreIdx(idx >= 0 ? idx : 0);
-      setGenreRowActive(true);
-    };
+    const { focusArea, navFocus, rowFocus, colFocus, sections, featured, activeNav, bannerBtn, genres, genreIdx, genreZone, genreFilter } = st.current;
     const k = e.keyCode;
     const hasBanner = activeNav !== 'minha-lista';
     const totalRows = (hasBanner ? 1 : 0) + sections.length;
@@ -1042,7 +1070,7 @@ export default function HomeScreen() {
 
     if (k === KEY.BACK) {
       e.preventDefault();
-      if (genreRowActive) { setGenreRowActive(false); return; }
+      if (genreZone !== 'off') { setGenreZone('off'); return; }
       if (focusArea === 'content') { setFocusArea('sidebar'); setSideExpanded(true); }
       return;
     }
@@ -1058,17 +1086,35 @@ export default function HomeScreen() {
 
     if (activeNav === 'search') return;
 
-    // Dropdown de categoria (Filmes/Series) — "Todos" + um item por genero.
-    if (genreRowActive) {
+    // Categoria (Filmes/Series) — 2 estados: 'button' (foco no botao
+    // recolhido, precisa ENTER pra abrir) e 'open' (lista navegavel).
+    // UP so move o foco pro botao - ele NAO abre sozinho.
+    if (genreZone === 'button') {
+      if (k === KEY.ENTER) {
+        e.preventDefault();
+        const idx = genreFilter ? genres.indexOf(genreFilter) + 1 : 0;
+        setGenreIdx(idx >= 0 ? idx : 0);
+        setGenreZone('open');
+      }
+      if (k === KEY.DOWN)  { e.preventDefault(); setGenreZone('off'); }
+      if (k === KEY.UP)    { e.preventDefault(); if (hasBanner) { setRowFocus(0); setGenreZone('off'); } }
+      if (k === KEY.LEFT)  {
+        e.preventDefault();
+        setGenreZone('off');
+        setFocusArea('sidebar'); setSideExpanded(true); setNavFocus(Math.max(0, NAV.indexOf(activeNav)));
+      }
+      return;
+    }
+    if (genreZone === 'open') {
       if (k === KEY.UP)    { e.preventDefault(); if (genreIdx > 0) setGenreIdx(i => i - 1); }
       if (k === KEY.DOWN)  { e.preventDefault(); if (genreIdx < genres.length) setGenreIdx(i => i + 1); }
-      if (k === KEY.LEFT)  { e.preventDefault(); setGenreRowActive(false); }
-      if (k === KEY.ENTER) { e.preventDefault(); setGenreFilter(genreIdx === 0 ? null : genres[genreIdx - 1]); setGenreRowActive(false); }
+      if (k === KEY.LEFT)  { e.preventDefault(); setGenreZone('button'); }
+      if (k === KEY.ENTER) { e.preventDefault(); setGenreFilter(genreIdx === 0 ? null : genres[genreIdx - 1]); setGenreZone('off'); }
       return;
     }
     if (k === KEY.UP && isCatalogNav && rowFocus === 0 && genres.length > 0) {
       e.preventDefault();
-      openGenreDropdown();
+      setGenreZone('button');
       return;
     }
 
@@ -1081,7 +1127,7 @@ export default function HomeScreen() {
     if (k === KEY.UP && isCatalogRow) {
       e.preventDefault();
       if (colFocus < CATALOG_COLS) {
-        if (genres.length > 0) openGenreDropdown();
+        if (genres.length > 0) setGenreZone('button');
         else { setRowFocus(0); setColFocus(0); }
       } else {
         setColFocus(c => Math.max(0, c - CATALOG_COLS));
@@ -1156,7 +1202,7 @@ export default function HomeScreen() {
           setColFocus(0);
           setBannerBtn(0);
           setGenreFilter(null);
-          setGenreRowActive(false);
+          setGenreZone('off');
           setGenreIdx(0);
         }}
         onLogout={() => { logout(); navigate('/login', { replace: true }); }}
@@ -1200,28 +1246,29 @@ export default function HomeScreen() {
               <div style={{ padding: '18px ' + PAD_L + 'px 4px', position: 'relative' }}>
                 <div
                   onClick={() => {
+                    if (genreZone === 'open') { setGenreZone('button'); return; }
                     const idx = genreFilter ? genres.indexOf(genreFilter) + 1 : 0;
                     setGenreIdx(idx >= 0 ? idx : 0);
-                    setGenreRowActive(v => !v);
+                    setGenreZone('open');
                   }}
                   style={{
                     display: 'inline-flex', alignItems: 'center', gap: 10,
                     padding: '10px 20px', borderRadius: 8, cursor: 'pointer',
                     fontSize: 14, fontWeight: 700, color: '#fff',
                     background: 'rgba(255,255,255,0.08)',
-                    border: '2px solid ' + (genreRowActive ? '#fff' : 'rgba(255,255,255,0.14)'),
+                    border: '2px solid ' + (genreZone !== 'off' ? '#fff' : 'rgba(255,255,255,0.14)'),
                   }}
                 >
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2">
                     <path d="M4 6h16M7 12h10M10 18h4" strokeLinecap="round"/>
                   </svg>
                   Categoria: {genreFilter || 'Todos'}
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="#fff" style={{ transform: genreRowActive ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="#fff" style={{ transform: genreZone === 'open' ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>
                     <path d="M7 10l5 5 5-5z"/>
                   </svg>
                 </div>
 
-                {genreRowActive && (
+                {genreZone === 'open' && (
                   <div style={{
                     position: 'absolute', top: '100%', left: PAD_L, marginTop: 6, zIndex: 40,
                     minWidth: 240, maxHeight: 420, overflowY: 'auto',
@@ -1235,7 +1282,7 @@ export default function HomeScreen() {
                       return (
                         <div
                           key={g}
-                          onClick={() => { setGenreFilter(i === 0 ? null : g); setGenreRowActive(false); }}
+                          onClick={() => { setGenreFilter(i === 0 ? null : g); setGenreZone('off'); }}
                           style={{
                             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                             padding: '10px 14px', borderRadius: 7, cursor: 'pointer',
