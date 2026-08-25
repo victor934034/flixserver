@@ -913,6 +913,7 @@ export default function HomeScreen() {
   const scrollRef  = useRef(null);
   const rowEls     = useRef([]);
   const vertRafRef = useRef(null);
+  const catalogMoveTimeRef = useRef(0);
   const st         = useRef({});
   st.current = { focusArea, navFocus, rowFocus, colFocus, sections, featured, activeNav, bannerBtn, genres, genreFilter, genreZone, genreIdx };
 
@@ -1004,6 +1005,10 @@ export default function HomeScreen() {
     if (prefetchCache[cacheKey] && !dataCache.current[cacheKey]) {
       dataCache.current[cacheKey] = prefetchCache[cacheKey];
     }
+    // Scroll da pagina anterior nao resetava sozinho - trocar de Filmes (rolado
+    // pra baixo) pra Series entrava direto na posicao antiga, ja "la embaixo".
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+
     if (dataCache.current[cacheKey]) {
       const c = dataCache.current[cacheKey];
       setFeatured(c.featured);
@@ -1136,6 +1141,16 @@ export default function HomeScreen() {
     const catalogSecIdx = hasBanner ? rowFocus - 1 : rowFocus;
     const catalogSec = isCatalogNav ? sections[catalogSecIdx] : null;
     const isCatalogRow = catalogSec && catalogSec.key === 'all';
+
+    // Throttle: segurar UP/DOWN dispara o repeat nativo do teclado bem mais
+    // rapido do que a animacao de scroll (180ms) consegue acompanhar - cada
+    // novo pulo cancelava a anterior no meio, dando a impressao de "travado"
+    // e de "desceu tudo sozinho" com so um toque mais demorado no controle.
+    if ((k === KEY.UP || k === KEY.DOWN) && isCatalogRow) {
+      const now = Date.now();
+      if (now - catalogMoveTimeRef.current < 140) { e.preventDefault(); return; }
+      catalogMoveTimeRef.current = now;
+    }
 
     if (k === KEY.UP && isCatalogRow) {
       e.preventDefault();
