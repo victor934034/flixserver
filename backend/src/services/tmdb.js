@@ -3,7 +3,7 @@ const axios = require('axios');
 const TMDB_API_KEY = process.env.TMDB_API_KEY;
 const TMDB_BASE = 'https://api.themoviedb.org/3';
 const TMDB_IMG = 'https://image.tmdb.org/t/p/w500';
-const TMDB_BACKDROP = 'https://image.tmdb.org/t/p/original';
+const TMDB_BACKDROP = 'https://image.tmdb.org/t/p/w1280';
 
 // Converte classificação MPAA (EUA) para padrão brasileiro
 function convertMPAA(cert) {

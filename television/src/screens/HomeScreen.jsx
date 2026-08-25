@@ -114,7 +114,11 @@ function getVersionBadge(item) {
 function ContentCard({ item, onPress, onFocus: notifyRow }) {
   const [foc, setFoc] = useState(false);
 
-  const img   = item.backdrop_url || item.poster_url;
+  // Poster (capa oficial) primeiro — backdrop e uma cena do meio do filme
+  // (nao e o que a pessoa espera ver no card) e vem em resolucao "original"
+  // do TMDB (bem mais pesada), o que tambem derrubava boa parte dos
+  // carregamentos.
+  const img   = item.poster_url || item.backdrop_url;
   const title = item.title || item.name || '';
   const versionBadge = getVersionBadge(item);
 
@@ -128,7 +132,7 @@ function ContentCard({ item, onPress, onFocus: notifyRow }) {
       <View style={[s.cardFrame, foc && s.cardFrameFoc]}>
         <View style={s.cardImgWrap}>
           {img
-            ? <Image source={{ uri: img }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+            ? <Image source={{ uri: img }} style={StyleSheet.absoluteFill} resizeMode="contain" />
             : <View style={[StyleSheet.absoluteFill, { backgroundColor: '#1f1f1f' }]} />
           }
           {versionBadge && (
@@ -268,7 +272,7 @@ const CATALOG_COLS = 6; // grade de catalogo completo (Filmes/Series) usa a tela
 // ─── Grid card (search results) ───────────────────────────────────────────────
 function GridCard({ item, onPress, onFocus: notifyRow }) {
   const [foc, setFoc] = useState(false);
-  const img   = item.backdrop_url || item.poster_url;
+  const img   = item.poster_url || item.backdrop_url;
   const title = item.title || item.name || '';
   const versionBadge = getVersionBadge(item);
   return (
@@ -281,7 +285,7 @@ function GridCard({ item, onPress, onFocus: notifyRow }) {
       <View style={[s.gridFrame, foc && s.gridFrameFoc]}>
         <View style={s.gridImgWrap}>
           {img
-            ? <Image source={{ uri: img }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+            ? <Image source={{ uri: img }} style={StyleSheet.absoluteFill} resizeMode="contain" />
             : <View style={[StyleSheet.absoluteFill, { backgroundColor: '#1a1a1a' }]} />
           }
           {versionBadge && (
