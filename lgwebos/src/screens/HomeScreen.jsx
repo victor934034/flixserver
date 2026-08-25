@@ -311,6 +311,40 @@ function CardRow({ data, colFocus, isActive, isLandscape, onSelect }) {
   );
 }
 
+// ── Catalog grid (Filmes/Series completo) — quebra linha em vez de fileira unica,
+// senao navegar 100+ itens so de LEFT/RIGHT e inviavel.
+const CATALOG_COLS = 8;
+function CatalogGrid({ data, colFocus, isActive, onSelect }) {
+  const itemRefs = useRef([]);
+  useEffect(() => {
+    if (!isActive) return;
+    const el = itemRefs.current[colFocus];
+    if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [colFocus, isActive]);
+
+  return (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: 'repeat(' + CATALOG_COLS + ', ' + PORT_W + 'px)',
+      gap: CARD_GAP,
+      paddingLeft: PAD_L, paddingRight: PAD_L, paddingBottom: 24, paddingTop: 16,
+    }}>
+      {data.map((item, ci) => {
+        const focused = isActive && ci === colFocus;
+        return (
+          <div key={item.id} ref={el => { itemRefs.current[ci] = el; }}>
+            <PortraitCard
+              item={item} focused={focused} hovered={false}
+              onClick={() => onSelect(item)}
+              onEnter={() => {}} onLeave={() => {}}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Hero Banner (left info + right poster) ───────────────────────────────────
 function HeroBanner({ item, focusedBtn, onWatch, onDetail }) {
   if (!item) return null;
@@ -567,7 +601,7 @@ function SearchPanel({ onSelect, onBack }) {
     if (k === KEY.BACK) { e.preventDefault(); onBack(); return; }
 
     if (zone === 'kb') {
-      if (k === KEY.LEFT)  { e.preventDefault(); if (kbCol > 0) setKbCol(c => c - 1); }
+      if (k === KEY.LEFT)  { e.preventDefault(); if (kbCol > 0) setKbCol(c => c - 1); else onBack(); }
       if (k === KEY.RIGHT) {
         e.preventDefault();
         const rowLen = KB_ROWS[kbRow].length;
@@ -587,6 +621,7 @@ function SearchPanel({ onSelect, onBack }) {
     if (zone === 'sug') {
       if (k === KEY.UP)    { e.preventDefault(); if (sugIdx > 0) setSugIdx(i => i - 1); else setZone('kb'); }
       if (k === KEY.DOWN)  { e.preventDefault(); if (sugIdx < suggestions.length - 1) setSugIdx(i => i + 1); }
+      if (k === KEY.LEFT)  { e.preventDefault(); onBack(); }
       if (k === KEY.RIGHT) { e.preventDefault(); if (allItems.length > 0) { setZone('grid'); setGridIdx(0); } }
       if (k === KEY.ENTER) { e.preventDefault(); if (suggestions[sugIdx]) onSelect(suggestions[sugIdx]); }
       return;
@@ -713,7 +748,9 @@ function SearchPanel({ onSelect, onBack }) {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(' + SEARCH_COLS + ', 1fr)', gap: 18, paddingBottom: 32 }}>
             {allItems.map((item, i) => {
               const isFoc = zone === 'grid' && gridIdx === i;
-              const img   = item.backdrop_url || item.poster_url;
+              // Capa oficial primeiro — backdrop e uma cena do meio do
+              // filme, nao a "logo"/capa que a pessoa espera ver no card.
+              const img   = item.poster_url || item.backdrop_url;
               const isS   = item.total_seasons !== undefined;
               return (
                 <div
@@ -729,7 +766,7 @@ function SearchPanel({ onSelect, onBack }) {
                 >
                   <div style={{ width: '100%', aspectRatio: '16/9', background: '#0a0a0a', overflow: 'hidden', position: 'relative' }}>
                     {img
-                      ? <img src={img} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                      ? <img src={img} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
                       : <div style={{ width: '100%', height: '100%', background: 'linear-gradient(135deg,#1c1c1c,#2a2a2a)' }} />
                     }
                     {isFoc && (
@@ -992,7 +1029,12 @@ export default function HomeScreen() {
   }, [rowFocus]);
 
   useKeyDown(e => {
-    const { focusArea, navFocus, rowFocus, colFocus, sections, featured, activeNav, bannerBtn, genres, genreIdx, genreRowActive } = st.current;
+    const { focusArea, navFocus, rowFocus, colFocus, sections, featured, activeNav, bannerBtn, genres, genreIdx, genreRowActive, genreFilter } = st.current;
+    const openGenreDropdown = () => {
+      const idx = genreFilter ? genres.indexOf(genreFilter) + 1 : 0;
+      setGenreIdx(idx >= 0 ? idx : 0);
+      setGenreRowActive(true);
+    };
     const k = e.keyCode;
     const hasBanner = activeNav !== 'minha-lista';
     const totalRows = (hasBanner ? 1 : 0) + sections.length;
@@ -1016,17 +1058,39 @@ export default function HomeScreen() {
 
     if (activeNav === 'search') return;
 
-    // Barra de categoria (Filmes/Series) — "Todos" + um chip por genero.
+    // Dropdown de categoria (Filmes/Series) — "Todos" + um item por genero.
     if (genreRowActive) {
-      if (k === KEY.LEFT)  { e.preventDefault(); if (genreIdx > 0) setGenreIdx(i => i - 1); }
-      if (k === KEY.RIGHT) { e.preventDefault(); if (genreIdx < genres.length) setGenreIdx(i => i + 1); }
-      if (k === KEY.DOWN)  { e.preventDefault(); setGenreRowActive(false); }
-      if (k === KEY.ENTER) { e.preventDefault(); setGenreFilter(genreIdx === 0 ? null : genres[genreIdx - 1]); }
+      if (k === KEY.UP)    { e.preventDefault(); if (genreIdx > 0) setGenreIdx(i => i - 1); }
+      if (k === KEY.DOWN)  { e.preventDefault(); if (genreIdx < genres.length) setGenreIdx(i => i + 1); }
+      if (k === KEY.LEFT)  { e.preventDefault(); setGenreRowActive(false); }
+      if (k === KEY.ENTER) { e.preventDefault(); setGenreFilter(genreIdx === 0 ? null : genres[genreIdx - 1]); setGenreRowActive(false); }
       return;
     }
     if (k === KEY.UP && isCatalogNav && rowFocus === 0 && genres.length > 0) {
       e.preventDefault();
-      setGenreRowActive(true);
+      openGenreDropdown();
+      return;
+    }
+
+    // Catalogo (Filmes/Series) quebra em grade — UP/DOWN andam CATALOG_COLS
+    // por vez dentro da mesma "linha logica" em vez de trocar de secao.
+    const catalogSecIdx = hasBanner ? rowFocus - 1 : rowFocus;
+    const catalogSec = isCatalogNav ? sections[catalogSecIdx] : null;
+    const isCatalogRow = catalogSec && catalogSec.key === 'all';
+
+    if (k === KEY.UP && isCatalogRow) {
+      e.preventDefault();
+      if (colFocus < CATALOG_COLS) {
+        if (genres.length > 0) openGenreDropdown();
+        else { setRowFocus(0); setColFocus(0); }
+      } else {
+        setColFocus(c => Math.max(0, c - CATALOG_COLS));
+      }
+      return;
+    }
+    if (k === KEY.DOWN && isCatalogRow) {
+      e.preventDefault();
+      setColFocus(c => Math.min(catalogSec.data.length - 1, c + CATALOG_COLS));
       return;
     }
 
@@ -1130,28 +1194,64 @@ export default function HomeScreen() {
               </div>
             )}
 
-            {/* Filtro de categoria — só Filmes/Séries. Sobe com UP a partir do banner. */}
+            {/* Dropdown de categoria — só Filmes/Séries. Sobe com UP a partir do
+                banner/topo do catalogo, abre um painel na lateral com a lista. */}
             {(activeNav === 'movies' || activeNav === 'series') && genres.length > 0 && (
-              <div style={{ padding: '18px ' + PAD_L + 'px 4px', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                {['Todos', ...genres].map((g, i) => {
-                  const isSel = genreIdx === i && genreRowActive;
-                  const isActiveFilter = i === 0 ? !genreFilter : genreFilter === g;
-                  return (
-                    <div
-                      key={g}
-                      onClick={() => { setGenreIdx(i); setGenreFilter(i === 0 ? null : g); }}
-                      style={{
-                        padding: '8px 18px', borderRadius: 20, cursor: 'pointer',
-                        fontSize: 13, fontWeight: 700,
-                        color: isSel || isActiveFilter ? '#fff' : 'rgba(255,255,255,0.55)',
-                        background: isActiveFilter ? ACCENT : 'rgba(255,255,255,0.07)',
-                        border: '2px solid ' + (isSel ? '#fff' : 'transparent'),
-                      }}
-                    >
-                      {g}
-                    </div>
-                  );
-                })}
+              <div style={{ padding: '18px ' + PAD_L + 'px 4px', position: 'relative' }}>
+                <div
+                  onClick={() => {
+                    const idx = genreFilter ? genres.indexOf(genreFilter) + 1 : 0;
+                    setGenreIdx(idx >= 0 ? idx : 0);
+                    setGenreRowActive(v => !v);
+                  }}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 10,
+                    padding: '10px 20px', borderRadius: 8, cursor: 'pointer',
+                    fontSize: 14, fontWeight: 700, color: '#fff',
+                    background: 'rgba(255,255,255,0.08)',
+                    border: '2px solid ' + (genreRowActive ? '#fff' : 'rgba(255,255,255,0.14)'),
+                  }}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2">
+                    <path d="M4 6h16M7 12h10M10 18h4" strokeLinecap="round"/>
+                  </svg>
+                  Categoria: {genreFilter || 'Todos'}
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="#fff" style={{ transform: genreRowActive ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>
+                    <path d="M7 10l5 5 5-5z"/>
+                  </svg>
+                </div>
+
+                {genreRowActive && (
+                  <div style={{
+                    position: 'absolute', top: '100%', left: PAD_L, marginTop: 6, zIndex: 40,
+                    minWidth: 240, maxHeight: 420, overflowY: 'auto',
+                    background: 'rgba(14,14,16,0.98)', borderRadius: 12,
+                    border: '1px solid rgba(255,255,255,0.10)',
+                    boxShadow: '0 20px 60px rgba(0,0,0,0.7)', padding: 8,
+                  }}>
+                    {['Todos', ...genres].map((g, i) => {
+                      const isSel = genreIdx === i;
+                      const isActiveFilter = i === 0 ? !genreFilter : genreFilter === g;
+                      return (
+                        <div
+                          key={g}
+                          onClick={() => { setGenreFilter(i === 0 ? null : g); setGenreRowActive(false); }}
+                          style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                            padding: '10px 14px', borderRadius: 7, cursor: 'pointer',
+                            fontSize: 13.5, fontWeight: isActiveFilter ? 800 : 500,
+                            color: isSel ? '#fff' : isActiveFilter ? '#fff' : 'rgba(255,255,255,0.6)',
+                            background: isSel ? 'rgba(255,255,255,0.10)' : 'transparent',
+                            border: '2px solid ' + (isSel ? 'rgba(255,255,255,0.5)' : 'transparent'),
+                          }}
+                        >
+                          {g}
+                          {isActiveFilter && <span style={{ color: ACCENT, fontSize: 15 }}>✓</span>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
 
@@ -1181,13 +1281,22 @@ export default function HomeScreen() {
                     style={{ marginTop: si === 0 ? 12 : 8, marginBottom: 0 }}
                   >
                     <SectionLabel title={sec.title} isActive={isActive} isHistory={isHistory} />
-                    <CardRow
-                      data={sec.data}
-                      colFocus={colFocus}
-                      isActive={isActive}
-                      isLandscape={isLand}
-                      onSelect={openDetail}
-                    />
+                    {sec.key === 'all' ? (
+                      <CatalogGrid
+                        data={sec.data}
+                        colFocus={colFocus}
+                        isActive={isActive}
+                        onSelect={openDetail}
+                      />
+                    ) : (
+                      <CardRow
+                        data={sec.data}
+                        colFocus={colFocus}
+                        isActive={isActive}
+                        isLandscape={isLand}
+                        onSelect={openDetail}
+                      />
+                    )}
                   </div>
                 );
               })}
