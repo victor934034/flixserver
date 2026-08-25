@@ -341,7 +341,11 @@ function CatalogGrid({ data, colFocus, isActive, onSelect, scrollRef, vertRafRef
     let target = sc.scrollTop;
     if (elT < scT + 20)      target = elT - 20;
     else if (elB > scB - 20) target = elB - sc.clientHeight + 20;
-    if (target !== sc.scrollTop) smoothScroll(sc, 'scrollTop', target, vertRafRef);
+    // Trava o alvo dentro do que da pra rolar de verdade - qualquer erro de
+    // medida (offsetTop errado por layout ainda nao assentado etc.) nao pode
+    // arremessar o scroll pro final/inicio do zero.
+    target = Math.max(0, Math.min(target, sc.scrollHeight - sc.clientHeight));
+    if (Math.abs(target - sc.scrollTop) > 1) smoothScroll(sc, 'scrollTop', target, vertRafRef);
   }, [colFocus, isActive, scrollRef, vertRafRef]);
 
   return (
@@ -357,9 +361,6 @@ function CatalogGrid({ data, colFocus, isActive, onSelect, scrollRef, vertRafRef
           <div
             key={item.id}
             ref={el => { itemRefs.current[ci] = el; }}
-            // content-visibility deixa o navegador pular o render de cards
-            // fora da tela — catalogo com 100+ itens sem isso ficava pesado.
-            style={{ contentVisibility: 'auto', containIntrinsicSize: CATALOG_CARD_W + 'px ' + (CATALOG_CARD_H + 30) + 'px' }}
           >
             <PortraitCard
               item={item} focused={focused} hovered={false}
