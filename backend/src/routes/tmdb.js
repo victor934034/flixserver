@@ -6,6 +6,8 @@ const { sendPushToAll } = require('../services/notifications');
 
 router.use(adminMiddleware);
 
+const { notifyImportReport } = require('../services/importNotify');
+
 // Detecta e importa pelo nome do arquivo
 router.post('/detect', async (req, res) => {
   const { fileUrl, version = 'dubbing' } = req.body;
@@ -14,6 +16,7 @@ router.post('/detect', async (req, res) => {
   try {
     const { processFiles } = require('../../tmdb-bot');
     const report = await processFiles([{ url: fileUrl, version }]);
+    notifyImportReport(supabase, report);
     res.json(report);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -191,32 +194,7 @@ router.post('/batch', async (req, res) => {
   try {
     const { processFiles } = require('../../tmdb-bot');
     const report = await processFiles(files);
-
-    // Notifica sobre conteúdo adicionado. processFiles retorna
-    // { success: [], notFound: [], errors: [] } — nao um array plano, e cada
-    // item de sucesso nao tem "status", so type/title/id (movie) ou
-    // type/title/seriesId/season/episode (episodio de serie).
-    const movies = (report.success || []).filter(r => r.type === 'movie');
-    if (movies.length === 1) {
-      sendPushToAll(supabase, `🎬 ${movies[0].title}`, 'Novo filme adicionado!', { screen: 'filme', id: movies[0].id }).catch(() => {});
-    } else if (movies.length > 1) {
-      sendPushToAll(supabase, '🎬 Novos filmes adicionados!', `${movies.length} filmes foram adicionados`).catch(() => {});
-    }
-
-    // Episódios (e séries novas trazidas junto): agrupa por série
-    const episodesBySeries = {};
-    for (const r of (report.success || []).filter(r => r.type === 'series' && r.season && r.episode)) {
-      const key = r.seriesId || r.title;
-      if (!episodesBySeries[key]) episodesBySeries[key] = { title: r.title, seriesId: r.seriesId, eps: [] };
-      episodesBySeries[key].eps.push(r);
-    }
-    for (const { title, seriesId, eps } of Object.values(episodesBySeries)) {
-      const body = eps.length === 1
-        ? `T${eps[0].season}E${String(eps[0].episode).padStart(2, '0')} disponível`
-        : `${eps.length} episódios foram adicionados`;
-      sendPushToAll(supabase, `📺 ${title}`, body, { screen: 'serie', id: seriesId }).catch(() => {});
-    }
-
+    notifyImportReport(supabase, report);
     res.json(report);
   } catch (err) {
     res.status(500).json({ error: err.message });
