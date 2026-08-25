@@ -77,12 +77,12 @@ export default function ForgotPasswordScreen() {
             <TextInput
               style={styles.input} placeholder="Nova senha (mín. 6 caracteres)" placeholderTextColor="#666"
               value={newPassword} onChangeText={setNewPassword}
-              secureTextEntry autoComplete="new-password"
+              secureTextEntry autoCapitalize="none" autoCorrect={false} autoComplete="new-password"
             />
             <TextInput
               style={styles.input} placeholder="Confirmar nova senha" placeholderTextColor="#666"
               value={confirmPassword} onChangeText={setConfirmPassword}
-              secureTextEntry
+              secureTextEntry autoCapitalize="none" autoCorrect={false}
             />
             <TouchableOpacity style={styles.button} onPress={handleReset} disabled={loading}>
               {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Alterar senha</Text>}

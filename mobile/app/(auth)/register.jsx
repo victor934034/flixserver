@@ -76,6 +76,8 @@ export default function RegisterScreen() {
           value={password}
           onChangeText={setPassword}
           secureTextEntry
+          autoCapitalize="none"
+          autoCorrect={false}
           autoComplete="password-new"
           returnKeyType="send"
           onSubmitEditing={handleSend}

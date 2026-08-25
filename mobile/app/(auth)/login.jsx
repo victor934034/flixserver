@@ -89,6 +89,8 @@ export default function LoginScreen() {
               value={pwPassword}
               onChangeText={setPwPassword}
               secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
               autoComplete="password"
               returnKeyType="done"
               onSubmitEditing={handlePasswordLogin}

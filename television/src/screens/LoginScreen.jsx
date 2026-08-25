@@ -35,8 +35,10 @@ function DirectLogin({ onSuccess }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [focused, setFocused] = useState('email');
+  const [showPassword, setShowPassword] = useState(false);
   const emailRef = useRef(null);
   const passwordRef = useRef(null);
+  const eyeRef = useRef(null);
   const btnRef = useRef(null);
 
   async function handleLogin() {
@@ -75,26 +77,43 @@ function DirectLogin({ onSuccess }) {
         hasTVPreferredFocus
       />
 
-      <TextInput
-        ref={passwordRef}
-        style={[styles.input, focused === 'password' && styles.inputFocused]}
-        placeholder="Senha"
-        placeholderTextColor="#444"
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
-        returnKeyType="done"
-        onFocus={() => setFocused('password')}
-        onBlur={() => setFocused('')}
-        onSubmitEditing={handleLogin}
-        // Em alguns teclados virtuais de Android TV, o botao "Enter" do
-        // controle manda um KEYCODE_ENTER cru em vez da acao de IME que
-        // onSubmitEditing escuta - sem isso, digitar e apertar Enter na
-        // senha parecia nao fazer nada.
-        onKeyPress={({ nativeEvent }) => { if (nativeEvent.key === 'Enter') handleLogin(); }}
-        nextFocusUp={findNodeHandle(emailRef.current)}
-        nextFocusDown={findNodeHandle(btnRef.current)}
-      />
+      <View style={styles.passwordWrap}>
+        <TextInput
+          ref={passwordRef}
+          style={[styles.input, styles.passwordInput, focused === 'password' && styles.inputFocused]}
+          placeholder="Senha"
+          placeholderTextColor="#444"
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry={!showPassword}
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="done"
+          onFocus={() => setFocused('password')}
+          onBlur={() => setFocused('')}
+          onSubmitEditing={handleLogin}
+          // Em alguns teclados virtuais de Android TV, o botao "Enter" do
+          // controle manda um KEYCODE_ENTER cru em vez da acao de IME que
+          // onSubmitEditing escuta - sem isso, digitar e apertar Enter na
+          // senha parecia nao fazer nada.
+          onKeyPress={({ nativeEvent }) => { if (nativeEvent.key === 'Enter') handleLogin(); }}
+          nextFocusUp={findNodeHandle(emailRef.current)}
+          nextFocusDown={findNodeHandle(btnRef.current)}
+          nextFocusRight={findNodeHandle(eyeRef.current)}
+        />
+        <TouchableHighlight
+          ref={eyeRef}
+          onPress={() => setShowPassword(v => !v)}
+          underlayColor="transparent"
+          style={[styles.eyeBtn, focused === 'eye' && styles.eyeBtnFocused]}
+          onFocus={() => setFocused('eye')}
+          onBlur={() => setFocused('')}
+          nextFocusLeft={findNodeHandle(passwordRef.current)}
+          nextFocusDown={findNodeHandle(btnRef.current)}
+        >
+          <Ionicons name={showPassword ? 'eye-off' : 'eye'} size={20} color={focused === 'eye' ? '#E50914' : '#666'} />
+        </TouchableHighlight>
+      </View>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
@@ -334,6 +353,14 @@ const styles = StyleSheet.create({
     borderColor: '#E50914',
     backgroundColor: '#1a1a1a',
   },
+  passwordWrap: { position: 'relative', justifyContent: 'center', marginBottom: 14 },
+  passwordInput: { paddingRight: 52, marginBottom: 0 },
+  eyeBtn: {
+    position: 'absolute', right: 4, top: 0, bottom: 0,
+    width: 44,
+    justifyContent: 'center', alignItems: 'center', borderRadius: 6,
+  },
+  eyeBtnFocused: { backgroundColor: 'rgba(229,9,20,0.15)' },
   error: {
     color: '#ff6b6b',
     fontSize: 14,
