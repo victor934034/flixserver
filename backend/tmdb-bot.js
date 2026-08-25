@@ -305,7 +305,7 @@ async function processFiles(fileList) {
 
       if (type === 'movie') {
         const saved = await saveMovie(details, fileUrl, version, dual);
-        report.success.push({ filename, fileUrl, type: 'movie', title: saved.title, dual });
+        report.success.push({ filename, fileUrl, type: 'movie', title: saved.title, id: saved.id, dual });
         // Busca legendas em background (não bloqueia a resposta)
         autoFetchSubtitles({ movieId: saved.id, tmdbId: saved.tmdb_id, movieType: 'movie' })
           .catch(e => console.warn('  [subtitles] movie:', e.message));
@@ -318,7 +318,7 @@ async function processFiles(fileList) {
             seasonNumber: season, episodeNumber: episode,
           }).catch(e => console.warn('  [subtitles] episode:', e.message));
         }
-        report.success.push({ filename, fileUrl, type: 'series', title: details.name, season, episode, dual });
+        report.success.push({ filename, fileUrl, type: 'series', title: details.name, seriesId: seriesRecord.id, season, episode, dual });
       }
 
       await new Promise(r => setTimeout(r, 260)); // respeita rate limit TMDB
