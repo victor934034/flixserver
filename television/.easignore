@@ -1,1 +1,13 @@
 node_modules
+.expo
+backend
+frontend
+mobile
+tizen
+lgwebos
+mobile_iptv
+paginas
+.claude
+**/.next
+**/*.zip
+**/node_modules
