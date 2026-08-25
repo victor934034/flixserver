@@ -1,4 +1,32 @@
-const { sendPushToAll } = require('./notifications');
+const { sendPush, sendPushToAll } = require('./notifications');
+
+// Avisa só as contas admin (nunca todo mundo) quando um upload terminou mas
+// NAO foi importado — arquivo nao encontrado no TMDB ou erro no processo.
+// So o admin precisa saber disso pra completar o cadastro manualmente.
+async function notifyAdminsImportFailed(supabase, report) {
+  const notFound = report.notFound || [];
+  const errors = report.errors || [];
+  if (!notFound.length && !errors.length) return;
+
+  try {
+    const { data: admins } = await supabase
+      .from('users')
+      .select('push_token')
+      .eq('is_admin', true)
+      .not('push_token', 'is', null);
+    const tokens = (admins || []).map(a => a.push_token).filter(Boolean);
+    if (!tokens.length) return;
+
+    const total = notFound.length + errors.length;
+    const title = '⚠️ Upload não importado';
+    const body = total === 1
+      ? `"${(notFound[0] || errors[0])?.filename}" precisa de importação manual.`
+      : `${total} arquivo(s) enviados não foram importados automaticamente e precisam de atenção.`;
+    await sendPush(tokens, title, body, { screen: 'admin-importar' });
+  } catch (e) {
+    console.error('[importNotify] notifyAdminsImportFailed erro:', e.message);
+  }
+}
 
 // Notifica conteudo novo a partir do relatorio de processFiles() (tmdb-bot.js)
 // { success: [], notFound: [], errors: [] } — usado pelos caminhos que
@@ -25,6 +53,8 @@ function notifyImportReport(supabase, report) {
       : `${eps.length} episódios foram adicionados`;
     sendPushToAll(supabase, `📺 ${title}`, body, { screen: 'serie', id: seriesId }).catch(() => {});
   }
+
+  notifyAdminsImportFailed(supabase, report).catch(() => {});
 }
 
 module.exports = { notifyImportReport };
