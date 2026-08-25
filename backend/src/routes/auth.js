@@ -195,6 +195,62 @@ router.post('/register-with-otp', async (req, res) => {
   }
 });
 
+// POST /auth/forgot-password — envia OTP pra redefinir senha (mesmo mecanismo
+// do send-otp, endpoint separado só pra manter a intenção clara pro app)
+router.post('/forgot-password', async (req, res) => {
+  const { email } = req.body;
+  if (!email || !email.includes('@')) {
+    return res.status(400).json({ error: 'Email inválido' });
+  }
+
+  const key = email.trim().toLowerCase();
+  const { error } = await supabaseAnon.auth.signInWithOtp({
+    email: key,
+    options: { shouldCreateUser: false },
+  });
+
+  if (error) {
+    console.error('[auth] forgot-password error:', error.message);
+    return res.status(500).json({ error: 'Erro ao enviar código. Tente novamente.' });
+  }
+
+  res.json({ ok: true });
+});
+
+// POST /auth/reset-password — valida o OTP e define uma senha nova no Supabase
+// Auth. É o unico jeito de uma conta criada so por codigo (sem senha nunca
+// definida) passar a ter senha, o que e obrigatorio pra login direto (TV).
+router.post('/reset-password', async (req, res) => {
+  const { email, code, newPassword } = req.body;
+  if (!email || !code || !newPassword) {
+    return res.status(400).json({ error: 'Todos os campos são obrigatórios' });
+  }
+  if (newPassword.length < 6) {
+    return res.status(400).json({ error: 'Senha muito curta' });
+  }
+
+  const key = email.trim().toLowerCase();
+
+  const { data: authData, error: authError } = await supabaseAnon.auth.verifyOtp({
+    email: key,
+    token: String(code).trim(),
+    type: 'email',
+  });
+
+  if (authError || !authData?.user) {
+    return res.status(400).json({ error: 'Código inválido ou expirado' });
+  }
+
+  try {
+    const { error: updateError } = await supabase.auth.admin.updateUserById(authData.user.id, { password: newPassword });
+    if (updateError) throw updateError;
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[auth] reset-password error:', e.message);
+    res.status(500).json({ error: 'Erro ao definir nova senha. Tente novamente.' });
+  }
+});
+
 // GET /auth/me
 router.get('/me', authMiddleware, async (req, res) => {
   try {
