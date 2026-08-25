@@ -157,7 +157,8 @@ function RemoteLogin({ onSuccess }) {
       setCode(data.code);
       setStatus('waiting');
       startPolling();
-    } catch {
+    } catch (e) {
+      console.error('[tv-code] falha ao gerar codigo:', e.message, e.code, e.response?.status, e.response?.data);
       setStatus('error');
     }
   }
