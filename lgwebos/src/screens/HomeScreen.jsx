@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
-import { moviesAPI, seriesAPI, watchlistAPI } from '../api/index.js';
+import { moviesAPI, seriesAPI, watchlistAPI, genresAPI } from '../api/index.js';
 import api from '../api/index.js';
 import { prefetchCache } from '../App.jsx';
 import Sidebar from '../components/Sidebar.jsx';
@@ -832,13 +832,23 @@ export default function HomeScreen() {
   const [colFocus,     setColFocus]     = useState(0);
   const [bannerBtn,    setBannerBtn]    = useState(0); // 0=Assistir, 1=Mais Info
 
+  // Filtro de categoria — só pras páginas Filmes/Séries.
+  const [genres,         setGenres]         = useState([]);
+  const [genreFilter,    setGenreFilter]    = useState(null);
+  const [genreRowActive, setGenreRowActive] = useState(false);
+  const [genreIdx,       setGenreIdx]       = useState(0); // 0 = "Todos"
+
   const dataCache     = useRef({});
   const prevProfileId = useRef(undefined);
   const scrollRef  = useRef(null);
   const rowEls     = useRef([]);
   const vertRafRef = useRef(null);
   const st         = useRef({});
-  st.current = { focusArea, navFocus, rowFocus, colFocus, sections, featured, activeNav, bannerBtn };
+  st.current = { focusArea, navFocus, rowFocus, colFocus, sections, featured, activeNav, bannerBtn, genres, genreFilter, genreRowActive, genreIdx };
+
+  useEffect(() => {
+    genresAPI.list().then(r => setGenres(Array.isArray(r.data) ? r.data : [])).catch(() => {});
+  }, []);
 
   const showSidebar = sideExpanded || sideHovered || focusArea === 'sidebar';
 
@@ -877,6 +887,9 @@ export default function HomeScreen() {
     setRowFocus(0);
     setColFocus(0);
     setBannerBtn(0);
+    setGenreFilter(null);
+    setGenreRowActive(false);
+    setGenreIdx(0);
   }, [logout, navigate, setActiveProfile]);
 
   // Load watchlist when minha-lista is active
@@ -918,11 +931,15 @@ export default function HomeScreen() {
     }
     prevProfileId.current = curProfileId;
 
-    if (prefetchCache[activeNav] && !dataCache.current[activeNav]) {
-      dataCache.current[activeNav] = prefetchCache[activeNav];
+    const cacheKey = (activeNav === 'movies' || activeNav === 'series')
+      ? activeNav + '|' + (genreFilter || '')
+      : activeNav;
+
+    if (prefetchCache[cacheKey] && !dataCache.current[cacheKey]) {
+      dataCache.current[cacheKey] = prefetchCache[cacheKey];
     }
-    if (dataCache.current[activeNav]) {
-      const c = dataCache.current[activeNav];
+    if (dataCache.current[cacheKey]) {
+      const c = dataCache.current[cacheKey];
       setFeatured(c.featured);
       setSections(c.sections);
       setLoadingData(false);
@@ -930,10 +947,11 @@ export default function HomeScreen() {
     }
     setLoadingData(true);
     const profileId = activeProfile && activeProfile.id;
+    const catalogParams = { limit: 500, sort: 'title', order: 'asc', ...(genreFilter ? { genre: genreFilter } : {}) };
     const fullCatalogReq = activeNav === 'movies'
-      ? moviesAPI.list({ limit: 500, sort: 'title', order: 'asc' }).then(r => r.data?.data || []).catch(() => [])
+      ? moviesAPI.list(catalogParams).then(r => r.data?.data || []).catch(() => [])
       : activeNav === 'series'
-        ? seriesAPI.list({ limit: 500, sort: 'title', order: 'asc' }).then(r => r.data?.data || []).catch(() => [])
+        ? seriesAPI.list(catalogParams).then(r => r.data?.data || []).catch(() => [])
         : Promise.resolve(null);
     Promise.all([
       moviesAPI.popular().then(r => r.data || []),
@@ -952,11 +970,11 @@ export default function HomeScreen() {
       const secs    = (history.length > 0 && activeNav !== 'movies' && activeNav !== 'series')
         ? [{ key: 'history', title: 'Continue Assistindo', data: history }, ...built.sections]
         : built.sections;
-      dataCache.current[activeNav] = { featured: built.featured, sections: secs };
+      dataCache.current[cacheKey] = { featured: built.featured, sections: secs };
       setFeatured(built.featured);
       setSections(secs);
     }).catch(() => {}).finally(() => setLoadingData(false));
-  }, [activeNav, activeProfile]);
+  }, [activeNav, activeProfile, genreFilter]);
 
   // Smooth vertical scroll to keep focused row visible
   useEffect(() => {
@@ -974,13 +992,15 @@ export default function HomeScreen() {
   }, [rowFocus]);
 
   useKeyDown(e => {
-    const { focusArea, navFocus, rowFocus, colFocus, sections, featured, activeNav, bannerBtn } = st.current;
+    const { focusArea, navFocus, rowFocus, colFocus, sections, featured, activeNav, bannerBtn, genres, genreIdx, genreRowActive } = st.current;
     const k = e.keyCode;
     const hasBanner = activeNav !== 'minha-lista';
     const totalRows = (hasBanner ? 1 : 0) + sections.length;
+    const isCatalogNav = activeNav === 'movies' || activeNav === 'series';
 
     if (k === KEY.BACK) {
       e.preventDefault();
+      if (genreRowActive) { setGenreRowActive(false); return; }
       if (focusArea === 'content') { setFocusArea('sidebar'); setSideExpanded(true); }
       return;
     }
@@ -995,6 +1015,20 @@ export default function HomeScreen() {
     }
 
     if (activeNav === 'search') return;
+
+    // Barra de categoria (Filmes/Series) — "Todos" + um chip por genero.
+    if (genreRowActive) {
+      if (k === KEY.LEFT)  { e.preventDefault(); if (genreIdx > 0) setGenreIdx(i => i - 1); }
+      if (k === KEY.RIGHT) { e.preventDefault(); if (genreIdx < genres.length) setGenreIdx(i => i + 1); }
+      if (k === KEY.DOWN)  { e.preventDefault(); setGenreRowActive(false); }
+      if (k === KEY.ENTER) { e.preventDefault(); setGenreFilter(genreIdx === 0 ? null : genres[genreIdx - 1]); }
+      return;
+    }
+    if (k === KEY.UP && isCatalogNav && rowFocus === 0 && genres.length > 0) {
+      e.preventDefault();
+      setGenreRowActive(true);
+      return;
+    }
 
     if (k === KEY.UP) {
       e.preventDefault();
@@ -1057,6 +1091,9 @@ export default function HomeScreen() {
           setRowFocus(0);
           setColFocus(0);
           setBannerBtn(0);
+          setGenreFilter(null);
+          setGenreRowActive(false);
+          setGenreIdx(0);
         }}
         onLogout={() => { logout(); navigate('/login', { replace: true }); }}
         onSwitchProfile={() => { setActiveProfile(null); navigate('/profile-select', { replace: true }); }}
@@ -1090,6 +1127,31 @@ export default function HomeScreen() {
                   onWatch={() => openWatch(featured)}
                   onDetail={() => openDetail(featured)}
                 />
+              </div>
+            )}
+
+            {/* Filtro de categoria — só Filmes/Séries. Sobe com UP a partir do banner. */}
+            {(activeNav === 'movies' || activeNav === 'series') && genres.length > 0 && (
+              <div style={{ padding: '18px ' + PAD_L + 'px 4px', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                {['Todos', ...genres].map((g, i) => {
+                  const isSel = genreIdx === i && genreRowActive;
+                  const isActiveFilter = i === 0 ? !genreFilter : genreFilter === g;
+                  return (
+                    <div
+                      key={g}
+                      onClick={() => { setGenreIdx(i); setGenreFilter(i === 0 ? null : g); }}
+                      style={{
+                        padding: '8px 18px', borderRadius: 20, cursor: 'pointer',
+                        fontSize: 13, fontWeight: 700,
+                        color: isSel || isActiveFilter ? '#fff' : 'rgba(255,255,255,0.55)',
+                        background: isActiveFilter ? ACCENT : 'rgba(255,255,255,0.07)',
+                        border: '2px solid ' + (isSel ? '#fff' : 'transparent'),
+                      }}
+                    >
+                      {g}
+                    </div>
+                  );
+                })}
               </div>
             )}
 

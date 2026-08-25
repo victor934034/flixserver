@@ -64,6 +64,11 @@ export const castAPI = {
   clear: () => api.delete('/api/cast'),
 };
 
+// ── Genres ────────────────────────────────────────────────────────────────────
+export const genresAPI = {
+  list: () => api.get('/api/genres'),
+};
+
 // ── IPTV ──────────────────────────────────────────────────────────────────────
 export const iptvAPI = {
   status:     ()      => api.get('/api/iptv/status'),
