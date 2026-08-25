@@ -240,7 +240,7 @@ export default function UploadDesenhosPage() {
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    accept: { 'video/*': ['.mp4', '.mkv', '.avi', '.mov', '.m4v'] },
+    accept: { '*/*': ['.mp4', '.mkv', '.avi', '.mov', '.m4v', '.webm', '.ts', '.flv', '.wmv', '.mpg', '.mpeg'] },
     multiple: true,
     noClick: false,
   });

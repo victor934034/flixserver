@@ -242,7 +242,7 @@ export default function UploadPage() {
     // video/imagem faz o navegador abrir direto o seletor de mídia (Galeria),
     // que não enxerga arquivos baixados fora da galeria (ex: filmes em Downloads).
     // Com '*/*' o seletor de arquivos padrão abre, com a Galeria só como opção.
-    accept: { '*/*': ['.mp4', '.mkv', '.avi', '.mov', '.m4v'] },
+    accept: { '*/*': ['.mp4', '.mkv', '.avi', '.mov', '.m4v', '.webm', '.ts', '.flv', '.wmv', '.mpg', '.mpeg'] },
     multiple: true,
   });
 
