@@ -482,25 +482,58 @@ function HeroBanner({ item, focusedBtn, onWatch, onDetail }) {
 }
 
 // ── Search Panel ──────────────────────────────────────────────────────────────
+// Teclado virtual — igual ao do TV Android (nenhum controle de TV real tem
+// um jeito universal de digitar num <input>, entao um teclado proprio
+// navegavel por seta e o unico jeito confiavel em qualquer controle/OEM).
+const KB_ROWS = [
+  ['SPC', '⌫'],
+  ['a', 'b', 'c', 'd', 'e', 'f'],
+  ['g', 'h', 'i', 'j', 'k', 'l'],
+  ['m', 'n', 'o', 'p', 'q', 'r'],
+  ['s', 't', 'u', 'v', 'w', 'x'],
+  ['y', 'z', '1', '2', '3', '4'],
+  ['5', '6', '7', '8', '9', '0'],
+];
+const SEARCH_COLS = 3;
+const SEARCH_LEFT_W = 370;
+
 function SearchPanel({ onSelect, onBack }) {
-  const [query,   setQuery]   = useState('');
-  const [results, setResults] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [resFoc,  setResFoc]  = useState(-1); // -1 = input focused
-  const inputRef  = useRef(null);
-  const gridRef   = useRef(null);
-  const itemRefs  = useRef([]);
-  const debRef    = useRef(null);
-  const stRef     = useRef({ results: [], resFoc: -1 });
-  stRef.current   = { results, resFoc };
+  const [query,       setQuery]       = useState('');
+  const [results,     setResults]     = useState({ movies: [], series: [] });
+  const [defaultItems, setDefaultItems] = useState([]);
+  const [loading,     setLoading]     = useState(false);
+  const [zone,        setZone]        = useState('kb'); // 'kb' | 'sug' | 'grid'
+  const [kbRow,       setKbRow]       = useState(1);
+  const [kbCol,       setKbCol]       = useState(0);
+  const [sugIdx,      setSugIdx]      = useState(0);
+  const [gridIdx,     setGridIdx]     = useState(0);
+  const itemRefs = useRef([]);
+  const debRef   = useRef(null);
+  const stRef    = useRef({});
 
-  const COLS = 6;
+  const searchItems = [...results.movies, ...results.series];
+  const allItems     = query ? searchItems : defaultItems;
+  const suggestions  = allItems.slice(0, 8);
+  stRef.current = { query, zone, kbRow, kbCol, sugIdx, gridIdx, allItems, suggestions };
 
-  useEffect(() => { setTimeout(() => inputRef.current && inputRef.current.focus(), 80); }, []);
+  // Catalogo pra sugestao quando ainda nao ha busca — populares de filme/serie,
+  // sem misturar "continuar assistindo" (isso e progresso, nao catalogo).
+  useEffect(() => {
+    Promise.all([
+      moviesAPI.popular().then(r => r.data || []).catch(() => []),
+      seriesAPI.popular().then(r => r.data || []).catch(() => []),
+    ]).then(([pm, ps]) => {
+      const seen = new Set();
+      const merged = [...pm, ...ps].filter(it => {
+        if (seen.has(it.id)) return false; seen.add(it.id); return true;
+      }).slice(0, 20);
+      setDefaultItems(merged);
+    });
+  }, []);
 
   useEffect(() => {
     clearTimeout(debRef.current);
-    if (!query.trim()) { setResults([]); setResFoc(-1); return; }
+    if (!query.trim()) { setResults({ movies: [], series: [] }); return; }
     debRef.current = setTimeout(async () => {
       setLoading(true);
       try {
@@ -508,113 +541,180 @@ function SearchPanel({ onSelect, onBack }) {
           moviesAPI.search(query).then(r => (r.data || []).slice(0, 18)),
           seriesAPI.search(query).then(r => (r.data || []).slice(0, 18)),
         ]);
-        setResults([...mv, ...sr]);
-        setResFoc(-1);
-      } catch { setResults([]); }
+        setResults({ movies: mv, series: sr });
+      } catch { setResults({ movies: [], series: [] }); }
       finally { setLoading(false); }
     }, 400);
   }, [query]);
 
-  // Keep focused result scrolled into view
+  useEffect(() => { setGridIdx(0); setSugIdx(0); }, [query]);
+
   useEffect(() => {
-    if (resFoc < 0) return;
-    const el = itemRefs.current[resFoc];
+    if (zone !== 'grid') return;
+    const el = itemRefs.current[gridIdx];
     if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  }, [resFoc]);
+  }, [gridIdx, zone]);
+
+  function pressKey(key) {
+    if (key === 'SPC') setQuery(q => q + ' ');
+    else if (key === '⌫') setQuery(q => q.slice(0, -1));
+    else setQuery(q => q + key);
+  }
 
   useKeyDown(e => {
-    const { results, resFoc } = stRef.current;
+    const { zone, kbRow, kbCol, sugIdx, gridIdx, allItems, suggestions } = stRef.current;
     const k = e.keyCode;
     if (k === KEY.BACK) { e.preventDefault(); onBack(); return; }
 
-    const inputFocused = document.activeElement === inputRef.current;
-
-    if (k === KEY.BACKSPACE && !inputFocused) { e.preventDefault(); onBack(); return; }
-
-    if (inputFocused) {
-      if (k === KEY.DOWN && results.length > 0) {
+    if (zone === 'kb') {
+      if (k === KEY.LEFT)  { e.preventDefault(); if (kbCol > 0) setKbCol(c => c - 1); }
+      if (k === KEY.RIGHT) {
         e.preventDefault();
-        inputRef.current.blur();
-        setResFoc(0);
+        const rowLen = KB_ROWS[kbRow].length;
+        if (kbCol < rowLen - 1) setKbCol(c => c + 1);
+        else if (allItems.length > 0) { setZone('grid'); setGridIdx(0); }
       }
+      if (k === KEY.UP)    { e.preventDefault(); if (kbRow > 0) { const nr = kbRow - 1; setKbRow(nr); setKbCol(c => Math.min(c, KB_ROWS[nr].length - 1)); } }
+      if (k === KEY.DOWN)  {
+        e.preventDefault();
+        if (kbRow < KB_ROWS.length - 1) { const nr = kbRow + 1; setKbRow(nr); setKbCol(c => Math.min(c, KB_ROWS[nr].length - 1)); }
+        else if (suggestions.length > 0) { setZone('sug'); setSugIdx(0); }
+      }
+      if (k === KEY.ENTER) { e.preventDefault(); pressKey(KB_ROWS[kbRow][kbCol]); }
       return;
     }
 
-    // Grid navigation (COLS columns)
+    if (zone === 'sug') {
+      if (k === KEY.UP)    { e.preventDefault(); if (sugIdx > 0) setSugIdx(i => i - 1); else setZone('kb'); }
+      if (k === KEY.DOWN)  { e.preventDefault(); if (sugIdx < suggestions.length - 1) setSugIdx(i => i + 1); }
+      if (k === KEY.RIGHT) { e.preventDefault(); if (allItems.length > 0) { setZone('grid'); setGridIdx(0); } }
+      if (k === KEY.ENTER) { e.preventDefault(); if (suggestions[sugIdx]) onSelect(suggestions[sugIdx]); }
+      return;
+    }
+
+    // zone === 'grid'
     if (k === KEY.UP) {
       e.preventDefault();
-      if (resFoc < COLS) {
-        // first row → go back to input
-        setResFoc(-1);
-        inputRef.current && inputRef.current.focus();
-      } else {
-        setResFoc(f => Math.max(0, f - COLS));
-      }
+      if (gridIdx < SEARCH_COLS) setZone('kb');
+      else setGridIdx(i => Math.max(0, i - SEARCH_COLS));
     }
     if (k === KEY.DOWN) {
       e.preventDefault();
-      setResFoc(f => Math.min(results.length - 1, f + COLS));
+      setGridIdx(i => Math.min(allItems.length - 1, i + SEARCH_COLS));
     }
     if (k === KEY.LEFT) {
       e.preventDefault();
-      if (resFoc % COLS > 0) setResFoc(f => f - 1);
+      if (gridIdx % SEARCH_COLS > 0) setGridIdx(i => i - 1);
+      else setZone(suggestions.length > 0 ? 'sug' : 'kb');
     }
     if (k === KEY.RIGHT) {
       e.preventDefault();
-      if (resFoc % COLS < COLS - 1 && resFoc + 1 < results.length) setResFoc(f => f + 1);
+      if (gridIdx % SEARCH_COLS < SEARCH_COLS - 1 && gridIdx + 1 < allItems.length) setGridIdx(i => i + 1);
     }
-    if (k === KEY.ENTER) {
-      e.preventDefault();
-      if (results[resFoc]) onSelect(results[resFoc]);
-    }
+    if (k === KEY.ENTER) { e.preventDefault(); if (allItems[gridIdx]) onSelect(allItems[gridIdx]); }
   });
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', padding: '0 ' + PAD_L + 'px', overflow: 'hidden' }}>
-      {/* Header */}
-      <div style={{ padding: '44px 0 28px' }}>
-        <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 3, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', marginBottom: 16 }}>
-          Buscar
-        </div>
-        <div style={{ position: 'relative' }}>
-          <svg style={{ position: 'absolute', left: 20, top: '50%', transform: 'translateY(-50%)', opacity: 0.45 }} width="22" height="22" viewBox="0 0 24 24" fill="#fff">
-            <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
-          </svg>
-          <input
-            ref={inputRef}
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            placeholder="Títulos, gêneros, pessoas…"
-            autoComplete="off" autoCorrect="off" spellCheck={false}
-            style={{
-              width: '100%', padding: '18px 24px 18px 56px',
-              background: 'rgba(255,255,255,0.07)',
-              border: '2px solid ' + (query ? ACCENT : 'rgba(255,255,255,0.12)'),
-              borderRadius: 10, color: '#fff', fontSize: 20, outline: 'none',
-              fontFamily: 'inherit', fontWeight: 500,
-            }}
-          />
-        </div>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* Header — query digitada */}
+      <div style={{ padding: '32px ' + PAD_L + 'px 20px', display: 'flex', alignItems: 'center', gap: 12, borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill={ACCENT}>
+          <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+        </svg>
+        {query ? (
+          <span style={{ fontSize: 22, fontWeight: 600, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {query}<span style={{ opacity: 0.5 }}> |</span>
+          </span>
+        ) : (
+          <span style={{ fontSize: 22, color: 'rgba(255,255,255,0.35)' }}>Digite para buscar…</span>
+        )}
+        {loading && <div style={{ width: 16, height: 16, border: '2px solid rgba(255,255,255,0.15)', borderTopColor: ACCENT, borderRadius: '50%', animation: 'spin 0.8s linear infinite', marginLeft: 6 }} />}
       </div>
 
-      {/* Results grid */}
-      <div ref={gridRef} style={{ flex: 1, overflowY: 'auto', paddingBottom: 32 }}>
-        {loading && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 0', color: 'rgba(255,255,255,0.4)', fontSize: 14 }}>
-            <div style={{ width: 18, height: 18, border: '2px solid rgba(255,255,255,0.15)', borderTopColor: ACCENT, borderRadius: '50%', animation: 'spin 0.8s linear infinite', flexShrink: 0 }} />
-            Buscando…
+      {/* Body: teclado + sugestoes | grade */}
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+        {/* Esquerda — teclado + sugestoes */}
+        <div style={{ width: SEARCH_LEFT_W, flexShrink: 0, padding: '24px ' + PAD_L + 'px', overflowY: 'auto' }}>
+          {KB_ROWS.map((row, ri) => (
+            <div key={ri} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+              {row.map((key, ki) => {
+                const isFoc = zone === 'kb' && kbRow === ri && kbCol === ki;
+                const wide  = key === 'SPC';
+                return (
+                  <div
+                    key={key}
+                    onClick={() => { setZone('kb'); setKbRow(ri); setKbCol(ki); pressKey(key); }}
+                    style={{
+                      flex: wide ? 3 : 1, height: 44,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      borderRadius: 7, cursor: 'pointer',
+                      fontSize: 15, fontWeight: 700,
+                      color: isFoc ? '#fff' : 'rgba(255,255,255,0.7)',
+                      background: isFoc ? ACCENT : 'rgba(255,255,255,0.06)',
+                      border: '2px solid ' + (isFoc ? '#fff' : 'transparent'),
+                      textTransform: key === 'SPC' ? 'uppercase' : 'none',
+                      letterSpacing: key === 'SPC' ? 1 : 0,
+                    }}
+                  >
+                    {key === 'SPC' ? 'ESPAÇO' : key}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+
+          {suggestions.length > 0 && (
+            <div style={{ marginTop: 20 }}>
+              <div style={{ fontSize: 11, fontWeight: 800, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 10 }}>
+                Sugestões
+              </div>
+              {suggestions.map((item, i) => {
+                const isFoc = zone === 'sug' && sugIdx === i;
+                const isS   = item.total_seasons !== undefined;
+                return (
+                  <div
+                    key={item.id}
+                    onClick={() => onSelect(item)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '9px 10px', borderRadius: 7, cursor: 'pointer',
+                      background: isFoc ? 'rgba(255,255,255,0.10)' : 'transparent',
+                      border: '2px solid ' + (isFoc ? 'rgba(255,255,255,0.4)' : 'transparent'),
+                      marginBottom: 2,
+                    }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill={isFoc ? ACCENT : '#484848'}>
+                      {isS
+                        ? <path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h5v-2H3V5h18v14h-5v2h5c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM8 19h8v-2H8v2z"/>
+                        : <path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2h-2z"/>}
+                    </svg>
+                    <span style={{ fontSize: 13.5, color: isFoc ? '#fff' : 'rgba(255,255,255,0.65)', fontWeight: isFoc ? 700 : 500, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {item.title || item.name}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {!loading && !!query && searchItems.length === 0 && (
+            <div style={{ marginTop: 20, fontSize: 13, color: 'rgba(255,255,255,0.3)' }}>
+              Nenhum resultado para "{query}"
+            </div>
+          )}
+        </div>
+
+        {/* Direita — grade 3 colunas */}
+        <div style={{ flex: 1, padding: '24px ' + PAD_L + 'px 24px 0', overflowY: 'auto' }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'rgba(255,255,255,0.4)', marginBottom: 14, textTransform: 'uppercase', letterSpacing: 1 }}>
+            {query
+              ? (allItems.length > 0 ? `${allItems.length} resultado${allItems.length !== 1 ? 's' : ''}` : (!loading ? `Sem resultados para "${query}"` : ''))
+              : 'Catálogo'}
           </div>
-        )}
-        {!loading && query && results.length === 0 && (
-          <div style={{ padding: '32px 0', color: 'rgba(255,255,255,0.3)', fontSize: 16 }}>
-            Nenhum resultado para "{query}"
-          </div>
-        )}
-        {results.length > 0 && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(' + COLS + ', 1fr)', gap: 18 }}>
-            {results.map((item, i) => {
-              const isFoc = resFoc === i;
-              const img   = item.poster_url || item.backdrop_url;
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(' + SEARCH_COLS + ', 1fr)', gap: 18, paddingBottom: 32 }}>
+            {allItems.map((item, i) => {
+              const isFoc = zone === 'grid' && gridIdx === i;
+              const img   = item.backdrop_url || item.poster_url;
+              const isS   = item.total_seasons !== undefined;
               return (
                 <div
                   key={item.id}
@@ -627,24 +727,32 @@ function SearchPanel({ onSelect, onBack }) {
                     border: '2px solid ' + (isFoc ? '#fff' : 'rgba(255,255,255,0.06)'),
                   }}
                 >
-                  {img && (
-                    <div style={{ width: '100%', aspectRatio: '2/3', background: '#0a0a0a', overflow: 'hidden' }}>
-                      <img src={img} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
-                    </div>
-                  )}
+                  <div style={{ width: '100%', aspectRatio: '16/9', background: '#0a0a0a', overflow: 'hidden', position: 'relative' }}>
+                    {img
+                      ? <img src={img} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                      : <div style={{ width: '100%', height: '100%', background: 'linear-gradient(135deg,#1c1c1c,#2a2a2a)' }} />
+                    }
+                    {isFoc && (
+                      <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.28)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <div style={{ width: 42, height: 42, borderRadius: '50%', background: 'rgba(255,255,255,0.93)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <div style={{ width: 0, height: 0, borderStyle: 'solid', borderWidth: '9px 0 9px 16px', borderColor: 'transparent transparent transparent #111', marginLeft: 3 }} />
+                        </div>
+                      </div>
+                    )}
+                  </div>
                   <div style={{ padding: '10px 12px 12px' }}>
                     <div style={{ fontSize: 13, fontWeight: isFoc ? 700 : 500, color: isFoc ? '#fff' : 'rgba(255,255,255,0.7)', marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {item.title || item.name}
                     </div>
                     <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>
-                      {item.total_seasons !== undefined ? 'Série' : 'Filme'}{item.year ? ' · ' + item.year : ''}
+                      {isS ? 'Série' : 'Filme'}{item.year ? ' · ' + item.year : ''}
                     </div>
                   </div>
                 </div>
               );
             })}
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
