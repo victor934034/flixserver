@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, Animated,
-  Dimensions, BackHandler, Pressable,
+  Dimensions, BackHandler, Pressable, findNodeHandle,
 } from 'react-native';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { useEvent } from 'expo';
@@ -81,13 +81,19 @@ function PanelOpt({ label, sub, active, grabFocus, onGrabbed, onPress, onFocus }
 }
 
 // ── CtrlBtn — botão circular dos controles ────────────────────────────────────
-function CtrlBtn({ icon, label, onPress, onFocus, grabFocus, active }) {
+const CtrlBtn = React.forwardRef(function CtrlBtn(
+  { icon, label, onPress, onFocus, grabFocus, active, nextFocusLeft, nextFocusRight, nextFocusUp }, ref
+) {
   return (
     <Pressable
+      ref={ref}
       focusable
       hasTVPreferredFocus={grabFocus}
       onFocus={() => { onFocus?.(); }}
       onPress={onPress}
+      nextFocusLeft={nextFocusLeft}
+      nextFocusRight={nextFocusRight}
+      nextFocusUp={nextFocusUp}
       style={({ focused }) => [s.ctrlBtn, focused && s.ctrlBtnFoc, active && s.ctrlBtnActive]}
     >
       {({ focused }) => (
@@ -102,16 +108,22 @@ function CtrlBtn({ icon, label, onPress, onFocus, grabFocus, active }) {
       )}
     </Pressable>
   );
-}
+});
 
 // ── PlayBtn ────────────────────────────────────────────────────────────────────
-function PlayBtn({ isPlaying, onPress, onFocus, grabFocus }) {
+const PlayBtn = React.forwardRef(function PlayBtn(
+  { isPlaying, onPress, onFocus, grabFocus, nextFocusLeft, nextFocusRight, nextFocusUp }, ref
+) {
   return (
     <Pressable
+      ref={ref}
       focusable
       hasTVPreferredFocus={grabFocus}
       onFocus={() => { onFocus?.(); }}
       onPress={onPress}
+      nextFocusLeft={nextFocusLeft}
+      nextFocusRight={nextFocusRight}
+      nextFocusUp={nextFocusUp}
       style={s.playBtnWrap}
     >
       {({ focused }) => (
@@ -126,7 +138,7 @@ function PlayBtn({ isPlaying, onPress, onFocus, grabFocus }) {
       )}
     </Pressable>
   );
-}
+});
 
 // ── PlayerScreen ───────────────────────────────────────────────────────────────
 export default function PlayerScreen({ navigation, route }) {
@@ -187,8 +199,6 @@ export default function PlayerScreen({ navigation, route }) {
     };
   }, [seriesContext, contentMeta]);
 
-  const currentUrl   = tracks[trackKey] || initialUrl;
-
   // ── Refs ────────────────────────────────────────────────────────────────────
   const hideTimer      = useRef(null);
   const switchPosRef   = useRef(startAt && startAt > 5 ? startAt * 1000 : null);
@@ -200,13 +210,26 @@ export default function PlayerScreen({ navigation, route }) {
   const durationRef    = useRef(0);
   const trackWRef      = useRef(W - r(88));
 
+  // Refs dos botoes da barra inferior — usados pra montar a cadeia de foco
+  // explicita (nextFocusLeft/Right). Sem isso o algoritmo automatico do
+  // Android TV se perde nessa fileira com botoes condicionais e o overlay
+  // de opacidade animada, e o D-pad "trava" sem mover o foco visualmente.
+  const prevBtnRef  = useRef(null);
+  const seekBackRef = useRef(null);
+  const playBtnRef  = useRef(null);
+  const seekFwdRef  = useRef(null);
+  const nextBtnRef  = useRef(null);
+  const skipBtnRef  = useRef(null);
+  const audioBtnRef = useRef(null);
+  const subBtnRef   = useRef(null);
+
   // Animated values — atualizados via .setValue() sem causar re-render
   const progressAnim = useRef(new Animated.Value(0)).current;
   const bufferAnim   = useRef(new Animated.Value(0)).current;
   const ctrlOp       = useRef(new Animated.Value(1)).current;
 
   // ── expo-video player ──────────────────────────────────────────────────────
-  const initialSource = useRef({ uri: currentUrl }).current;
+  const initialSource = useRef({ uri: tracks[initKey] || initialUrl }).current;
   const player = useVideoPlayer(initialSource, p => {
     p.play();
     p.timeUpdateEventInterval = 1;
@@ -230,6 +253,8 @@ export default function PlayerScreen({ navigation, route }) {
   const [grabSub,     setGrabSub]    = useState(false);
   const [grabPrev,    setGrabPrev]   = useState(false);
   const [grabNext,    setGrabNext]   = useState(false);
+
+  const currentUrl = tracks[trackKey] || initialUrl;
 
   panelRef.current = panel;
   playingRef.current = isPlaying;
@@ -383,6 +408,33 @@ export default function PlayerScreen({ navigation, route }) {
     closePanel('sub');
   }
 
+  // Monta a cadeia de foco esquerda/direita da fileira de botoes inferior,
+  // pulando os que nao estao presentes nesta tela (prevEp/nextEp/skip/audio/sub
+  // sao condicionais).
+  const btnChain = [
+    prevEp && { ref: prevBtnRef },
+    { ref: seekBackRef },
+    { ref: playBtnRef },
+    { ref: seekFwdRef },
+    nextEp && { ref: nextBtnRef },
+    showSkip && { ref: skipBtnRef },
+    availTracks.length > 1 && { ref: audioBtnRef },
+    availSubs.length > 1 && { ref: subBtnRef },
+  ].filter(Boolean);
+  const focusNav = (i) => ({
+    nextFocusLeft:  i > 0 ? findNodeHandle(btnChain[i - 1].ref.current) : undefined,
+    nextFocusRight: i < btnChain.length - 1 ? findNodeHandle(btnChain[i + 1].ref.current) : undefined,
+  });
+  let chainIdx = 0;
+  const idxPrev = prevEp ? chainIdx++ : -1;
+  const idxSeekBack = chainIdx++;
+  const idxPlay = chainIdx++;
+  const idxSeekFwd = chainIdx++;
+  const idxNext = nextEp ? chainIdx++ : -1;
+  const idxSkip = showSkip ? chainIdx++ : -1;
+  const idxAudio = availTracks.length > 1 ? chainIdx++ : -1;
+  const idxSub = availSubs.length > 1 ? chainIdx++ : -1;
+
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <View style={s.root}>
@@ -531,38 +583,48 @@ export default function PlayerScreen({ navigation, route }) {
             <View style={s.leftBtns}>
               {!!prevEp && (
                 <CtrlBtn
+                  ref={prevBtnRef}
                   icon="play-skip-back"
                   label="Anterior"
                   grabFocus={grabPrev}
                   onFocus={() => { setGrabPrev(false); onBtnFocus(); }}
                   onPress={() => navigation.replace('Player', prevEp)}
+                  {...focusNav(idxPrev)}
                 />
               )}
               <CtrlBtn
+                ref={seekBackRef}
                 icon="play-back"
                 label="Voltar 10s"
                 onFocus={onBtnFocus}
                 onPress={() => seekBy(-SEEK_MS)}
+                {...focusNav(idxSeekBack)}
               />
               <PlayBtn
+                ref={playBtnRef}
                 isPlaying={isPlaying}
                 grabFocus={grabPlay}
                 onFocus={() => { setGrabPlay(false); onBtnFocus(); }}
                 onPress={togglePlay}
+                {...focusNav(idxPlay)}
               />
               <CtrlBtn
+                ref={seekFwdRef}
                 icon="play-forward"
                 label="Avançar 10s"
                 onFocus={onBtnFocus}
                 onPress={() => seekBy(SEEK_MS)}
+                {...focusNav(idxSeekFwd)}
               />
               {!!nextEp && (
                 <CtrlBtn
+                  ref={nextBtnRef}
                   icon="play-skip-forward"
                   label="Próximo"
                   grabFocus={grabNext}
                   onFocus={() => { setGrabNext(false); onBtnFocus(); }}
                   onPress={() => navigation.replace('Player', nextEp)}
+                  {...focusNav(idxNext)}
                 />
               )}
             </View>
@@ -573,30 +635,36 @@ export default function PlayerScreen({ navigation, route }) {
             <View style={s.rightBtns}>
               {showSkip && (
                 <CtrlBtn
+                  ref={skipBtnRef}
                   icon="play-skip-forward-outline"
                   label="Pular Abertura"
                   onFocus={onBtnFocus}
                   onPress={() => seekBy(skipIntroTo - displayPos)}
+                  {...focusNav(idxSkip)}
                 />
               )}
               {availTracks.length > 1 && (
                 <CtrlBtn
+                  ref={audioBtnRef}
                   icon="volume-high-outline"
                   label="Áudio"
                   active={panel === 'audio'}
                   grabFocus={grabAudio}
                   onFocus={() => { setGrabAudio(false); onBtnFocus(); }}
                   onPress={() => panel === 'audio' ? closePanel('play') : openPanel('audio')}
+                  {...focusNav(idxAudio)}
                 />
               )}
               {availSubs.length > 1 && (
                 <CtrlBtn
+                  ref={subBtnRef}
                   icon="chatbubble-ellipses-outline"
                   label="CC"
                   active={panel === 'sub'}
                   grabFocus={grabSub}
                   onFocus={() => { setGrabSub(false); onBtnFocus(); }}
                   onPress={() => panel === 'sub' ? closePanel('play') : openPanel('sub')}
+                  {...focusNav(idxSub)}
                 />
               )}
             </View>

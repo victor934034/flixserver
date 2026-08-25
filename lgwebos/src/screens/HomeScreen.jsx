@@ -680,21 +680,23 @@ function SectionLabel({ title, isActive, isHistory }) {
 }
 
 // ── Data builder ──────────────────────────────────────────────────────────────
-function buildSections(activeNav, pm, nm, ps, ns) {
+function buildSections(activeNav, pm, nm, ps, ns, fullCatalog) {
   const seen  = new Set();
   const dedup = arr => arr.filter(it => {
     if (seen.has(it.id)) return false; seen.add(it.id); return true;
   }).slice(0, 20);
+  // Paginas Filmes/Series mostram so o catalogo completo — sem separar em
+  // Lançamentos/Populares (pedido explicito, igual TV Android e Tizen).
   if (activeNav === 'movies') {
-    return { featured: pm[0] || nm[0] || null, sections: [
-      { key: 'pm', title: 'Mais Assistidos', data: dedup(pm) },
-      { key: 'nm', title: 'Novidades',       data: dedup(nm) },
+    const all = fullCatalog || [];
+    return { featured: all[0] || pm[0] || nm[0] || null, sections: [
+      { key: 'all', title: 'Filmes', data: all },
     ].filter(s => s.data.length > 0) };
   }
   if (activeNav === 'series') {
-    return { featured: ps[0] || ns[0] || null, sections: [
-      { key: 'ps', title: 'Mais Assistidas', data: dedup(ps) },
-      { key: 'ns', title: 'Novidades',       data: dedup(ns) },
+    const all = fullCatalog || [];
+    return { featured: all[0] || ps[0] || ns[0] || null, sections: [
+      { key: 'all', title: 'Séries', data: all },
     ].filter(s => s.data.length > 0) };
   }
   return { featured: pm[0] || ps[0] || null, sections: [
@@ -820,6 +822,11 @@ export default function HomeScreen() {
     }
     setLoadingData(true);
     const profileId = activeProfile && activeProfile.id;
+    const fullCatalogReq = activeNav === 'movies'
+      ? moviesAPI.list({ limit: 500, sort: 'title', order: 'asc' }).then(r => r.data?.data || []).catch(() => [])
+      : activeNav === 'series'
+        ? seriesAPI.list({ limit: 500, sort: 'title', order: 'asc' }).then(r => r.data?.data || []).catch(() => [])
+        : Promise.resolve(null);
     Promise.all([
       moviesAPI.popular().then(r => r.data || []),
       moviesAPI.newReleases().then(r => r.data || []),
@@ -828,10 +835,13 @@ export default function HomeScreen() {
       activeProfile
         ? api.get('/api/history' + (profileId ? '?profile_id=' + profileId : '')).then(r => r.data || []).catch(() => [])
         : Promise.resolve([]),
-    ]).then(([pm, nm, ps, ns, hist]) => {
+      fullCatalogReq,
+    ]).then(([pm, nm, ps, ns, hist, fullCatalog]) => {
       const history = hist.filter(h => h.progress > 0 && h.duration > 0 && !h.completed).slice(0, 12);
-      const built   = buildSections(activeNav, pm, nm, ps, ns);
-      const secs    = history.length > 0
+      const built   = buildSections(activeNav, pm, nm, ps, ns, fullCatalog);
+      // Filmes/Series: so o catalogo, "Continue Assistindo" fica de fora
+      // (pedido explicito - essas paginas devem ter so a listagem completa).
+      const secs    = (history.length > 0 && activeNav !== 'movies' && activeNav !== 'series')
         ? [{ key: 'history', title: 'Continue Assistindo', data: history }, ...built.sections]
         : built.sections;
       dataCache.current[activeNav] = { featured: built.featured, sections: secs };

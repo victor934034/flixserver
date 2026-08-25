@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import {
   View, Text, StyleSheet, Pressable,
   FlatList, ScrollView, Animated, Dimensions, Image,
-  ActivityIndicator,
+  ActivityIndicator, findNodeHandle,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -32,31 +32,44 @@ const NAV = [
 ];
 
 // ─── TVPressable ──────────────────────────────────────────────────────────────
-function TVPressable({ children, style, onPress, onFocus, onBlur, hasTVPreferredFocus, focusable = true }) {
+const TVPressable = React.forwardRef(function TVPressable(
+  { children, style, onPress, onFocus, onBlur, hasTVPreferredFocus, focusable = true, nextFocusUp, nextFocusDown, nextFocusLeft, nextFocusRight }, ref
+) {
   return (
     <Pressable
+      ref={ref}
       focusable={focusable}
       hasTVPreferredFocus={hasTVPreferredFocus}
       onFocus={onFocus}
       onBlur={onBlur}
       onPress={onPress}
+      nextFocusUp={nextFocusUp}
+      nextFocusDown={nextFocusDown}
+      nextFocusLeft={nextFocusLeft}
+      nextFocusRight={nextFocusRight}
       style={style}
     >
       {children}
     </Pressable>
   );
-}
+});
 
 // ─── NavItem ──────────────────────────────────────────────────────────────────
-function NavItem({ icon, label, labelOp, active, danger, onFocus, onBlur, onPress, hasTVPreferredFocus, focusable = true }) {
+const NavItem = React.forwardRef(function NavItem(
+  { icon, label, labelOp, active, danger, onFocus, onBlur, onPress, hasTVPreferredFocus, focusable = true, nextFocusUp, nextFocusDown, nextFocusRight }, ref
+) {
   const [foc, setFoc] = useState(false);
   return (
     <TVPressable
+      ref={ref}
       focusable={focusable}
       hasTVPreferredFocus={hasTVPreferredFocus}
       onFocus={() => { setFoc(true); onFocus?.(); }}
       onBlur={() => { setFoc(false); onBlur?.(); }}
       onPress={onPress}
+      nextFocusUp={nextFocusUp}
+      nextFocusDown={nextFocusDown}
+      nextFocusRight={nextFocusRight}
       style={s.navItem}
     >
       <View style={[
@@ -81,7 +94,7 @@ function NavItem({ icon, label, labelOp, active, danger, onFocus, onBlur, onPres
       </View>
     </TVPressable>
   );
-}
+});
 
 // Series so mostra selo quando P&B (audio DUB/LEG/CAM varia por episodio,
 // nao faz sentido resumir num card so). Filme mostra a versao mais notavel.
@@ -250,6 +263,7 @@ const KB_ROWS = [
 const LEFT_W   = r(370);
 const GRID_COLS = 3;
 const GRID_GAP  = r(10);
+const CATALOG_COLS = 6; // grade de catalogo completo (Filmes/Series) usa a tela toda
 
 // ─── Grid card (search results) ───────────────────────────────────────────────
 function GridCard({ item, onPress, onFocus: notifyRow }) {
@@ -404,6 +418,11 @@ export default function HomeScreen({ navigation }) {
   const [searchResults, setSearchResults] = useState({ movies: [], series: [] });
   const [searchLoading, setSearchLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen]   = useState(false);
+  // Catalogo completo pras abas Filmes/Series — sem secoes de
+  // "Lançamentos"/"Populares", só a listagem inteira (igual LG/Tizen).
+  const [catalogMovies, setCatalogMovies] = useState(null);
+  const [catalogSeries, setCatalogSeries] = useState(null);
+  const [catalogLoading, setCatalogLoading] = useState(false);
 
   const sidebarW  = useRef(new Animated.Value(SIDEBAR_SM)).current;
   const overlayOp = useRef(new Animated.Value(0)).current;
@@ -413,6 +432,15 @@ export default function HomeScreen({ navigation }) {
   const sidebarVisited = useRef(false);
   const blurTimer = useRef(null);
   const searchTimer = useRef(null);
+
+  // Refs da barra lateral — cadeia de foco explicita (nextFocusUp/Down/Right).
+  // Sem isso o algoritmo automatico do Android TV se perde nessa lista vertical
+  // (a mesma classe de bug corrigida no login e no player): descer passava do
+  // "Sair" de um jeito estranho e so soltava o foco pro conteudo depois de um
+  // segundo "baixo" extra.
+  const navRefs = useRef(NAV.map(() => React.createRef())).current;
+  const sairRef = useRef(null);
+  const contentLandingRef = useRef(null);
 
   // Sidebar animation
   useEffect(() => {
@@ -452,6 +480,29 @@ export default function HomeScreen({ navigation }) {
   useEffect(() => {
     if (activeNav === 3 && watchlist.length === 0) loadWatchlist();
   }, [activeNav]);
+
+  // Carrega o catalogo completo (sem secoes) na primeira vez que a aba
+  // Filmes ou Series e aberta.
+  useEffect(() => {
+    if (activeNav === 1 && catalogMovies === null) loadCatalog('movie');
+    if (activeNav === 2 && catalogSeries === null) loadCatalog('series');
+  }, [activeNav]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function loadCatalog(type) {
+    setCatalogLoading(true);
+    try {
+      const endpoint = type === 'movie' ? '/movies' : '/series';
+      const { data } = await api.get(endpoint, { params: { limit: 500, sort: 'title', order: 'asc' } });
+      const list = Array.isArray(data?.data) ? data.data : [];
+      if (type === 'movie') setCatalogMovies(list);
+      else setCatalogSeries(list);
+    } catch {
+      if (type === 'movie') setCatalogMovies([]);
+      else setCatalogSeries([]);
+    } finally {
+      setCatalogLoading(false);
+    }
+  }
 
   // Called when "Início" (idx 0) receives focus
   const onHomeNavFoc = useCallback(() => {
@@ -540,8 +591,8 @@ export default function HomeScreen({ navigation }) {
   // Computed sections & hero based on active nav
   const visibleSections = useMemo(() => {
     if (activeNav === 0) return sections;
-    if (activeNav === 1) return sections.filter(s => s.type === 'movie');
-    if (activeNav === 2) return sections.filter(s => s.type === 'series');
+    // activeNav 1/2 (Filmes/Series) usam a grade de catalogo completo, nao
+    // secoes — ver renderizacao de catalogGrid mais abaixo.
     if (activeNav === 3) return watchlist.length > 0 ? [{ title: 'Minha Lista', data: watchlist, type: null }] : [];
     if (activeNav === 4) return [
       ...(searchResults.movies.length > 0 ? [{ title: 'Filmes', data: searchResults.movies, type: 'movie' }] : []),
@@ -553,10 +604,10 @@ export default function HomeScreen({ navigation }) {
   const heroItem = useMemo(() => {
     if (activeNav === 4) return null;
     if (activeNav === 3) return watchlist[0] || null;
-    if (activeNav === 1) return sections.find(s => s.type === 'movie')?.data?.[0] || null;
-    if (activeNav === 2) return sections.find(s => s.type === 'series')?.data?.[0] || null;
+    if (activeNav === 1) return catalogMovies?.[0] || null;
+    if (activeNav === 2) return catalogSeries?.[0] || null;
     return featured;
-  }, [activeNav, featured, sections, watchlist]);
+  }, [activeNav, featured, watchlist, catalogMovies, catalogSeries]);
 
   function openDetail(item, type) {
     navigation.navigate('Detail', { item, type: type || item.content_type || 'movie' });
@@ -642,9 +693,10 @@ export default function HomeScreen({ navigation }) {
 
             <View style={s.navDividerTop} />
 
-            {NAV.map(n => (
+            {NAV.map((n, i) => (
               <NavItem
                 key={n.idx}
+                ref={navRefs[i]}
                 icon={n.icon}
                 label={n.label}
                 labelOp={labelOp}
@@ -653,6 +705,9 @@ export default function HomeScreen({ navigation }) {
                 onFocus={n.idx === 0 ? onHomeNavFoc : onOtherNavFoc}
                 onBlur={onSidebarBlur}
                 onPress={() => selectNav(n.idx)}
+                nextFocusUp={i > 0 ? findNodeHandle(navRefs[i - 1].current) : undefined}
+                nextFocusDown={findNodeHandle(i < NAV.length - 1 ? navRefs[i + 1].current : sairRef.current)}
+                nextFocusRight={findNodeHandle(contentLandingRef.current)}
               />
             ))}
 
@@ -660,6 +715,7 @@ export default function HomeScreen({ navigation }) {
             <View style={s.navDivider} />
 
             <NavItem
+              ref={sairRef}
               icon="log-out-outline"
               label="Sair"
               labelOp={labelOp}
@@ -668,6 +724,8 @@ export default function HomeScreen({ navigation }) {
               onFocus={onOtherNavFoc}
               onBlur={onSidebarBlur}
               onPress={logout}
+              nextFocusUp={findNodeHandle(navRefs[NAV.length - 1].current)}
+              nextFocusRight={findNodeHandle(contentLandingRef.current)}
             />
             <View style={{ height: r(16) }} />
           </Animated.View>
@@ -677,9 +735,11 @@ export default function HomeScreen({ navigation }) {
         <View style={s.content}>
           {/* Invisible focus landing — grabs focus when a sidebar item is pressed */}
           <Pressable
+            ref={contentLandingRef}
             focusable
             hasTVPreferredFocus={grabContentFocus}
             onFocus={() => setGrabContentFocus(false)}
+            nextFocusLeft={findNodeHandle(navRefs[activeNav >= 0 && activeNav < NAV.length ? activeNav : 0]?.current)}
             style={s.focusLanding}
           />
 
@@ -689,11 +749,17 @@ export default function HomeScreen({ navigation }) {
               onKey={handleSearchKey}
               results={searchResults}
               defaultItems={(() => {
+                // Exclui "Continuar Assistindo" — a busca deve sugerir
+                // catalogo (filmes/series), nao progresso de quem ja
+                // esta assistindo.
                 const seen = new Set();
-                return sections.flatMap(s => s.data).filter(it => {
-                  if (seen.has(it.id)) return false;
-                  seen.add(it.id); return true;
-                }).slice(0, 20);
+                return sections
+                  .filter(s => s.title !== 'Continuar Assistindo')
+                  .flatMap(s => s.data)
+                  .filter(it => {
+                    if (seen.has(it.id)) return false;
+                    seen.add(it.id); return true;
+                  }).slice(0, 20);
               })()}
               loading={searchLoading}
               onSelect={item => openDetail(item, item.total_seasons !== undefined ? 'series' : 'movie')}
@@ -740,18 +806,50 @@ export default function HomeScreen({ navigation }) {
                 </View>
               )}
 
-              <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
-                {visibleSections.map((sec, i) => (
-                  <ContentRow
-                    key={i}
-                    title={sec.title}
-                    data={sec.data}
-                    onSelect={item => openDetail(item, item.content_type || sec.type || 'movie')}
-                    onFocus={onContentFoc}
+              {(activeNav === 1 || activeNav === 2) ? (
+                catalogLoading && !(activeNav === 1 ? catalogMovies : catalogSeries)?.length ? (
+                  <View style={s.emptyState}>
+                    <ActivityIndicator color="#E50914" size="large" />
+                  </View>
+                ) : (
+                  <FlatList
+                    key={`catalog-${activeNav}`}
+                    data={activeNav === 1 ? (catalogMovies || []) : (catalogSeries || [])}
+                    numColumns={CATALOG_COLS}
+                    keyExtractor={it => String(it.id)}
+                    showsVerticalScrollIndicator={false}
+                    removeClippedSubviews={false}
+                    columnWrapperStyle={{ gap: GRID_GAP }}
+                    contentContainerStyle={{ paddingBottom: r(40), gap: GRID_GAP }}
+                    ListEmptyComponent={!catalogLoading ? (
+                      <EmptyState
+                        icon={activeNav === 1 ? 'film-outline' : 'tv-outline'}
+                        title={activeNav === 1 ? 'Nenhum filme encontrado' : 'Nenhuma série encontrada'}
+                      />
+                    ) : null}
+                    renderItem={({ item }) => (
+                      <GridCard
+                        item={item}
+                        onPress={() => openDetail(item, activeNav === 1 ? 'movie' : 'series')}
+                        onFocus={onContentFoc}
+                      />
+                    )}
                   />
-                ))}
-                <View style={{ height: r(40) }} />
-              </ScrollView>
+                )
+              ) : (
+                <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+                  {visibleSections.map((sec, i) => (
+                    <ContentRow
+                      key={i}
+                      title={sec.title}
+                      data={sec.data}
+                      onSelect={item => openDetail(item, item.content_type || sec.type || 'movie')}
+                      onFocus={onContentFoc}
+                    />
+                  ))}
+                  <View style={{ height: r(40) }} />
+                </ScrollView>
+              )}
             </>
           )}
 
