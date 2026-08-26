@@ -21,11 +21,16 @@ router.get('/', authMiddleware, (req, res) => {
 
   const ffmpeg = spawn('ffmpeg', [
     '-hide_banner', '-loglevel', 'error',
+    '-fflags', '+genpts',              // regenera timestamps limpos - sem isso o
+                                        // audio reencodado ia acumulando dessincronia
+                                        // (ficava cada vez mais atrasado com o tempo)
     '-i', url,
     '-c:v', 'copy',          // copia vídeo sem re-encodar
     '-c:a', 'aac',           // converte áudio para AAC (suportado por todos os browsers)
     '-b:a', '192k',
     '-ac', '2',              // estéreo (downmix de 5.1 se necessário)
+    '-af', 'aresample=async=1', // corrige drift entre audio/video durante o reencode
+    '-avoid_negative_ts', 'make_zero',
     '-movflags', 'frag_keyframe+empty_moov', // MP4 fragmentado para streaming
     '-f', 'mp4',
     'pipe:1',

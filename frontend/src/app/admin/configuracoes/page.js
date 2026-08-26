@@ -35,6 +35,7 @@ export default function Configuracoes() {
   const [seriesResults, setSeriesResults] = useState([]);
   const [seriesSearching, setSeriesSearching] = useState(false);
   const [selectedSeries, setSelectedSeries] = useState([]); // [{id, title}]
+  const [seriesFixForce, setSeriesFixForce] = useState(false);
   const seriesSearchDebounce = useRef(null);
   const [seriesFixMsg, setSeriesFixMsg] = useState('');
   const [seriesFixRunning, setSeriesFixRunning] = useState(false);
@@ -507,6 +508,16 @@ export default function Configuracoes() {
                 )}
               </div>
 
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, color: '#aaa', fontSize: 12.5 }}>
+                <input
+                  type="checkbox"
+                  checked={seriesFixForce}
+                  onChange={e => setSeriesFixForce(e.target.checked)}
+                  disabled={seriesFixRunning}
+                />
+                Forçar reprocessamento (mesmo que já esteja marcado como corrigido — use se um episódio ficou com áudio dessincronizado)
+              </label>
+
               <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
                 <button
                   disabled={seriesFixRunning || selectedSeries.length === 0}
@@ -518,7 +529,7 @@ export default function Configuracoes() {
                     setSeriesFixProgress(null);
                     clearInterval(seriesFixPollRef.current);
                     try {
-                      const r = await api.post('/upload/fix-series-faststart', { seriesIds }, { timeout: 30000 });
+                      const r = await api.post('/upload/fix-series-faststart', { seriesIds, force: seriesFixForce }, { timeout: 30000 });
                       if (!r.data.jobId) {
                         setSeriesFixMsg(r.data.message || '✓ Nada para corrigir.');
                         setSeriesFixRunning(false);

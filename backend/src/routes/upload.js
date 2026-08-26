@@ -278,6 +278,9 @@ async function applyFaststart(inputPath, outputPath) {
     await execFileAsync(ffmpegPath, [
       '-i', inputPath,
       '-c', 'copy',
+      '-avoid_negative_ts', 'make_zero', // sem isso, remux de arquivo com audio/video
+                                          // iniciando em timestamps diferentes podia
+                                          // sair com o audio dessincronizado do video
       '-movflags', '+faststart',
       '-y', outputPath,
     ], { maxBuffer: 10 * 1024 * 1024, timeout: 7_200_000 });
@@ -719,6 +722,7 @@ router.post('/fix-faststart', async (req, res) => {
         '-headers', b2AuthHdr,
         '-i', b2Url,
         '-c', 'copy',
+        '-avoid_negative_ts', 'make_zero',
         '-movflags', '+faststart',
         '-y', tmpOutput,
       ], { maxBuffer: 10 * 1024 * 1024, timeout: 7_200_000 });
@@ -846,7 +850,7 @@ router.post('/batch-fix-faststart', async (_req, res) => {
         // Remux local: move moov atom para início (faststart)
         await execFileAsync(ffmpegPath, [
           '-i', tmpIn,
-          '-c', 'copy', '-movflags', '+faststart',
+          '-c', 'copy', '-avoid_negative_ts', 'make_zero', '-movflags', '+faststart',
           '-y', tmpOut,
         ], { maxBuffer: 10 * 1024 * 1024, timeout: 7_200_000 });
 
@@ -938,8 +942,11 @@ router.post('/fix-series-faststart', async (req, res) => {
     });
   }
 
+  // force reprocessa mesmo que ja esteja marcado como corrigido - util quando
+  // uma correcao anterior saiu com problema (ex: audio dessincronizado) e o
+  // arquivo precisa passar pelo ffmpeg de novo com o comando atualizado.
   const doneSet = await loadFaststartDone(supabase);
-  const pending = allItems.filter(i => !doneSet.has(i.cdnUrl));
+  const pending = req.body.force ? allItems : allItems.filter(i => !doneSet.has(i.cdnUrl));
   const skipped = allItems.length - pending.length;
 
   if (pending.length === 0) {
@@ -968,7 +975,7 @@ router.post('/fix-series-faststart', async (req, res) => {
         await downloadB2File(b2AuthUrl, null, tmpIn, 5);
 
         await execFileAsync(ffmpegPath, [
-          '-i', tmpIn, '-c', 'copy', '-movflags', '+faststart', '-y', tmpOut,
+          '-i', tmpIn, '-c', 'copy', '-avoid_negative_ts', 'make_zero', '-movflags', '+faststart', '-y', tmpOut,
         ], { maxBuffer: 10 * 1024 * 1024, timeout: 7_200_000 });
 
         await uploadFileFromPath(tmpOut, origName, 'video/mp4');
