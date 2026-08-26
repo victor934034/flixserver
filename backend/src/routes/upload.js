@@ -869,6 +869,108 @@ router.post('/batch-fix-faststart', async (_req, res) => {
   })();
 });
 
+// Corrige faststart so das series informadas (por titulo, busca parcial) -
+// mesma logica segura e sequencial do /batch-fix-faststart, so que filtrada.
+// Reusa o mesmo poller /batch-status.
+router.post('/fix-series-faststart', async (req, res) => {
+  const { supabase } = require('../services/supabase');
+  const { uploadFileFromPath } = require('../services/backblaze');
+  const { seriesTitles } = req.body;
+  if (!Array.isArray(seriesTitles) || seriesTitles.length === 0) {
+    return res.status(400).json({ error: 'seriesTitles deve ser um array não-vazio' });
+  }
+
+  const EPISODE_FIELDS = ['file_dubbing', 'file_subtitled', 'file_cinema'];
+
+  let allItems = [];
+  const notFound = [];
+  try {
+    for (const title of seriesTitles) {
+      const { data: seriesRows, error: seriesErr } = await supabase
+        .from('series').select('id, title').ilike('title', `%${title.trim()}%`);
+      if (seriesErr) throw new Error(`Supabase series: ${seriesErr.message}`);
+      if (!seriesRows || seriesRows.length === 0) { notFound.push(title); continue; }
+
+      const seriesIds = seriesRows.map(s => s.id);
+      const { data: eps, error: epsErr } = await supabase
+        .from('episodes')
+        .select(['id', 'series_id', ...EPISODE_FIELDS].join(', '))
+        .in('series_id', seriesIds);
+      if (epsErr) throw new Error(`Supabase episodes: ${epsErr.message}`);
+
+      for (const row of eps || []) {
+        for (const f of EPISODE_FIELDS) {
+          if (row[f] && /\.mp4$/i.test(row[f])) {
+            allItems.push({ table: 'episodes', id: row.id, field: f, cdnUrl: row[f] });
+          }
+        }
+      }
+    }
+  } catch (e) {
+    return res.status(500).json({ error: 'Erro ao coletar episódios: ' + e.message });
+  }
+
+  if (allItems.length === 0) {
+    return res.json({
+      ok: true, jobId: null, total: 0,
+      message: notFound.length
+        ? `Nenhum episódio .mp4 encontrado. Série(s) não encontrada(s): ${notFound.join(', ')}`
+        : 'Nenhum episódio .mp4 encontrado para essas séries.',
+    });
+  }
+
+  const doneSet = await loadFaststartDone(supabase);
+  const pending = allItems.filter(i => !doneSet.has(i.cdnUrl));
+  const skipped = allItems.length - pending.length;
+
+  if (pending.length === 0) {
+    return res.json({ ok: true, jobId: null, total: 0, message: `Todos os ${allItems.length} episódio(s) já foram corrigidos.` });
+  }
+
+  const jobId = `fss_${Date.now()}`;
+  batchJobs.set(jobId, { total: pending.length, done: 0, errors: 0, running: true, lastFile: '', lastError: '', skipped });
+
+  const notFoundMsg = notFound.length ? ` (não encontrada(s): ${notFound.join(', ')})` : '';
+  res.json({ ok: true, jobId, total: pending.length, skipped, message: `Corrigindo ${pending.length} episódio(s)${notFoundMsg}.` });
+
+  (async () => {
+    const job = batchJobs.get(jobId);
+    for (const item of pending) {
+      let tmpIn = null, tmpOut = null;
+      try {
+        const origName = path.posix.basename(decodeURIComponent(new URL(item.cdnUrl).pathname));
+        job.lastFile = origName.slice(-60);
+        const { url: b2AuthUrl } = await getDirectDownloadInfo(origName);
+        const ts = Date.now();
+        tmpIn  = path.join(os.tmpdir(), `fh_fss_in_${ts}.mp4`);
+        tmpOut = path.join(os.tmpdir(), `fh_fss_${ts}.mp4`);
+
+        console.log(`[fix-series-faststart] baixando ${origName}...`);
+        await downloadB2File(b2AuthUrl, null, tmpIn, 5);
+
+        await execFileAsync(ffmpegPath, [
+          '-i', tmpIn, '-c', 'copy', '-movflags', '+faststart', '-y', tmpOut,
+        ], { maxBuffer: 10 * 1024 * 1024, timeout: 7_200_000 });
+
+        await uploadFileFromPath(tmpOut, origName, 'video/mp4');
+        job.done++;
+        doneSet.add(item.cdnUrl);
+        saveFaststartDone(supabase, doneSet).catch(() => {});
+        console.log(`[fix-series-faststart] ${job.done}/${job.total} OK: ${origName}`);
+      } catch (e) {
+        job.errors++;
+        job.lastError = (e.stderr || e.message || 'erro desconhecido').slice(0, 400);
+        console.error(`[fix-series-faststart] ERRO (episodes#${item.id} ${item.field}):`, e.stderr || e.message);
+      } finally {
+        try { if (tmpIn)  fs.unlinkSync(tmpIn);  } catch {}
+        try { if (tmpOut) fs.unlinkSync(tmpOut); } catch {}
+      }
+    }
+    job.running = false;
+    console.log(`[fix-series-faststart] Concluído: ${job.done} corrigidos, ${job.errors} erros`);
+  })();
+});
+
 // Polling de progresso do batch
 router.get('/batch-status', (req, res) => {
   const { jobId } = req.query;

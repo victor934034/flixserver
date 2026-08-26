@@ -31,6 +31,12 @@ export default function Configuracoes() {
   const [faststartProgress, setFaststartProgress] = useState(null);
   const faststartPollRef = useRef(null);
 
+  const [seriesFixInput, setSeriesFixInput] = useState('');
+  const [seriesFixMsg, setSeriesFixMsg] = useState('');
+  const [seriesFixRunning, setSeriesFixRunning] = useState(false);
+  const [seriesFixProgress, setSeriesFixProgress] = useState(null);
+  const seriesFixPollRef = useRef(null);
+
   const [hlsMsg, setHlsMsg] = useState('');
   const [hlsRunning, setHlsRunning] = useState(false);
   const [hlsProgress, setHlsProgress] = useState(null);
@@ -401,6 +407,117 @@ export default function Configuracoes() {
                 )}
               </div>
             )}
+
+            <div style={{ borderTop: '1px solid #2a2a2a', marginTop: 8, paddingTop: 16 }}>
+              <p style={{ color: '#fff', fontWeight: 600, margin: '0 0 4px', fontSize: 14 }}>Corrigir só séries específicas</p>
+              <p style={{ color: '#888', fontSize: 12, margin: '0 0 12px' }}>
+                Um título por linha (busca parcial, não precisa ser exato). Mais rápido que corrigir tudo quando você só quer priorizar algumas séries.
+              </p>
+              <textarea
+                value={seriesFixInput}
+                onChange={e => setSeriesFixInput(e.target.value)}
+                placeholder={'Desventuras em Série\nAvatar: A Lenda de Aang\nAvatar: A Lenda de Korra'}
+                rows={3}
+                disabled={seriesFixRunning}
+                style={{
+                  width: '100%', background: '#111', border: '1px solid #2a2a2a', borderRadius: 8,
+                  color: '#fff', padding: '10px 12px', fontSize: 13, fontFamily: 'inherit',
+                  resize: 'vertical', marginBottom: 12,
+                }}
+              />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+                <button
+                  disabled={seriesFixRunning || !seriesFixInput.trim()}
+                  onClick={async () => {
+                    const seriesTitles = seriesFixInput.split('\n').map(s => s.trim()).filter(Boolean);
+                    if (seriesTitles.length === 0) return;
+                    setSeriesFixRunning(true);
+                    setSeriesFixMsg('');
+                    setSeriesFixProgress(null);
+                    clearInterval(seriesFixPollRef.current);
+                    try {
+                      const r = await api.post('/upload/fix-series-faststart', { seriesTitles }, { timeout: 30000 });
+                      if (!r.data.jobId) {
+                        setSeriesFixMsg(r.data.message || '✓ Nada para corrigir.');
+                        setSeriesFixRunning(false);
+                        return;
+                      }
+                      const { jobId } = r.data;
+                      setSeriesFixProgress({ total: r.data.total, done: 0, errors: 0, running: true, lastFile: '', skipped: r.data.skipped || 0 });
+                      setSeriesFixMsg(r.data.message || '');
+                      seriesFixPollRef.current = setInterval(async () => {
+                        try {
+                          const s = await api.get(`/upload/batch-status?jobId=${jobId}`);
+                          setSeriesFixProgress(s.data);
+                          if (!s.data.running) {
+                            clearInterval(seriesFixPollRef.current);
+                            setSeriesFixRunning(false);
+                            const sk = s.data.skipped ? ` (${s.data.skipped} já prontos)` : '';
+                            setSeriesFixMsg(
+                              s.data.errors === 0
+                                ? `✓ ${s.data.done} episódio(s) corrigido(s)${sk}.`
+                                : `${s.data.done} corrigido(s), ${s.data.errors} erro(s)${sk}${s.data.lastError ? ': ' + s.data.lastError : ' — veja os logs.'}`
+                            );
+                          }
+                        } catch {
+                          clearInterval(seriesFixPollRef.current);
+                          setSeriesFixRunning(false);
+                          setSeriesFixMsg('Erro ao verificar progresso. Veja os logs do servidor.');
+                        }
+                      }, 3000);
+                    } catch (e) {
+                      setSeriesFixMsg('Erro: ' + (e.response?.data?.error || e.message));
+                      setSeriesFixRunning(false);
+                    }
+                  }}
+                  style={{
+                    padding: '10px 24px', borderRadius: 8,
+                    background: seriesFixRunning ? '#333' : '#1565c0',
+                    color: '#fff', border: 'none', fontWeight: 700, fontSize: 14,
+                    cursor: seriesFixRunning ? 'not-allowed' : 'pointer',
+                  }}>
+                  {seriesFixRunning ? 'Processando...' : 'Corrigir essas séries'}
+                </button>
+                {seriesFixMsg && (
+                  <span style={{ color: seriesFixMsg.startsWith('Erro') ? '#ff6b6b' : '#4caf50', fontSize: 13 }}>
+                    {seriesFixMsg}
+                  </span>
+                )}
+              </div>
+
+              {seriesFixProgress && seriesFixProgress.running && (
+                <div style={{ background: '#111', borderRadius: 8, padding: '12px 16px', marginTop: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <span style={{ color: '#fff', fontSize: 13, fontWeight: 600 }}>
+                      {seriesFixProgress.done} / {seriesFixProgress.total} episódios
+                      {seriesFixProgress.errors > 0 && (
+                        <span style={{ color: '#ff6b6b', marginLeft: 8 }}>({seriesFixProgress.errors} erros)</span>
+                      )}
+                    </span>
+                    <span style={{ color: '#888', fontSize: 12 }}>
+                      {Math.round((seriesFixProgress.done / seriesFixProgress.total) * 100)}%
+                    </span>
+                  </div>
+                  <div style={{ background: '#222', borderRadius: 4, height: 6, overflow: 'hidden' }}>
+                    <div style={{
+                      height: '100%', borderRadius: 4, background: '#1565c0',
+                      width: `${Math.round((seriesFixProgress.done / seriesFixProgress.total) * 100)}%`,
+                      transition: 'width 0.5s ease',
+                    }} />
+                  </div>
+                  {seriesFixProgress.lastFile && (
+                    <p style={{ color: '#555', fontSize: 11, margin: '6px 0 0', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {seriesFixProgress.lastFile}
+                    </p>
+                  )}
+                  {seriesFixProgress.lastError && (
+                    <p style={{ color: '#ff6b6b', fontSize: 11, margin: '4px 0 0', fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                      Último erro: {seriesFixProgress.lastError}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </section>
