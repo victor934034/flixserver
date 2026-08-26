@@ -542,8 +542,10 @@ router.post('/fix-audio', async (req, res) => {
   let tmpOutput = null;
 
   try {
-    // Extrai o nome do arquivo da URL da CDN
-    const origName = decodeURIComponent(path.basename(new URL(cdnUrl).pathname));
+    // Extrai a chave B2 completa (com pastas) da URL da CDN — episodios de
+    // serie ficam em subpastas, cortar pra so o nome do arquivo fazia o
+    // download no B2 dar 404 (buscava na raiz do bucket em vez da subpasta).
+    const origName = decodeURIComponent(new URL(cdnUrl).pathname.replace(/^\//, ''));
     const ext = path.extname(origName) || '.mkv';
 
     // Obtém URL direta do B2 (contorna Cloudflare Workers CDN)
@@ -628,7 +630,7 @@ router.post('/check-audio', async (req, res) => {
   if (!cdnUrl) return res.status(400).json({ error: 'cdnUrl é obrigatório' });
 
   try {
-    const filename = decodeURIComponent(path.basename(new URL(cdnUrl).pathname));
+    const filename = decodeURIComponent(new URL(cdnUrl).pathname.replace(/^\//, ''));
     const { url: b2Url, token: b2Token } = await getDirectDownloadInfo(filename);
 
     const { stdout } = await execFileAsync('ffprobe', [
@@ -710,7 +712,7 @@ router.post('/fix-faststart', async (req, res) => {
 
   let tmpOutput = null;
   try {
-    const origName = decodeURIComponent(path.basename(new URL(cdnUrl).pathname));
+    const origName = decodeURIComponent(new URL(cdnUrl).pathname.replace(/^\//, ''));
     const { url: b2Url, token: b2Token } = await getDirectDownloadInfo(origName);
     const b2AuthHdr = `Authorization: ${b2Token}\r\nUser-Agent: ${UA}\r\n`;
 
@@ -834,7 +836,7 @@ router.post('/batch-fix-faststart', async (_req, res) => {
       let tmpIn  = null;
       let tmpOut = null;
       try {
-        const origName = path.posix.basename(decodeURIComponent(new URL(item.cdnUrl).pathname));
+        const origName = decodeURIComponent(new URL(item.cdnUrl).pathname.replace(/^\//, ''));
         job.lastFile = origName.slice(-60);
 
         // URL do B2 com token já embutido — axios baixa sem header extra
@@ -964,7 +966,7 @@ router.post('/fix-series-faststart', async (req, res) => {
     for (const item of pending) {
       let tmpIn = null, tmpOut = null;
       try {
-        const origName = path.posix.basename(decodeURIComponent(new URL(item.cdnUrl).pathname));
+        const origName = decodeURIComponent(new URL(item.cdnUrl).pathname.replace(/^\//, ''));
         job.lastFile = origName.slice(-60);
         const { url: b2AuthUrl } = await getDirectDownloadInfo(origName);
         const ts = Date.now();
@@ -1058,8 +1060,9 @@ router.post('/batch-generate-hls', async (_req, res) => {
     const job = batchJobs.get(jobId);
     for (const item of allItems) {
       try {
-        // Usa só o basename para evitar incluir prefixo de bucket CDN no nome B2
-        const origName = path.posix.basename(decodeURIComponent(new URL(item.cdnUrl).pathname));
+        // Chave B2 completa (com pastas) — episodios de serie ficam em subpastas,
+        // usar só o basename fazia o lookup no B2 dar 404 (raiz do bucket).
+        const origName = decodeURIComponent(new URL(item.cdnUrl).pathname.replace(/^\//, ''));
         job.lastFile   = origName.slice(-60);
         await generateHLS(origName);
         job.done++;
