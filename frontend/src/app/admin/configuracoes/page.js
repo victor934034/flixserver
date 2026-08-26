@@ -31,11 +31,41 @@ export default function Configuracoes() {
   const [faststartProgress, setFaststartProgress] = useState(null);
   const faststartPollRef = useRef(null);
 
-  const [seriesFixInput, setSeriesFixInput] = useState('');
+  const [seriesQuery, setSeriesQuery] = useState('');
+  const [seriesResults, setSeriesResults] = useState([]);
+  const [seriesSearching, setSeriesSearching] = useState(false);
+  const [selectedSeries, setSelectedSeries] = useState([]); // [{id, title}]
+  const seriesSearchDebounce = useRef(null);
   const [seriesFixMsg, setSeriesFixMsg] = useState('');
   const [seriesFixRunning, setSeriesFixRunning] = useState(false);
   const [seriesFixProgress, setSeriesFixProgress] = useState(null);
   const seriesFixPollRef = useRef(null);
+
+  useEffect(() => {
+    clearTimeout(seriesSearchDebounce.current);
+    if (!seriesQuery.trim()) { setSeriesResults([]); return; }
+    seriesSearchDebounce.current = setTimeout(async () => {
+      setSeriesSearching(true);
+      try {
+        const r = await api.get('/series/search', { params: { q: seriesQuery.trim() } });
+        setSeriesResults(Array.isArray(r.data) ? r.data : []);
+      } catch {
+        setSeriesResults([]);
+      } finally {
+        setSeriesSearching(false);
+      }
+    }, 300);
+    return () => clearTimeout(seriesSearchDebounce.current);
+  }, [seriesQuery]);
+
+  function addSeries(s) {
+    setSelectedSeries(prev => prev.some(p => p.id === s.id) ? prev : [...prev, { id: s.id, title: s.title }]);
+    setSeriesQuery('');
+    setSeriesResults([]);
+  }
+  function removeSeries(id) {
+    setSelectedSeries(prev => prev.filter(p => p.id !== id));
+  }
 
   const [hlsMsg, setHlsMsg] = useState('');
   const [hlsRunning, setHlsRunning] = useState(false);
@@ -411,32 +441,84 @@ export default function Configuracoes() {
             <div style={{ borderTop: '1px solid #2a2a2a', marginTop: 8, paddingTop: 16 }}>
               <p style={{ color: '#fff', fontWeight: 600, margin: '0 0 4px', fontSize: 14 }}>Corrigir só séries específicas</p>
               <p style={{ color: '#888', fontSize: 12, margin: '0 0 12px' }}>
-                Um título por linha (busca parcial, não precisa ser exato). Mais rápido que corrigir tudo quando você só quer priorizar algumas séries.
+                Busca as séries que já estão no banco — sem risco de digitar o nome errado e não achar. Mais rápido que corrigir tudo quando você só quer priorizar algumas.
               </p>
-              <textarea
-                value={seriesFixInput}
-                onChange={e => setSeriesFixInput(e.target.value)}
-                placeholder={'Desventuras em Série\nAvatar: A Lenda de Aang\nAvatar: A Lenda de Korra'}
-                rows={3}
-                disabled={seriesFixRunning}
-                style={{
-                  width: '100%', background: '#111', border: '1px solid #2a2a2a', borderRadius: 8,
-                  color: '#fff', padding: '10px 12px', fontSize: 13, fontFamily: 'inherit',
-                  resize: 'vertical', marginBottom: 12,
-                }}
-              />
+
+              {selectedSeries.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+                  {selectedSeries.map(s => (
+                    <span key={s.id} style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 6,
+                      background: '#1565c0', color: '#fff', fontSize: 12, fontWeight: 600,
+                      padding: '5px 6px 5px 12px', borderRadius: 16,
+                    }}>
+                      {s.title}
+                      <button
+                        onClick={() => removeSeries(s.id)}
+                        disabled={seriesFixRunning}
+                        style={{
+                          background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: '50%',
+                          width: 18, height: 18, color: '#fff', fontSize: 12, lineHeight: 1,
+                          cursor: seriesFixRunning ? 'not-allowed' : 'pointer',
+                        }}>
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              <div style={{ position: 'relative', marginBottom: 12 }}>
+                <input
+                  type="text"
+                  value={seriesQuery}
+                  onChange={e => setSeriesQuery(e.target.value)}
+                  placeholder="Digite o nome de uma série…"
+                  disabled={seriesFixRunning}
+                  style={{
+                    width: '100%', background: '#111', border: '1px solid #2a2a2a', borderRadius: 8,
+                    color: '#fff', padding: '10px 12px', fontSize: 13, fontFamily: 'inherit',
+                  }}
+                />
+                {seriesSearching && (
+                  <span style={{ position: 'absolute', right: 12, top: 10, fontSize: 11, color: '#666' }}>buscando…</span>
+                )}
+                {seriesResults.length > 0 && (
+                  <div style={{
+                    position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4, zIndex: 10,
+                    background: '#181818', border: '1px solid #2a2a2a', borderRadius: 8,
+                    maxHeight: 220, overflowY: 'auto',
+                  }}>
+                    {seriesResults.map(s => (
+                      <div
+                        key={s.id}
+                        onClick={() => addSeries(s)}
+                        style={{
+                          padding: '10px 12px', fontSize: 13, color: '#fff', cursor: 'pointer',
+                          borderBottom: '1px solid #222',
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.background = '#242424'; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                      >
+                        {s.title}{s.year_start ? ` (${s.year_start})` : ''}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
                 <button
-                  disabled={seriesFixRunning || !seriesFixInput.trim()}
+                  disabled={seriesFixRunning || selectedSeries.length === 0}
                   onClick={async () => {
-                    const seriesTitles = seriesFixInput.split('\n').map(s => s.trim()).filter(Boolean);
-                    if (seriesTitles.length === 0) return;
+                    const seriesIds = selectedSeries.map(s => s.id);
+                    if (seriesIds.length === 0) return;
                     setSeriesFixRunning(true);
                     setSeriesFixMsg('');
                     setSeriesFixProgress(null);
                     clearInterval(seriesFixPollRef.current);
                     try {
-                      const r = await api.post('/upload/fix-series-faststart', { seriesTitles }, { timeout: 30000 });
+                      const r = await api.post('/upload/fix-series-faststart', { seriesIds }, { timeout: 30000 });
                       if (!r.data.jobId) {
                         setSeriesFixMsg(r.data.message || '✓ Nada para corrigir.');
                         setSeriesFixRunning(false);

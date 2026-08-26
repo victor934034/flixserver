@@ -875,9 +875,11 @@ router.post('/batch-fix-faststart', async (_req, res) => {
 router.post('/fix-series-faststart', async (req, res) => {
   const { supabase } = require('../services/supabase');
   const { uploadFileFromPath } = require('../services/backblaze');
-  const { seriesTitles } = req.body;
-  if (!Array.isArray(seriesTitles) || seriesTitles.length === 0) {
-    return res.status(400).json({ error: 'seriesTitles deve ser um array não-vazio' });
+  const { seriesTitles, seriesIds: seriesIdsInput } = req.body;
+  const hasIds = Array.isArray(seriesIdsInput) && seriesIdsInput.length > 0;
+  const hasTitles = Array.isArray(seriesTitles) && seriesTitles.length > 0;
+  if (!hasIds && !hasTitles) {
+    return res.status(400).json({ error: 'seriesIds ou seriesTitles deve ser um array não-vazio' });
   }
 
   const EPISODE_FIELDS = ['file_dubbing', 'file_subtitled', 'file_cinema'];
@@ -885,23 +887,40 @@ router.post('/fix-series-faststart', async (req, res) => {
   let allItems = [];
   const notFound = [];
   try {
-    for (const title of seriesTitles) {
-      const { data: seriesRows, error: seriesErr } = await supabase
-        .from('series').select('id, title').ilike('title', `%${title.trim()}%`);
-      if (seriesErr) throw new Error(`Supabase series: ${seriesErr.message}`);
-      if (!seriesRows || seriesRows.length === 0) { notFound.push(title); continue; }
-
-      const seriesIds = seriesRows.map(s => s.id);
+    // Preferir seriesIds (selecionado via busca na UI - sem ambiguidade).
+    // seriesTitles fica so pra compatibilidade com o formato antigo.
+    if (hasIds) {
       const { data: eps, error: epsErr } = await supabase
         .from('episodes')
         .select(['id', 'series_id', ...EPISODE_FIELDS].join(', '))
-        .in('series_id', seriesIds);
+        .in('series_id', seriesIdsInput);
       if (epsErr) throw new Error(`Supabase episodes: ${epsErr.message}`);
-
       for (const row of eps || []) {
         for (const f of EPISODE_FIELDS) {
           if (row[f] && /\.mp4$/i.test(row[f])) {
             allItems.push({ table: 'episodes', id: row.id, field: f, cdnUrl: row[f] });
+          }
+        }
+      }
+    } else {
+      for (const title of seriesTitles) {
+        const { data: seriesRows, error: seriesErr } = await supabase
+          .from('series').select('id, title').ilike('title', `%${title.trim()}%`);
+        if (seriesErr) throw new Error(`Supabase series: ${seriesErr.message}`);
+        if (!seriesRows || seriesRows.length === 0) { notFound.push(title); continue; }
+
+        const seriesIds = seriesRows.map(s => s.id);
+        const { data: eps, error: epsErr } = await supabase
+          .from('episodes')
+          .select(['id', 'series_id', ...EPISODE_FIELDS].join(', '))
+          .in('series_id', seriesIds);
+        if (epsErr) throw new Error(`Supabase episodes: ${epsErr.message}`);
+
+        for (const row of eps || []) {
+          for (const f of EPISODE_FIELDS) {
+            if (row[f] && /\.mp4$/i.test(row[f])) {
+              allItems.push({ table: 'episodes', id: row.id, field: f, cdnUrl: row[f] });
+            }
           }
         }
       }
