@@ -299,17 +299,28 @@ export default function UploadDesenhosPage() {
         const { data: saveResult } = await api.post('/admin/episodes', epData);
         updateEp(ep.episode_number, { status: 'done', progress: 100, cdnUrl, error: null });
 
-        // MP4 sem faststart → moov atom no final → abertura lenta (6-10s)
-        // Otimiza em background sem travar o upload dos próximos episódios
+        // MP4 sem faststart → moov atom no final → abertura lenta (6-10s).
+        // Espera terminar (nao dispara em segundo plano) - como cada episodio
+        // ja processa em sequencia aqui, isso garante que so 1 ffmpeg de
+        // remux roda por vez no servidor. Disparar sem esperar (como era
+        // antes) deixava um remux por episodio rodando AO MESMO TEMPO num
+        // upload em lote, sobrecarregando o servidor e derrubando varios
+        // silenciosamente - exatamente o "todo episodio demora pra abrir"
+        // reportado, ja que a otimizacao simplesmente nao completava.
         if (/\.mp4$/i.test(ep.file.name) && saveResult?.id) {
-          api.post('/upload/fix-faststart', {
-            cdnUrl,
-            movieId: saveResult.id,
-            movieType: 'series',
-            field: `file_${version}`,
-          }, { timeout: 600_000 }).catch(e =>
-            console.warn(`[faststart] ep ${ep.episode_number}:`, e.message)
-          );
+          updateEp(ep.episode_number, { optimizing: true });
+          try {
+            await api.post('/upload/fix-faststart', {
+              cdnUrl,
+              movieId: saveResult.id,
+              movieType: 'series',
+              field: `file_${version}`,
+            }, { timeout: 600_000 });
+            updateEp(ep.episode_number, { optimizing: false });
+          } catch (e) {
+            console.warn(`[faststart] ep ${ep.episode_number}:`, e.message);
+            updateEp(ep.episode_number, { optimizing: false, faststartError: true });
+          }
         }
         delete abortRefs.current[ep.episode_number];
       } catch (err) {
@@ -508,7 +519,13 @@ export default function UploadDesenhosPage() {
                     </div>
 
                     <div className={styles.epActions}>
-                      {ep.status === 'done' && <span className={styles.badgeDone}>✓ Enviado</span>}
+                      {ep.status === 'done' && ep.optimizing && <span className={styles.badgeUploading}>Otimizando…</span>}
+                      {ep.status === 'done' && !ep.optimizing && ep.faststartError && (
+                        <span className={styles.badgeError} title="Vídeo enviado, mas a otimização de abertura rápida falhou — pode demorar mais pra abrir">
+                          ✓ Enviado (sem otimizar)
+                        </span>
+                      )}
+                      {ep.status === 'done' && !ep.optimizing && !ep.faststartError && <span className={styles.badgeDone}>✓ Enviado</span>}
                       {ep.status === 'uploading' && <span className={styles.badgeUploading}>{ep.progress}%</span>}
                       {ep.status === 'pending' && (
                         <>
