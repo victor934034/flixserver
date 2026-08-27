@@ -17,6 +17,8 @@ const IC = {
   castOk:    <svg width="20" height="20" viewBox="0 0 24 24" fill="#46d369"><path d="M21 3H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5H8c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11z"/><path d="M9 16.17L4.83 12l-1.42 1.41L9 19l7.59-7.59L15.17 10z"/></svg>,
   fullOn:    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>,
   fullOff:   <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/></svg>,
+  back:      <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>,
+  next:      <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>,
 };
 
 function fmt(s) {
@@ -28,7 +30,7 @@ function fmt(s) {
   return `${m}:${String(sec).padStart(2,'0')}`;
 }
 
-export default function VideoPlayer({ content, onProgress, startAt = 0 }) {
+export default function VideoPlayer({ content, onProgress, startAt = 0, onClose, onNextEpisode, nextEpisodeLabel, overlayTitle }) {
   const videoRef     = useRef(null);
   const containerRef = useRef(null);
   const hideTimer    = useRef(null);
@@ -53,6 +55,7 @@ export default function VideoPlayer({ content, onProgress, startAt = 0 }) {
   const [castStatus,   setCastStatus]   = useState('idle');
   const [flashIcon,    setFlashIcon]    = useState(null); // 'play' | 'pause'
   const [hoverTime,    setHoverTime]    = useState(null); // { pct, time }
+  const [showNextCard, setShowNextCard] = useState(false);
 
   const versions = [
     { key: 'dubbing',    label: 'Dublado',   url: content.file_dubbing },
@@ -67,6 +70,9 @@ export default function VideoPlayer({ content, onProgress, startAt = 0 }) {
     { key: 'en',   label: 'Inglês',    url: content.subtitle_en },
     { key: 'es',   label: 'Espanhol',  url: content.subtitle_es },
   ].filter(s => s.key === 'none' || s.url);
+  // O <track> do HTML5 só entende WebVTT — a maioria das legendas enviadas é
+  // .srt, que o browser ignora silenciosamente. Essa rota converte na hora.
+  const vttUrl = (raw) => raw ? `/api/subtitle?url=${encodeURIComponent(raw)}` : null;
 
   const rawUrl    = versions.find(v => v.key === version)?.url || versions[0]?.url;
   const remuxUrl  = rawUrl ? `/api/remux?url=${encodeURIComponent(rawUrl)}` : null;
@@ -113,7 +119,7 @@ export default function VideoPlayer({ content, onProgress, startAt = 0 }) {
         video.currentTime = startAt;
       }
     };
-    const onEnded  = () => setPlaying(false);
+    const onEnded  = () => { setPlaying(false); if (onNextEpisode) setShowNextCard(true); };
     const onError  = () => {
       // code 4 = MEDIA_ERR_SRC_NOT_SUPPORTED (codec de áudio ou vídeo incompatível)
       if (video.error?.code === 4 || video.error?.code === 3) {
@@ -142,7 +148,22 @@ export default function VideoPlayer({ content, onProgress, startAt = 0 }) {
       video.removeEventListener('pause', onPause);
       onProgress?.(video.currentTime, video.duration);
     };
-  }, [onProgress]);
+  }, [onProgress, onNextEpisode]);
+
+  // Autoplay + tela cheia assim que o player abre (é acionado a partir do
+  // clique em "Assistir"/"Play", então o gesto do usuário ainda vale pro
+  // browser liberar play() e requestFullscreen()).
+  useEffect(() => {
+    const v = videoRef.current;
+    const el = containerRef.current;
+    if (el && !document.fullscreenElement) {
+      const req = el.requestFullscreen?.bind(el) || el.webkitRequestFullscreen?.bind(el);
+      req?.()?.catch?.(() => {});
+    }
+    if (v) {
+      v.play().then(() => setPlaying(true)).catch(() => {});
+    }
+  }, []);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -301,9 +322,31 @@ export default function VideoPlayer({ content, onProgress, startAt = 0 }) {
       >
         <source src={currentUrl} type="video/mp4" />
         {subtitles.filter(s => s.url).map(s => (
-          <track key={s.key} kind="subtitles" src={s.url} srcLang={s.key} label={s.label} />
+          <track key={s.key} kind="subtitles" src={vttUrl(s.url)} srcLang={s.key} label={s.label} />
         ))}
       </video>
+
+      {/* Top bar (título + voltar) */}
+      {(onClose || overlayTitle || content.title) && (
+        <div className={`${styles.topBar} ${showControls ? styles.visible : ''}`} onClick={e => e.stopPropagation()}>
+          {onClose && (
+            <button onClick={onClose} className={styles.backBtn} title="Voltar">
+              {IC.back}
+            </button>
+          )}
+          <span className={styles.topTitle}>{overlayTitle || content.title}</span>
+        </div>
+      )}
+
+      {/* Próximo episódio (aparece perto do fim / quando o vídeo termina) */}
+      {showNextCard && onNextEpisode && (
+        <div className={styles.nextCard} onClick={e => e.stopPropagation()}>
+          <button className={styles.nextCardBtn} onClick={() => { setShowNextCard(false); onNextEpisode(); }}>
+            {IC.next}
+            <span>Próximo episódio{nextEpisodeLabel ? `: ${nextEpisodeLabel}` : ''}</span>
+          </button>
+        </div>
+      )}
 
       {/* Center flash icon */}
       <div className={styles.centerFlash}>
@@ -394,6 +437,12 @@ export default function VideoPlayer({ content, onProgress, startAt = 0 }) {
           </div>
 
           <div className={styles.right}>
+            {onNextEpisode && (
+              <button onClick={() => { setShowNextCard(false); onNextEpisode(); }} className={styles.btn} title="Próximo episódio">
+                {IC.next}
+              </button>
+            )}
+
             {versions.length > 1 && (
               <div className={styles.selectWrap}>
                 <select value={version} onChange={e => changeVersion(e.target.value)} className={styles.select}>

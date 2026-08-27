@@ -23,6 +23,7 @@ const streamsRouter = require('./routes/streams');
 const likesRouter = require('./routes/likes');
 const iptvRouter = require('./routes/iptv');
 const remuxRouter = require('./routes/remux');
+const subtitleRouter = require('./routes/subtitle');
 const collectionsRouter = require('./routes/collections');
 
 const REQUIRED_ENV = ['JWT_SECRET', 'SUPABASE_URL', 'SUPABASE_SERVICE_KEY'];
@@ -98,6 +99,7 @@ app.use('/api/streams', streamsRouter);
 app.use('/api/likes', likesRouter);
 app.use('/api/iptv', iptvRouter);
 app.use('/api/remux', remuxRouter);
+app.use('/api/subtitle', subtitleRouter);
 app.use('/api/collections', collectionsRouter);
 
 app.get('/api/preset-avatars', async (req, res) => {

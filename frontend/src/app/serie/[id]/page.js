@@ -87,6 +87,10 @@ export default function SeriePage() {
 
   const heroEpisode = nextUp ? episodes.find(e => e.id === nextUp.episode_id) : null;
 
+  const sortedEpisodes = [...episodes].sort((a, b) => a.season_number - b.season_number || a.episode_number - b.episode_number);
+  const playingIdx = playing ? sortedEpisodes.findIndex(e => e.id === playing.id) : -1;
+  const nextEpisode = playingIdx >= 0 ? sortedEpisodes[playingIdx + 1] || null : null;
+
   if (error) return <div className={styles.error}>{error}</div>;
   if (!serie) return <div className={styles.loading}>Carregando...</div>;
 
@@ -106,11 +110,16 @@ export default function SeriePage() {
       <main className={styles.main}>
         {playing ? (
           <div className={styles.playerWrap}>
-            <div className={styles.playerTitle}>
-              {serie.title} — T{playing.season_number}E{playing.episode_number}: {playing.title}
-            </div>
-            <VideoPlayer content={playing} onProgress={(c, t) => saveProgress(c, t, playing)} startAt={playingResume} />
-            <button className={styles.closePlayer} onClick={() => { setPlaying(null); setPlayingResume(0); }}>✕ Fechar Player</button>
+            <VideoPlayer
+              key={playing.id}
+              content={playing}
+              onProgress={(c, t) => saveProgress(c, t, playing)}
+              startAt={playingResume}
+              onClose={() => { setPlaying(null); setPlayingResume(0); }}
+              overlayTitle={`${serie.title} — T${playing.season_number}E${playing.episode_number}: ${playing.title}`}
+              onNextEpisode={nextEpisode ? () => playEpisode(nextEpisode) : undefined}
+              nextEpisodeLabel={nextEpisode ? `T${nextEpisode.season_number}E${nextEpisode.episode_number}: ${nextEpisode.title}` : undefined}
+            />
           </div>
         ) : (
           <>

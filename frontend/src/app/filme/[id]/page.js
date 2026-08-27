@@ -94,8 +94,13 @@ export default function FilmePage() {
       <main className={styles.main}>
         {playing ? (
           <div className={styles.playerWrap}>
-            <VideoPlayer content={movie} onProgress={saveProgress} startAt={resumeAt} />
-            <button className={styles.closePlayer} onClick={() => setPlaying(false)}>✕ Fechar Player</button>
+            <VideoPlayer
+              content={movie}
+              onProgress={saveProgress}
+              startAt={resumeAt}
+              onClose={() => setPlaying(false)}
+              overlayTitle={movie.title}
+            />
           </div>
         ) : (
           <div className={styles.hero}>

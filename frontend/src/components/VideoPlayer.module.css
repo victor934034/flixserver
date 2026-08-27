@@ -264,6 +264,80 @@
   border: 1px solid rgba(255,100,100,0.3);
 }
 
+/* Top bar (voltar + título) */
+.topBar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1.1rem 1.25rem;
+  background: linear-gradient(to bottom, rgba(0,0,0,0.75) 0%, transparent 100%);
+  opacity: 0;
+  transition: opacity 0.3s;
+  pointer-events: none;
+  z-index: 6;
+}
+.topBar.visible { opacity: 1; pointer-events: all; }
+
+.backBtn {
+  background: none;
+  border: none;
+  color: #fff;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+.backBtn:hover { background: rgba(255,255,255,0.15); }
+
+.topTitle {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Próximo episódio */
+.nextCard {
+  position: absolute;
+  bottom: 6.5rem;
+  right: 1.5rem;
+  z-index: 8;
+  animation: nextCardIn 0.35s ease-out;
+}
+@keyframes nextCardIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.nextCardBtn {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: rgba(20,20,20,0.92);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 8px;
+  padding: 0.7rem 1.1rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 18px rgba(0,0,0,0.5);
+  transition: background 0.15s, transform 0.15s;
+}
+.nextCardBtn:hover { background: rgba(40,40,40,0.95); transform: scale(1.03); }
+
 /* Separator */
 .sep {
   width: 1px;
