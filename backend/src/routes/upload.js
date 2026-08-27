@@ -270,8 +270,13 @@ function needsRemux(info) {
   if (!info) return false;
   const p = info.profile.toLowerCase();
   const heAac = p.includes('he') || p === 'lc+sbr' || p === 'lc+sbr+ps';
-  return heAac || info.channels > 2;
+  const badCodec = info.codec && info.codec !== 'aac';
+  return heAac || info.channels > 2 || badCodec;
 }
+
+// Containers que o <video> HTML5 não toca nativamente na maioria dos browsers
+// (Chrome/Firefox não têm demuxer pra MPEG-TS/AVI/WMV/FLV) — precisam virar .mp4.
+const BAD_CONTAINER_RE = /\.(ts|avi|wmv|flv|mpg|mpeg)$/i;
 
 async function applyFaststart(inputPath, outputPath) {
   try {
@@ -346,18 +351,29 @@ router.post('/video', upload.single('file'), async (req, res) => {
 
     let buffer   = req.file.buffer;
     let filename = req.file.originalname;
+    let mimetype = req.file.mimetype;
+
+    // .ts/.avi/.wmv/.flv/.mpg não tocam no <video> HTML5 (sem demuxer no browser) —
+    // precisam virar .mp4, independente do codec de áudio.
+    const badContainer = BAD_CONTAINER_RE.test(filename);
 
     const audioInfo = await probeAudio(tmpInput);
     if (audioInfo) {
       console.log(`[upload/video] audio: codec=${audioInfo.codec} profile="${audioInfo.profile}" ch=${audioInfo.channels}`);
     }
 
-    if (needsRemux(audioInfo)) {
-      console.log('[upload/video] HE-AAC ou surround detectado → remuxando para AAC-LC estéreo…');
-      const fixedPath = tmpInput.replace(/(\.[^.]+)$/, '_fixed$1');
+    if (needsRemux(audioInfo) || badContainer) {
+      console.log(`[upload/video] ${badContainer ? 'container incompatível (' + ext + ') + ' : ''}remuxando → AAC-LC estéreo${badContainer ? ' + mp4' : ''}…`);
+      const fixedPath = badContainer
+        ? tmpInput.replace(/\.[^.]+$/, '_fixed.mp4')
+        : tmpInput.replace(/(\.[^.]+)$/, '_fixed$1');
       tmpOutput = await remuxToWebAac(tmpInput, fixedPath);
       if (tmpOutput) {
-        buffer   = fs.readFileSync(tmpOutput);
+        buffer = fs.readFileSync(tmpOutput);
+        if (badContainer) {
+          filename = filename.replace(/\.[^.]+$/, '.mp4');
+          mimetype = 'video/mp4';
+        }
         console.log(`[upload/video] remux OK: ${buffer.length} bytes`);
       }
     }
@@ -375,7 +391,7 @@ router.post('/video', upload.single('file'), async (req, res) => {
       }
     }
 
-    const result = await uploadFile(buffer, filename, req.file.mimetype);
+    const result = await uploadFile(buffer, filename, mimetype);
     res.json({ ...result, remuxed: !!tmpOutput, faststartApplied: isMp4, audioInfo });
 
     // Gera HLS em background (abre em < 1s em qualquer dispositivo)
@@ -547,6 +563,9 @@ router.post('/fix-audio', async (req, res) => {
     // download no B2 dar 404 (buscava na raiz do bucket em vez da subpasta).
     const origName = decodeURIComponent(new URL(cdnUrl).pathname.replace(/^\//, ''));
     const ext = path.extname(origName) || '.mkv';
+    // .ts/.avi/.wmv/.flv/.mpg não tocam no <video> HTML5 (sem demuxer no browser) —
+    // precisam virar .mp4, independente do codec de áudio.
+    const badContainer = BAD_CONTAINER_RE.test(origName);
 
     // Obtém URL direta do B2 (contorna Cloudflare Workers CDN)
     console.log('[fix-audio] obtendo URL direta do B2 para:', origName);
@@ -578,12 +597,13 @@ router.post('/fix-audio', async (req, res) => {
       return res.status(422).json({ error: 'Não foi possível ler as faixas de áudio mesmo com acesso direto ao B2. Verifique os logs do servidor.' });
     }
 
-    if (!needsRemux(audioInfo)) {
+    if (!needsRemux(audioInfo) && !badContainer) {
       return res.json({ skipped: true, reason: 'Áudio já compatível (AAC-LC estéreo)', audioInfo });
     }
 
     // Passo 2: remux com ffmpeg via URL direta B2 + token
-    tmpOutput = path.join(os.tmpdir(), `fh_fix_${Date.now()}${ext}`);
+    const outExt = badContainer ? '.mp4' : ext;
+    tmpOutput = path.join(os.tmpdir(), `fh_fix_${Date.now()}${outExt}`);
     console.log(`[fix-audio] remuxando ${origName} → ${tmpOutput}`);
 
     const ffArgs = [
@@ -591,6 +611,7 @@ router.post('/fix-audio', async (req, res) => {
       '-i', b2Url,
       '-c:v', 'copy',
       '-c:a', 'aac', '-profile:a', 'aac_low', '-ac', '2', '-b:a', '192k',
+      ...(badContainer ? ['-avoid_negative_ts', 'make_zero', '-movflags', '+faststart'] : []),
       '-y', tmpOutput,
     ];
 
@@ -605,8 +626,12 @@ router.post('/fix-audio', async (req, res) => {
     console.log(`[fix-audio] remux OK: ${(sizeBytes / 1024 / 1024).toFixed(0)} MB`);
 
     // Passo 3: upload para B2 em partes (sem carregar tudo na memória)
+    // Container ruim vira .mp4 (mesmo nome/pasta, só troca a extensão) —
+    // o arquivo antigo (.ts etc) fica órfão no B2, mas o cdnUrl no DB passa a
+    // apontar pro .mp4 novo.
+    const finalName = badContainer ? origName.replace(/\.[^.]+$/, '.mp4') : origName;
     const { uploadFileFromPath } = require('../services/backblaze');
-    const result = await uploadFileFromPath(tmpOutput, origName, 'video/x-matroska');
+    const result = await uploadFileFromPath(tmpOutput, finalName, badContainer ? 'video/mp4' : 'video/x-matroska');
 
     // Passo 4: atualiza DB se movieId/field informados
     if (movieId && field) {
@@ -645,7 +670,8 @@ router.post('/check-audio', async (req, res) => {
     if (!stream) return res.status(422).json({ error: 'Nenhuma faixa de áudio encontrada no arquivo.' });
 
     const audioInfo = { codec: stream.codec_name, profile: stream.profile || '', channels: stream.channels || 0 };
-    res.json({ audioInfo, needsRemux: needsRemux(audioInfo) });
+    const badContainer = BAD_CONTAINER_RE.test(filename);
+    res.json({ audioInfo, needsRemux: needsRemux(audioInfo) || badContainer, badContainer });
   } catch (err) {
     console.error('[check-audio] erro:', err.message?.slice(0, 300));
     res.status(500).json({ error: err.message?.slice(0, 300) });
