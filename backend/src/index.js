@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const path = require('path');
 
 const moviesRouter = require('./routes/movies');
 const seriesRouter = require('./routes/series');
@@ -51,6 +52,19 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json({ limit: '10mb' }));
+
+// Página pública do Cast Receiver (registrada como "Application URL" no
+// Google Cast Developer Console). Precisa de rota própria porque o helmet()
+// acima aplica um CSP default (script-src 'self') que bloquearia o CAF SDK
+// carregado de gstatic.com — sem isso a página nem inicializa.
+app.get('/cast-receiver.html', (req, res) => {
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; script-src 'self' https://www.gstatic.com; " +
+    "style-src 'self' 'unsafe-inline'; img-src * data:; media-src *; connect-src *; frame-src *;"
+  );
+  res.sendFile(path.join(__dirname, '..', 'public', 'cast-receiver.html'));
+});
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,

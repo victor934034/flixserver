@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>FlixHome Cast Receiver</title>
+  <style>
+    html, body { margin: 0; padding: 0; background: #000; height: 100%; }
+    cast-media-player { --splash-image: none; }
+  </style>
+  <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
+</head>
+<body>
+  <cast-media-player></cast-media-player>
+  <script>
+    const context = cast.framework.CastReceiverContext.getInstance();
+    const playerManager = context.getPlayerManager();
+
+    playerManager.addEventListener(
+      cast.framework.events.EventType.PLAYER_LOAD_COMPLETE,
+      () => {
+        console.log('[FlixHome Receiver] Atmos suportado:', cast.framework.system.DeviceCapabilities.IS_DOLBY_ATMOS_SUPPORTED);
+      }
+    );
+
+    // Intercepta o LOAD só pra logar — não altera a requisição
+    playerManager.setMessageInterceptor(
+      cast.framework.messages.MessageType.LOAD,
+      (loadRequestData) => {
+        console.log('[FlixHome Receiver] Atmos support:', cast.framework.system.DeviceCapabilities.IS_DOLBY_ATMOS_SUPPORTED);
+        console.log('[FlixHome Receiver] Loading:', loadRequestData.media.contentId);
+        return loadRequestData;
+      }
+    );
+
+    playerManager.addEventListener(
+      cast.framework.events.EventType.ERROR,
+      (event) => console.error('[FlixHome Receiver] Player error:', event)
+    );
+
+    const options = new cast.framework.CastReceiverOptions();
+    options.maxInactivity = 3600;
+    context.start(options);
+  </script>
+</body>
+</html>
