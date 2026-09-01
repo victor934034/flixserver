@@ -11,6 +11,10 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import * as KeepAwake from 'expo-keep-awake';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  CastButton, CastState, MediaPlayerState,
+  useCastDevice, useCastState, useMediaStatus, useRemoteMediaClient, useStreamPosition,
+} from 'react-native-google-cast';
 import api from '../lib/api';
 import { useProfile } from '../contexts/ProfileContext';
 
@@ -91,7 +95,7 @@ function fmtMs(ms) {
 
 export default function PlayerScreen() {
   const params = useLocalSearchParams();
-  const { title, id, type, seriesId } = params;
+  const { title, id, type, seriesId, posterUrl } = params;
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
@@ -155,6 +159,47 @@ export default function PlayerScreen() {
   const [dragProgress, setDragProgress] = useState(null);
   // Computed after dragProgress to avoid TDZ / forward-reference
   const displayProgress = dragProgress !== null ? dragProgress : progress;
+
+  // ─── Google Cast (Chromecast) ─────────────────────────────────────────────
+  const castClient = useRemoteMediaClient();
+  const castState = useCastState();
+  const castDevice = useCastDevice();
+  const mediaStatus = useMediaStatus();
+  const remotePosition = useStreamPosition();
+  const isCasting = castState === CastState.CONNECTED && !!castClient;
+  const remoteIsPlaying = mediaStatus?.playerState === MediaPlayerState.PLAYING
+    || mediaStatus?.playerState === MediaPlayerState.BUFFERING;
+  const wasCastingRef = useRef(false);
+
+  // Ao conectar num Chromecast: pausa o vídeo local (senão toca nos dois ao
+  // mesmo tempo) e manda a versão/posição atual pro receiver. Ao desconectar:
+  // retoma local de onde a TV parou.
+  useEffect(() => {
+    if (isCasting && !wasCastingRef.current) {
+      wasCastingRef.current = true;
+      const videoUrl = versions[activeVer];
+      if (videoUrl) {
+        player.pause();
+        castClient.loadMedia({
+          mediaInfo: {
+            contentUrl: videoUrl,
+            contentType: 'video/mp4',
+            metadata: {
+              type: 'movie',
+              title: String(title || ''),
+              images: posterUrl ? [{ url: String(posterUrl) }] : [],
+            },
+          },
+          startTime: Math.floor(currentTime),
+          autoplay: true,
+        }).catch(() => {});
+      }
+    } else if (!isCasting && wasCastingRef.current) {
+      wasCastingRef.current = false;
+      if (remotePosition != null) player.currentTime = remotePosition;
+      player.play();
+    }
+  }, [isCasting]);
   const displayTime     = dragProgress !== null ? dragProgress * durSec : currentTime;
   const sessionId = useRef(`${Date.now()}_${Math.random().toString(36).substr(2, 9)}`).current;
   const heartbeatRef = useRef(null);
@@ -353,11 +398,24 @@ export default function PlayerScreen() {
   };
 
   const togglePlay = () => {
+    if (isCasting) {
+      remoteIsPlaying ? castClient.pause().catch(() => {}) : castClient.play().catch(() => {});
+      schedHide();
+      return;
+    }
     isPlaying ? player.pause() : player.play();
     schedHide();
   };
 
-  const seekBy = (sec) => { player.seekBy(sec); schedHide(); };
+  const seekBy = (sec) => {
+    if (isCasting) {
+      castClient.seek({ position: sec, relative: true, resumeState: remoteIsPlaying ? 'play' : 'pause' }).catch(() => {});
+      schedHide();
+      return;
+    }
+    player.seekBy(sec);
+    schedHide();
+  };
 
   const seekToRatio = (ratio) => {
     if (durSec > 0) player.currentTime = Math.max(0, Math.min(1, ratio)) * durSec;
@@ -612,6 +670,29 @@ export default function PlayerScreen() {
       {/* Tap area */}
       <TouchableOpacity style={StyleSheet.absoluteFill} onPress={onTap} activeOpacity={1} />
 
+      {/* Transmitindo para Chromecast — vídeo local fica pausado, controles
+          básicos aqui atuam sobre o RemoteMediaClient. Renderizado depois da
+          "Tap area" pra ficar por cima dela e receber os toques. */}
+      {isCasting && (
+        <View style={styles.castingOverlay} pointerEvents="box-none">
+          <Ionicons name="tv" size={64} color="rgba(255,255,255,0.85)" />
+          <Text style={styles.castingText}>
+            Transmitindo para {castDevice?.friendlyName || 'a TV'}
+          </Text>
+          <View style={styles.castingControls}>
+            <TouchableOpacity style={styles.seekBtn} onPress={() => seekBy(-10)} activeOpacity={0.7}>
+              <Ionicons name="refresh" size={34} color="#fff" style={{ transform: [{ scaleX: -1 }] }} />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.playPauseBtn} onPress={togglePlay} activeOpacity={0.8}>
+              <Ionicons name={remoteIsPlaying ? 'pause' : 'play'} size={40} color="#fff" style={!remoteIsPlaying ? { marginLeft: 4 } : undefined} />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.seekBtn} onPress={() => seekBy(10)} activeOpacity={0.7}>
+              <Ionicons name="refresh" size={34} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
       {/* ── CONTROLES ── */}
       {!locked && (
         <Animated.View
@@ -629,6 +710,7 @@ export default function PlayerScreen() {
                 <Text style={styles.verBadgeText}>{VER_SHORT[activeVer]}</Text>
               </View>
             )}
+            <CastButton style={styles.castHeaderBtn} tintColor="#fff" />
             <TouchableOpacity style={styles.timerBtn} onPress={() => openSheet('timer')}>
               <Ionicons name="timer-outline" size={18} color="#fff" />
               <Text style={styles.timerBtnText}>
@@ -914,6 +996,23 @@ export default function PlayerScreen() {
               return <>
                 <Text style={styles.sheetTitle}>Transmitir para TV</Text>
 
+                {/* Chromecast — toque no ícone abre a lista de dispositivos nativa */}
+                {!isLocal && (
+                  <View style={styles.castOption}>
+                    <View style={[styles.castIconBox, isCasting && { backgroundColor: '#E50914' }]}>
+                      <CastButton style={{ width: 24, height: 24 }} tintColor="#fff" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.castOptionTitle}>Chromecast</Text>
+                      <Text style={styles.castOptionDesc}>
+                        {isCasting
+                          ? `✓ Transmitindo para ${castDevice?.friendlyName || 'a TV'}`
+                          : 'Toque no ícone pra escolher um Chromecast na mesma rede.'}
+                      </Text>
+                    </View>
+                  </View>
+                )}
+
                 {/* FlixHome TV — envia ao app LG WebOS via backend */}
                 {!isLocal && (
                   <TouchableOpacity style={styles.castOption} onPress={sendCastToTV} activeOpacity={0.8}>
@@ -1142,6 +1241,10 @@ const styles = StyleSheet.create({
   titleText: { flex: 1, color: '#fff', fontSize: 16, fontWeight: '700', textAlign: 'center', paddingHorizontal: 6 },
   timerBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 7 },
   timerBtnText: { color: '#fff', fontSize: 13 },
+  castHeaderBtn: { width: 24, height: 24, marginHorizontal: 6 },
+  castingOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', gap: 16, backgroundColor: 'rgba(0,0,0,0.4)' },
+  castingText: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  castingControls: { flexDirection: 'row', alignItems: 'center', gap: 28, marginTop: 8 },
   verBadge: {
     backgroundColor: 'rgba(229,9,20,0.85)', borderRadius: 4,
     paddingHorizontal: 7, paddingVertical: 3, marginRight: 4,
