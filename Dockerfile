@@ -22,10 +22,13 @@ COPY backend/package*.json ./backend/
 RUN cd backend && npm install --omit=dev
 COPY backend/ ./backend/
 
-# Frontend (standalone)
+# Frontend (standalone) — o build standalone do Next.js NÃO inclui a pasta
+# public/ sozinho, precisa copiar manualmente ou os arquivos estáticos
+# (favicon, cast-receiver.html, etc.) dão 404 em produção mesmo existindo
+# no repo.
 COPY --from=builder /build/.next/standalone ./frontend/
 COPY --from=builder /build/.next/static ./frontend/.next/static
-RUN mkdir -p ./frontend/public
+COPY --from=builder /build/public ./frontend/public
 
 # PM2 config
 COPY ecosystem.config.js ./
