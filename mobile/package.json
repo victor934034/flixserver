@@ -4,8 +4,8 @@
   "main": "expo-router/entry",
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
     "build:apk": "eas build --platform android --profile preview",
     "update": "eas update --branch production --message \"v1.0.2\""
   },
@@ -25,6 +25,7 @@
     "expo-keep-awake": "~15.0.8",
     "expo-linear-gradient": "~15.0.8",
     "expo-linking": "~8.0.12",
+    "expo-navigation-bar": "~5.0.10",
     "expo-notifications": "~0.32.17",
     "expo-router": "~6.0.24",
     "expo-screen-orientation": "~9.0.0",

@@ -10,6 +10,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import * as KeepAwake from 'expo-keep-awake';
+import * as NavigationBar from 'expo-navigation-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   CastButton, CastState, MediaPlayerState,
@@ -217,6 +218,13 @@ export default function PlayerScreen() {
     StatusBar.setHidden(true, 'fade');
     ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
     KeepAwake.activateKeepAwakeAsync('player');
+    if (Platform.OS === 'android') {
+      // 'overlay-swipe': some sozinha e some por cima do vídeo (sem empurrar
+      // o layout); arrastar da borda mostra de novo por alguns segundos.
+      NavigationBar.setPositionAsync('absolute').catch(() => {});
+      NavigationBar.setBehaviorAsync('overlay-swipe').catch(() => {});
+      NavigationBar.setVisibilityAsync('hidden').catch(() => {});
+    }
     schedHide();
     Brightness?.getBrightnessAsync?.()?.then(b => { brightnessRef.current = b; setBrightness(b); }).catch(() => {});
 
@@ -227,6 +235,7 @@ export default function PlayerScreen() {
     const appStateSub = AppState.addEventListener('change', (next) => {
       if (next === 'active') {
         ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
+        if (Platform.OS === 'android') NavigationBar.setVisibilityAsync('hidden').catch(() => {});
       } else {
         ScreenOrientation.unlockAsync().catch(() => {});
       }
@@ -235,6 +244,10 @@ export default function PlayerScreen() {
     return () => {
       appStateSub.remove();
       StatusBar.setHidden(false, 'fade');
+      if (Platform.OS === 'android') {
+        NavigationBar.setVisibilityAsync('visible').catch(() => {});
+        NavigationBar.setPositionAsync('relative').catch(() => {});
+      }
       ScreenOrientation.unlockAsync();
       KeepAwake.deactivateKeepAwake('player');
       clearTimeout(hideTimerRef.current);
