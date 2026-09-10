@@ -1,4 +1,5 @@
 node_modules
+**/node_modules
 .expo
 backend
 frontend
@@ -9,9 +10,12 @@ mobile_iptv
 meu-app
 paginas
 .claude
+.git
+.vscode
 **/.next
 **/*.zip
-**/node_modules
-android
-android.bak-unused
-ios
+**/android
+**/ios
+.env
+.env.local
+.env.production
