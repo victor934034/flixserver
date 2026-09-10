@@ -280,6 +280,24 @@ router.get('/me', authMiddleware, async (req, res) => {
   }
 });
 
+// DELETE /auth/me — exclusão de conta pelo próprio usuário (exigência da
+// Play Store: precisa existir um jeito self-service de apagar a conta).
+// Apaga a linha em "users" (cascateia watch_history/watchlist via FK) e o
+// usuário no Supabase Auth, pra ele nem conseguir logar de novo.
+router.delete('/me', authMiddleware, async (req, res) => {
+  try {
+    const { error: dbError } = await supabase.from('users').delete().eq('id', req.user.id);
+    if (dbError) return res.status(500).json({ error: dbError.message });
+
+    const { error: authError } = await supabase.auth.admin.deleteUser(req.user.id);
+    if (authError) return res.status(500).json({ error: authError.message });
+
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // PUT /auth/notification-prefs — liga/desliga tipos de notificação push
 router.put('/notification-prefs', authMiddleware, async (req, res) => {
   const { new_content, billing } = req.body;
