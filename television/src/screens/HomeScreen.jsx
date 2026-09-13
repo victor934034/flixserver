@@ -164,13 +164,13 @@ const ContentCard = React.forwardRef(function ContentCard({ item, onPress, onFoc
 });
 
 // ─── ContentRow ───────────────────────────────────────────────────────────────
-function ContentRow({ title, data, onSelect, onFocus, firstItemRef, upRef }) {
+function ContentRow({ title, data, onSelect, onFocus, firstItemRef, upRef, onLayout }) {
   const listRef = useRef(null);
 
   if (!data?.length) return null;
 
   return (
-    <View style={s.row}>
+    <View style={s.row} onLayout={onLayout}>
       <Text style={s.rowTitle}>{title}</Text>
       <View style={s.rowListWrap}>
         <FlatList
@@ -541,6 +541,18 @@ export default function HomeScreen({ navigation }) {
   function getRowRef(i) {
     if (!rowRefsMap[i]) rowRefsMap[i] = { current: null };
     return rowRefsMap[i];
+  }
+  // Scroll manual das fileiras (home/Minha Lista): o auto-scroll padrão do
+  // Android só rola o mínimo pra deixar o card focado visível, cortando a
+  // fileira ao meio (título fica escondido acima da borda). Guarda o Y de
+  // cada fileira no layout e rola até ela inteira sempre que algum card dela
+  // ganha foco.
+  const homeScrollRef = useRef(null);
+  const rowYRef = useRef({});
+  function scrollToRow(i) {
+    const y = rowYRef.current[i];
+    if (y == null) return;
+    homeScrollRef.current?.scrollTo({ y: Math.max(0, y - r(16)), animated: true });
   }
   const [, forceFocusRewire] = useState(0);
 
@@ -965,14 +977,14 @@ export default function HomeScreen({ navigation }) {
                       <HeroBtn
                         ref={assistirRef}
                         icon="play" label="Assistir" primary hasTVPreferredFocus
-                        onPress={playFeatured} onFocus={onContentFoc}
+                        onPress={playFeatured} onFocus={() => { onContentFoc(); homeScrollRef.current?.scrollTo({ y: 0, animated: true }); }}
                         nextFocusDown={findNodeHandle(getRowRef(0).current)}
                         nextFocusUp={findNodeHandle(assistirRef.current)}
                       />
                       <HeroBtn
                         ref={maisInfoRef}
                         icon="information-circle-outline" label="Mais Info"
-                        onPress={() => openDetail(heroItem, isSeries(heroItem) ? 'series' : 'movie')} onFocus={onContentFoc}
+                        onPress={() => openDetail(heroItem, isSeries(heroItem) ? 'series' : 'movie')} onFocus={() => { onContentFoc(); homeScrollRef.current?.scrollTo({ y: 0, animated: true }); }}
                         nextFocusDown={findNodeHandle(getRowRef(0).current)}
                         nextFocusUp={findNodeHandle(maisInfoRef.current)}
                       />
@@ -1054,16 +1066,17 @@ export default function HomeScreen({ navigation }) {
                   )}
                 </View>
               ) : (
-                <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+                <ScrollView ref={homeScrollRef} style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
                   {visibleSections.map((sec, i) => (
                     <ContentRow
                       key={i}
                       title={sec.title}
                       data={sec.data}
                       onSelect={item => openDetail(item, item.content_type || sec.type || 'movie')}
-                      onFocus={onContentFoc}
+                      onFocus={() => { onContentFoc(); scrollToRow(i); }}
                       firstItemRef={getRowRef(i)}
                       upRef={i === 0 ? assistirRef : getRowRef(i - 1)}
+                      onLayout={e => { rowYRef.current[i] = e.nativeEvent.layout.y; }}
                     />
                   ))}
                   <View style={{ height: r(40) }} />
