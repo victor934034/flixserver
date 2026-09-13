@@ -17,8 +17,11 @@ const r = v => Math.max(1, Math.round(v * S));
 
 const SIDEBAR_SM = r(72);
 const SIDEBAR_LG = r(240);
-const CARD_W     = r(248);
-const CARD_H     = Math.round(CARD_W * 9 / 16);
+// Pôster 2:3 (padrão de capa) em vez de miniatura 16:9 — a maioria dos
+// títulos só tem poster_url preenchido, então cover 16:9 cortava/mostrava
+// vazio boa parte do tempo.
+const CARD_W     = r(180);
+const CARD_H     = Math.round(CARD_W * 3 / 2);
 const CARD_GAP   = r(16);
 const ICON_SZ    = r(24);
 
@@ -112,7 +115,8 @@ function getVersionBadge(item) {
 
 // ─── ContentCard ──────────────────────────────────────────────────────────────
 function ContentCard({ item, onPress, onFocus: notifyRow }) {
-  const [foc, setFoc] = useState(false);
+  const [foc, setFoc]   = useState(false);
+  const [imgOk, setImgOk] = useState(true);
 
   // Poster (capa oficial) primeiro — backdrop e uma cena do meio do filme
   // (nao e o que a pessoa espera ver no card) e vem em resolucao "original"
@@ -121,6 +125,7 @@ function ContentCard({ item, onPress, onFocus: notifyRow }) {
   const img   = item.poster_url || item.backdrop_url;
   const title = item.title || item.name || '';
   const versionBadge = getVersionBadge(item);
+  const isSer = item.total_seasons !== undefined || item.content_type === 'series';
 
   return (
     <TVPressable
@@ -131,9 +136,13 @@ function ContentCard({ item, onPress, onFocus: notifyRow }) {
     >
       <View style={[s.cardFrame, foc && s.cardFrameFoc]}>
         <View style={s.cardImgWrap}>
-          {img
-            ? <Image source={{ uri: img }} style={StyleSheet.absoluteFill} resizeMode="contain" />
-            : <View style={[StyleSheet.absoluteFill, { backgroundColor: '#1f1f1f' }]} />
+          {img && imgOk
+            ? <Image source={{ uri: img }} style={StyleSheet.absoluteFill} resizeMode="cover" onError={() => setImgOk(false)} />
+            : (
+              <View style={[StyleSheet.absoluteFill, s.cardFallback]}>
+                <Ionicons name={isSer ? 'tv-outline' : 'film-outline'} size={r(36)} color="#3a3a3a" />
+              </View>
+            )
           }
           {versionBadge && (
             <View style={s.cardVerBadge}>
@@ -272,9 +281,11 @@ const CATALOG_COLS = 6; // grade de catalogo completo (Filmes/Series) usa a tela
 // ─── Grid card (search results) ───────────────────────────────────────────────
 function GridCard({ item, onPress, onFocus: notifyRow }) {
   const [foc, setFoc] = useState(false);
+  const [imgOk, setImgOk] = useState(true);
   const img   = item.poster_url || item.backdrop_url;
   const title = item.title || item.name || '';
   const versionBadge = getVersionBadge(item);
+  const isSer = item.total_seasons !== undefined || item.content_type === 'series';
   return (
     <TVPressable
       onFocus={() => { setFoc(true); notifyRow?.(); }}
@@ -284,9 +295,13 @@ function GridCard({ item, onPress, onFocus: notifyRow }) {
     >
       <View style={[s.gridFrame, foc && s.gridFrameFoc]}>
         <View style={s.gridImgWrap}>
-          {img
-            ? <Image source={{ uri: img }} style={StyleSheet.absoluteFill} resizeMode="contain" />
-            : <View style={[StyleSheet.absoluteFill, { backgroundColor: '#1a1a1a' }]} />
+          {img && imgOk
+            ? <Image source={{ uri: img }} style={StyleSheet.absoluteFill} resizeMode="cover" onError={() => setImgOk(false)} />
+            : (
+              <View style={[StyleSheet.absoluteFill, s.cardFallback]}>
+                <Ionicons name={isSer ? 'tv-outline' : 'film-outline'} size={r(30)} color="#3a3a3a" />
+              </View>
+            )
           }
           {versionBadge && (
             <View style={s.cardVerBadge}>
@@ -306,7 +321,7 @@ function GridCard({ item, onPress, onFocus: notifyRow }) {
 }
 
 // ─── Netflix-style search panel ───────────────────────────────────────────────
-function SearchPanel({ query, onKey, results, defaultItems = [], loading, onSelect, onFocus: notifyFocus }) {
+function SearchPanel({ query, onKey, results, defaultItems = [], placeholder, loading, onSelect, onFocus: notifyFocus }) {
   const searchItems = [...results.movies, ...results.series];
   const allItems    = query ? searchItems : defaultItems;
   const suggestions = allItems.slice(0, 8);
@@ -321,7 +336,7 @@ function SearchPanel({ query, onKey, results, defaultItems = [], loading, onSele
             {query}<Text style={s.spCursor}> |</Text>
           </Text>
         ) : (
-          <Text style={s.spQueryPh} numberOfLines={1}>Digite para buscar…</Text>
+          <Text style={s.spQueryPh} numberOfLines={1}>{placeholder || 'Digite para buscar…'}</Text>
         )}
         {loading && <ActivityIndicator color="#E50914" size="small" style={{ marginLeft: r(10) }} />}
       </View>
@@ -397,6 +412,57 @@ function SearchPanel({ query, onKey, results, defaultItems = [], loading, onSele
   );
 }
 
+// ─── Genre filter dropdown (Filmes/Series) ────────────────────────────────────
+function GenreButton({ label, open, onPress, onFocus }) {
+  const [foc, setFoc] = useState(false);
+  return (
+    <TVPressable
+      onPress={onPress}
+      onFocus={() => { setFoc(true); onFocus?.(); }}
+      onBlur={() => setFoc(false)}
+      style={[s.genreBtn, foc && s.genreBtnFoc]}
+    >
+      <Ionicons name="options-outline" size={r(16)} color={foc ? '#fff' : '#ccc'} />
+      <Text style={[s.genreBtnTxt, foc && s.genreBtnTxtFoc]} numberOfLines={1}>
+        Categoria: {label}
+      </Text>
+      <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={r(14)} color={foc ? '#fff' : '#888'} />
+    </TVPressable>
+  );
+}
+
+function SectionSearchBtn({ onPress, onFocus }) {
+  const [foc, setFoc] = useState(false);
+  return (
+    <TVPressable
+      onPress={onPress}
+      onFocus={() => { setFoc(true); onFocus?.(); }}
+      onBlur={() => setFoc(false)}
+      style={[s.sectionSearchBtn, foc && s.sectionSearchBtnFoc]}
+    >
+      <Ionicons name="search" size={r(20)} color={foc ? '#fff' : '#ccc'} />
+    </TVPressable>
+  );
+}
+
+function GenreOption({ label, selected, onPress, hasTVPreferredFocus }) {
+  const [foc, setFoc] = useState(false);
+  return (
+    <TVPressable
+      hasTVPreferredFocus={hasTVPreferredFocus}
+      onPress={onPress}
+      onFocus={() => setFoc(true)}
+      onBlur={() => setFoc(false)}
+      style={[s.genreOption, foc && s.genreOptionFoc]}
+    >
+      <Text style={[s.genreOptionTxt, (foc || selected) && s.genreOptionTxtFoc]} numberOfLines={1}>
+        {label}
+      </Text>
+      {selected && <Ionicons name="checkmark" size={r(15)} color={foc ? '#fff' : '#E50914'} />}
+    </TVPressable>
+  );
+}
+
 // ─── EmptyState ───────────────────────────────────────────────────────────────
 function EmptyState({ icon, title, desc }) {
   return (
@@ -427,6 +493,10 @@ export default function HomeScreen({ navigation }) {
   const [catalogMovies, setCatalogMovies] = useState(null);
   const [catalogSeries, setCatalogSeries] = useState(null);
   const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogGenre, setCatalogGenre]   = useState(null); // filtro ativo (Filmes/Series)
+  const [genreOpen, setGenreOpen]         = useState(false);
+  const [searchTypeFilter, setSearchTypeFilter] = useState(null); // 'movie' | 'series' | null
+  const [recommendations, setRecommendations] = useState([]);
 
   const sidebarW  = useRef(new Animated.Value(SIDEBAR_SM)).current;
   const overlayOp = useRef(new Animated.Value(0)).current;
@@ -468,9 +538,10 @@ export default function HomeScreen({ navigation }) {
     searchTimer.current = setTimeout(async () => {
       try {
         const q = encodeURIComponent(searchQuery.trim());
+        // Se aberta pelo botão de busca do Filmes/Series, busca só naquele tipo.
         const [mr, sr] = await Promise.all([
-          api.get(`/movies/search?q=${q}`).catch(() => ({ data: [] })),
-          api.get(`/series/search?q=${q}`).catch(() => ({ data: [] })),
+          searchTypeFilter === 'series' ? { data: [] } : api.get(`/movies/search?q=${q}`).catch(() => ({ data: [] })),
+          searchTypeFilter === 'movie' ? { data: [] } : api.get(`/series/search?q=${q}`).catch(() => ({ data: [] })),
         ]);
         setSearchResults({ movies: Array.isArray(mr.data) ? mr.data : [], series: Array.isArray(sr.data) ? sr.data : [] });
       } finally {
@@ -478,7 +549,7 @@ export default function HomeScreen({ navigation }) {
       }
     }, 500);
     return () => clearTimeout(searchTimer.current);
-  }, [searchQuery, activeNav]);
+  }, [searchQuery, activeNav, searchTypeFilter]);
 
   // Load watchlist when tab selected
   useEffect(() => {
@@ -547,20 +618,24 @@ export default function HomeScreen({ navigation }) {
 
   async function loadData() {
     try {
+      const profileParams = activeProfile?.id ? { profile_id: activeProfile.id } : undefined;
       const historyReq = activeProfile?.id
-        ? api.get('/history', { params: { profile_id: activeProfile.id } }).catch(() => ({ data: [] }))
+        ? api.get('/history', { params: profileParams }).catch(() => ({ data: [] }))
         : Promise.resolve({ data: [] });
-      const [feat, nm, ns, pm, ps, hist] = await Promise.all([
+      const recsReq = api.get('/recommendations', { params: profileParams }).catch(() => ({ data: [] }));
+      const [feat, nm, ns, pm, ps, hist, recs] = await Promise.all([
         api.get('/featured').catch(() => ({ data: [] })),
         api.get('/movies/section/new').catch(() => ({ data: [] })),
         api.get('/series/section/new').catch(() => ({ data: [] })),
         api.get('/movies/section/popular').catch(() => ({ data: [] })),
         api.get('/series/section/popular').catch(() => ({ data: [] })),
         historyReq,
+        recsReq,
       ]);
       const a = d => (Array.isArray(d.data) ? d.data : []);
-      const [fl, nm2, ns2, pm2, ps2, hist2] = [feat, nm, ns, pm, ps, hist].map(a);
+      const [fl, nm2, ns2, pm2, ps2, hist2, recs2] = [feat, nm, ns, pm, ps, hist, recs].map(a);
       setFeatured(fl[0] || nm2[0] || pm2[0] || null);
+      setRecommendations(recs2);
 
       const continuing = hist2
         .filter(h => !h.completed && h.progress > 0 && h.duration > 0 && h.title)
@@ -571,6 +646,7 @@ export default function HomeScreen({ navigation }) {
 
       setSections([
         ...(continuing.length > 0 ? [{ title: 'Continuar Assistindo', data: continuing, type: 'mixed' }] : []),
+        ...(recs2.length > 0 ? [{ title: 'Recomendados pra você', data: recs2, type: 'mixed' }] : []),
         { title: 'Lançamentos — Filmes', data: nm2, type: 'movie'  },
         { title: 'Lançamentos — Séries', data: ns2, type: 'series' },
         { title: 'Populares — Filmes',   data: pm2, type: 'movie'  },
@@ -605,6 +681,43 @@ export default function HomeScreen({ navigation }) {
     return [];
   }, [activeNav, sections, watchlist, searchResults]);
 
+  // Gêneros disponíveis no catálogo atual (Filmes ou Series) — derivado do
+  // catálogo completo já carregado, sem endpoint novo.
+  const catalogGenres = useMemo(() => {
+    const list = activeNav === 1 ? catalogMovies : activeNav === 2 ? catalogSeries : null;
+    if (!list) return [];
+    const set = new Set();
+    list.forEach(it => (it.genres || []).forEach(g => set.add(g)));
+    return [...set].sort();
+  }, [activeNav, catalogMovies, catalogSeries]);
+
+  const filteredCatalog = useMemo(() => {
+    const list = activeNav === 1 ? catalogMovies : activeNav === 2 ? catalogSeries : null;
+    if (!list) return [];
+    if (!catalogGenre) return list;
+    return list.filter(it => (it.genres || []).includes(catalogGenre));
+  }, [activeNav, catalogMovies, catalogSeries, catalogGenre]);
+
+  // defaultItems da busca, já filtrados por tipo quando aberta via botão de
+  // seção (Filmes/Series) — prioriza recomendações antes do catálogo geral.
+  const searchDefaultItems = useMemo(() => {
+    const seen = new Set();
+    const pool = [
+      ...recommendations,
+      ...sections.filter(s => s.title !== 'Continuar Assistindo' && s.title !== 'Recomendados pra você').flatMap(s => s.data),
+    ];
+    return pool
+      .filter(it => {
+        if (searchTypeFilter) {
+          const t = it.content_type || (it.total_seasons !== undefined ? 'series' : 'movie');
+          if (t !== searchTypeFilter) return false;
+        }
+        if (seen.has(it.id)) return false;
+        seen.add(it.id); return true;
+      })
+      .slice(0, 20);
+  }, [recommendations, sections, searchTypeFilter]);
+
   const heroItem = useMemo(() => {
     if (activeNav === 4) return null;
     if (activeNav === 3) return watchlist[0] || null;
@@ -635,7 +748,19 @@ export default function HomeScreen({ navigation }) {
   function selectNav(idx) {
     if (idx === 5) { navigation.navigate('Iptv'); return; }
     setActiveNav(idx);
-    if (idx !== 4) setSearchQuery('');
+    if (idx !== 4) { setSearchQuery(''); setSearchTypeFilter(null); }
+    setCatalogGenre(null);
+    setGenreOpen(false);
+    setSidebarOpen(false);
+    setGrabContentFocus(true);
+  }
+
+  // Abre a busca já filtrada por tipo (chamado pelo botão de busca no topo
+  // das telas Filmes/Series, em vez de misturar filme+serie nos resultados).
+  function openSectionSearch(type) {
+    setSearchTypeFilter(type);
+    setSearchQuery('');
+    setActiveNav(4);
     setSidebarOpen(false);
     setGrabContentFocus(true);
   }
@@ -752,19 +877,12 @@ export default function HomeScreen({ navigation }) {
               query={searchQuery}
               onKey={handleSearchKey}
               results={searchResults}
-              defaultItems={(() => {
-                // Exclui "Continuar Assistindo" — a busca deve sugerir
-                // catalogo (filmes/series), nao progresso de quem ja
-                // esta assistindo.
-                const seen = new Set();
-                return sections
-                  .filter(s => s.title !== 'Continuar Assistindo')
-                  .flatMap(s => s.data)
-                  .filter(it => {
-                    if (seen.has(it.id)) return false;
-                    seen.add(it.id); return true;
-                  }).slice(0, 20);
-              })()}
+              defaultItems={searchDefaultItems}
+              placeholder={
+                searchTypeFilter === 'movie' ? 'Buscar filmes…'
+                : searchTypeFilter === 'series' ? 'Buscar séries…'
+                : undefined
+              }
               loading={searchLoading}
               onSelect={item => openDetail(item, item.total_seasons !== undefined ? 'series' : 'movie')}
               onFocus={onContentFoc}
@@ -811,35 +929,66 @@ export default function HomeScreen({ navigation }) {
               )}
 
               {(activeNav === 1 || activeNav === 2) ? (
-                catalogLoading && !(activeNav === 1 ? catalogMovies : catalogSeries)?.length ? (
-                  <View style={s.emptyState}>
-                    <ActivityIndicator color="#E50914" size="large" />
+                <View style={{ flex: 1 }}>
+                  <View style={s.catalogToolbar}>
+                    {catalogGenres.length > 0 ? (
+                      <View style={s.genreDropdownWrap}>
+                        <GenreButton
+                          label={catalogGenre || 'Todas'}
+                          open={genreOpen}
+                          onFocus={onContentFoc}
+                          onPress={() => setGenreOpen(o => !o)}
+                        />
+
+                        {genreOpen && (
+                          <View style={s.genreMenu}>
+                            <ScrollView style={{ maxHeight: r(320) }} showsVerticalScrollIndicator={false}>
+                              <GenreOption label="Todas" selected={!catalogGenre} onPress={() => { setCatalogGenre(null); setGenreOpen(false); }} hasTVPreferredFocus />
+                              {catalogGenres.map(g => (
+                                <GenreOption key={g} label={g} selected={catalogGenre === g} onPress={() => { setCatalogGenre(g); setGenreOpen(false); }} />
+                              ))}
+                            </ScrollView>
+                          </View>
+                        )}
+                      </View>
+                    ) : <View />}
+
+                    <SectionSearchBtn
+                      onPress={() => openSectionSearch(activeNav === 1 ? 'movie' : 'series')}
+                      onFocus={onContentFoc}
+                    />
                   </View>
-                ) : (
-                  <FlatList
-                    key={`catalog-${activeNav}`}
-                    data={activeNav === 1 ? (catalogMovies || []) : (catalogSeries || [])}
-                    numColumns={CATALOG_COLS}
-                    keyExtractor={it => String(it.id)}
-                    showsVerticalScrollIndicator={false}
-                    removeClippedSubviews={false}
-                    columnWrapperStyle={{ gap: GRID_GAP }}
-                    contentContainerStyle={{ paddingBottom: r(40), gap: GRID_GAP }}
-                    ListEmptyComponent={!catalogLoading ? (
-                      <EmptyState
-                        icon={activeNav === 1 ? 'film-outline' : 'tv-outline'}
-                        title={activeNav === 1 ? 'Nenhum filme encontrado' : 'Nenhuma série encontrada'}
-                      />
-                    ) : null}
-                    renderItem={({ item }) => (
-                      <GridCard
-                        item={item}
-                        onPress={() => openDetail(item, activeNav === 1 ? 'movie' : 'series')}
-                        onFocus={onContentFoc}
-                      />
-                    )}
-                  />
-                )
+
+                  {catalogLoading && !(activeNav === 1 ? catalogMovies : catalogSeries)?.length ? (
+                    <View style={s.emptyState}>
+                      <ActivityIndicator color="#E50914" size="large" />
+                    </View>
+                  ) : (
+                    <FlatList
+                      key={`catalog-${activeNav}`}
+                      data={filteredCatalog}
+                      numColumns={CATALOG_COLS}
+                      keyExtractor={it => String(it.id)}
+                      showsVerticalScrollIndicator={false}
+                      removeClippedSubviews={false}
+                      columnWrapperStyle={{ gap: GRID_GAP }}
+                      contentContainerStyle={{ paddingBottom: r(40), gap: GRID_GAP }}
+                      ListEmptyComponent={!catalogLoading ? (
+                        <EmptyState
+                          icon={activeNav === 1 ? 'film-outline' : 'tv-outline'}
+                          title={activeNav === 1 ? 'Nenhum filme encontrado' : 'Nenhuma série encontrada'}
+                        />
+                      ) : null}
+                      renderItem={({ item }) => (
+                        <GridCard
+                          item={item}
+                          onPress={() => openDetail(item, activeNav === 1 ? 'movie' : 'series')}
+                          onFocus={onContentFoc}
+                        />
+                      )}
+                    />
+                  )}
+                </View>
               ) : (
                 <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
                   {visibleSections.map((sec, i) => (
@@ -997,9 +1146,45 @@ const s = StyleSheet.create({
   gridItem: { flex: 1 },
   gridFrame:    { borderWidth: r(3), borderColor: 'transparent', borderRadius: r(9), marginBottom: r(4) },
   gridFrameFoc: { borderColor: '#fff' },
-  gridImgWrap:  { aspectRatio: 16 / 9, borderRadius: r(6), overflow: 'hidden', backgroundColor: '#1a1a1a' },
+  gridImgWrap:  { aspectRatio: 2 / 3, borderRadius: r(6), overflow: 'hidden', backgroundColor: '#1a1a1a' },
+  cardFallback: { backgroundColor: '#1a1a1a', justifyContent: 'center', alignItems: 'center' },
   gridTitle:    { fontSize: r(12), color: '#666', fontWeight: '500', paddingHorizontal: r(2) },
   gridTitleFoc: { color: '#fff', fontWeight: '700' },
+
+  // Catálogo: barra de categoria + busca (Filmes/Series)
+  catalogToolbar: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: r(40), marginBottom: r(16), zIndex: 5,
+  },
+  genreDropdownWrap: { position: 'relative' },
+  genreBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: r(8),
+    backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: r(8),
+    borderWidth: r(2), borderColor: 'transparent',
+    paddingHorizontal: r(14), paddingVertical: r(9),
+  },
+  genreBtnFoc: { backgroundColor: '#E50914', borderColor: '#fff' },
+  genreBtnTxt: { color: '#ccc', fontSize: r(14), fontWeight: '700' },
+  genreBtnTxtFoc: { color: '#fff' },
+  genreMenu: {
+    position: 'absolute', top: '100%', left: 0, marginTop: r(6),
+    backgroundColor: '#1a1a1a', borderRadius: r(8), borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+    minWidth: r(220), paddingVertical: r(6), zIndex: 10,
+  },
+  genreOption: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: r(14), paddingVertical: r(10),
+  },
+  genreOptionFoc: { backgroundColor: 'rgba(229,9,20,0.25)' },
+  genreOptionTxt: { color: '#aaa', fontSize: r(14), fontWeight: '600' },
+  genreOptionTxtFoc: { color: '#fff' },
+  sectionSearchBtn: {
+    width: r(40), height: r(40), borderRadius: r(8),
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: r(2), borderColor: 'transparent',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  sectionSearchBtnFoc: { backgroundColor: '#E50914', borderColor: '#fff' },
 
   // Empty state
   emptyState: { alignItems: 'center', justifyContent: 'center', paddingVertical: r(60) },
