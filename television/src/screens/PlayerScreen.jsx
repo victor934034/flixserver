@@ -61,14 +61,21 @@ function fmt(ms) {
 }
 
 // ── PanelOpt ──────────────────────────────────────────────────────────────────
+// Nota: usa estado local de foco (useState + onFocus/onBlur), NAO o `focused`
+// que o proprio Pressable devolveria via render-prop — esse valor nao estava
+// atualizando de forma confiavel no Android TV aqui (o evento onFocus disparava
+// certinho, mas o realce visual via {focused => ...} nunca aparecia), mesmo
+// padrao ja usado em todo o resto do app (NavItem, ContentCard, etc.).
 function PanelOpt({ label, sub, active, grabFocus, onGrabbed, onPress, onFocus }) {
+  const [foc, setFoc] = useState(false);
   return (
     <Pressable
       focusable
       hasTVPreferredFocus={grabFocus}
-      onFocus={() => { if (grabFocus) onGrabbed?.(); onFocus?.(); }}
+      onFocus={() => { setFoc(true); if (grabFocus) onGrabbed?.(); onFocus?.(); }}
+      onBlur={() => setFoc(false)}
       onPress={onPress}
-      style={({ focused }) => [po.item, focused && po.itemFoc]}
+      style={[po.item, foc && po.itemFoc]}
     >
       <View style={po.radio}>
         {active && <View style={po.radioDot} />}
@@ -82,30 +89,30 @@ function PanelOpt({ label, sub, active, grabFocus, onGrabbed, onPress, onFocus }
 }
 
 // ── CtrlBtn — botão circular dos controles ────────────────────────────────────
+// Mesma observação do PanelOpt acima: usa useState local em vez do `focused`
+// do render-prop do Pressable.
 const CtrlBtn = React.forwardRef(function CtrlBtn(
   { icon, label, onPress, onFocus, grabFocus, active, nextFocusLeft, nextFocusRight, nextFocusUp }, ref
 ) {
+  const [foc, setFoc] = useState(false);
   return (
     <Pressable
       ref={ref}
       focusable
       hasTVPreferredFocus={grabFocus}
-      onFocus={() => { onFocus?.(); }}
+      onFocus={() => { setFoc(true); onFocus?.(); }}
+      onBlur={() => setFoc(false)}
       onPress={onPress}
       nextFocusLeft={nextFocusLeft}
       nextFocusRight={nextFocusRight}
       nextFocusUp={nextFocusUp}
-      style={({ focused }) => [s.ctrlBtn, focused && s.ctrlBtnFoc, active && s.ctrlBtnActive]}
+      style={[s.ctrlBtn, foc && s.ctrlBtnFoc, active && s.ctrlBtnActive]}
     >
-      {({ focused }) => (
-        <>
-          <View style={[s.ctrlBtnCircle, focused && s.ctrlBtnCircleFoc, active && !focused && s.ctrlBtnCircleActive]}>
-            <Ionicons name={icon} size={r(20)} color={active && !focused ? ACCENT : '#fff'} />
-          </View>
-          {!!label && (
-            <Text style={[s.ctrlBtnLabel, focused && s.ctrlBtnLabelFoc]}>{label}</Text>
-          )}
-        </>
+      <View style={[s.ctrlBtnCircle, foc && s.ctrlBtnCircleFoc, active && !foc && s.ctrlBtnCircleActive]}>
+        <Ionicons name={icon} size={r(20)} color={active && !foc ? ACCENT : '#fff'} />
+      </View>
+      {!!label && (
+        <Text style={[s.ctrlBtnLabel, foc && s.ctrlBtnLabelFoc]}>{label}</Text>
       )}
     </Pressable>
   );
@@ -115,28 +122,26 @@ const CtrlBtn = React.forwardRef(function CtrlBtn(
 const PlayBtn = React.forwardRef(function PlayBtn(
   { isPlaying, onPress, onFocus, grabFocus, nextFocusLeft, nextFocusRight, nextFocusUp }, ref
 ) {
+  const [foc, setFoc] = useState(false);
   return (
     <Pressable
       ref={ref}
       focusable
       hasTVPreferredFocus={grabFocus}
-      onFocus={() => { onFocus?.(); }}
+      onFocus={() => { setFoc(true); onFocus?.(); }}
+      onBlur={() => setFoc(false)}
       onPress={onPress}
       nextFocusLeft={nextFocusLeft}
       nextFocusRight={nextFocusRight}
       nextFocusUp={nextFocusUp}
       style={s.playBtnWrap}
     >
-      {({ focused }) => (
-        <>
-          <View style={[s.playBtnCircle, focused && s.playBtnCircleFoc]}>
-            <Ionicons name={isPlaying ? 'pause' : 'play'} size={r(32)} color="#0a0a0a" />
-          </View>
-          <Text style={[s.ctrlBtnLabel, focused && s.ctrlBtnLabelFoc]}>
-            {isPlaying ? 'Pausar' : 'Reproduzir'}
-          </Text>
-        </>
-      )}
+      <View style={[s.playBtnCircle, foc && s.playBtnCircleFoc]}>
+        <Ionicons name={isPlaying ? 'pause' : 'play'} size={r(32)} color="#0a0a0a" />
+      </View>
+      <Text style={[s.ctrlBtnLabel, foc && s.ctrlBtnLabelFoc]}>
+        {isPlaying ? 'Pausar' : 'Reproduzir'}
+      </Text>
     </Pressable>
   );
 });
@@ -851,13 +856,15 @@ const s = StyleSheet.create({
   ctrlBtnCircle: {
     width: r(54), height: r(54), borderRadius: r(27),
     alignItems: 'center', justifyContent: 'center',
-    borderWidth: 2, borderColor: 'rgba(255,255,255,0.22)',
+    borderWidth: r(3), borderColor: 'rgba(255,255,255,0.18)',
     backgroundColor: 'transparent',
   },
+  // Mesmo motivo do playBtnCircleFoc: diferença antiga (borda branca 22%
+  // opaca -> 100% opaca) era sutil demais pra notar de relance na TV.
   ctrlBtnCircleFoc: {
-    borderColor: '#fff',
-    backgroundColor: 'rgba(255,255,255,0.18)',
-    transform: [{ scale: 1.12 }],
+    borderColor: ACCENT,
+    backgroundColor: 'rgba(201,28,44,0.25)',
+    transform: [{ scale: 1.2 }],
   },
   ctrlBtnCircleActive: {
     borderColor: ACCENT,
@@ -876,14 +883,20 @@ const s = StyleSheet.create({
   },
   playBtnCircle: {
     width: r(88), height: r(88), borderRadius: r(44),
-    backgroundColor: 'rgba(255,255,255,0.88)',
+    backgroundColor: 'rgba(255,255,255,0.55)',
+    borderWidth: r(3), borderColor: 'transparent',
     alignItems: 'center', justifyContent: 'center',
     shadowColor: '#000', shadowOpacity: 0.6, shadowRadius: r(16), elevation: 8,
   },
+  // Sem foco, o botão ficava sempre parecido (88% vs 100% de opacidade branca
+  // era imperceptível) — dava a impressão de "travado" no play/pause mesmo
+  // quando o foco já tinha ido pra outro botão. Diferença bem mais óbvia
+  // agora: opaco+anel vermelho quando focado vs esmaecido quando não.
   playBtnCircleFoc: {
     backgroundColor: '#fff',
-    shadowColor: '#fff', shadowOpacity: 0.35, shadowRadius: r(24), elevation: 12,
-    transform: [{ scale: 1.06 }],
+    borderColor: ACCENT,
+    shadowColor: ACCENT, shadowOpacity: 0.7, shadowRadius: r(28), elevation: 14,
+    transform: [{ scale: 1.15 }],
   },
 });
 
