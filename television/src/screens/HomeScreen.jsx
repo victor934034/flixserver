@@ -542,6 +542,7 @@ export default function HomeScreen({ navigation }) {
     if (!rowRefsMap[i]) rowRefsMap[i] = { current: null };
     return rowRefsMap[i];
   }
+  const [, forceFocusRewire] = useState(0);
 
   // Sidebar animation
   useEffect(() => {
@@ -625,7 +626,10 @@ export default function HomeScreen({ navigation }) {
   }, []);
 
   const onSidebarBlur = useCallback(() => { blurTimer.current = setTimeout(() => setSidebarOpen(false), 160); }, []);
-  const onContentFoc  = useCallback(() => { clearTimeout(blurTimer.current); setSidebarOpen(false); }, []);
+  const onContentFoc  = useCallback(() => {
+    clearTimeout(blurTimer.current);
+    setSidebarOpen(false);
+  }, []);
 
   // Subscription gate
   useEffect(() => {
@@ -756,6 +760,17 @@ export default function HomeScreen({ navigation }) {
   function openDetail(item, type) {
     navigation.navigate('Detail', { item, type: type || item.content_type || 'movie' });
   }
+
+  // Herói e primeira fileira/grade aparecem juntos no MESMO commit (quando os
+  // dados terminam de carregar) — nesse commit, o ref do primeiro card ainda
+  // é null no momento em que o nextFocusDown/Up do herói é calculado (o ref só
+  // é preenchido DEPOIS, na fase de commit dos filhos). Sem um re-render
+  // seguinte, essa prop fica presa em null pra sempre. Esse effect força um
+  // re-render extra assim que o conteúdo aparece, garantindo que os refs já
+  // estejam preenchidos na hora de calcular o wiring de foco.
+  useEffect(() => {
+    if (heroItem) forceFocusRewire(v => v + 1);
+  }, [heroItem, sections, filteredCatalog]);
 
   function playFeatured() {
     if (!heroItem) return;
