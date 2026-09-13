@@ -830,6 +830,14 @@ export default function HomeScreen({ navigation }) {
                 label={n.label}
                 labelOp={labelOp}
                 active={activeNav === n.idx}
+                // Só o item ativo fica focável com a sidebar fechada — é o
+                // unico alvo garantido do LEFT vindo do conteudo (contentLandingRef
+                // aponta pra ele). Os outros só viram focáveis quando a sidebar
+                // já está aberta. Sem isso, o algoritmo automatico de foco do
+                // Android TV as vezes escolhia um item da sidebar como "mais
+                // proximo" ao apertar BAIXO numa fileira de conteudo, abrindo a
+                // sidebar sozinha sem o usuario ter ido pra esquerda.
+                focusable={sidebarOpen || activeNav === n.idx}
                 hasTVPreferredFocus={n.idx === 0 && grabFirstNavFocus}
                 onFocus={n.idx === 0 ? onHomeNavFoc : onOtherNavFoc}
                 onBlur={onSidebarBlur}
