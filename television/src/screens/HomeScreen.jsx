@@ -114,7 +114,7 @@ function getVersionBadge(item) {
 }
 
 // ─── ContentCard ──────────────────────────────────────────────────────────────
-function ContentCard({ item, onPress, onFocus: notifyRow }) {
+const ContentCard = React.forwardRef(function ContentCard({ item, onPress, onFocus: notifyRow }, ref) {
   const [foc, setFoc]   = useState(false);
   const [imgOk, setImgOk] = useState(true);
 
@@ -129,6 +129,7 @@ function ContentCard({ item, onPress, onFocus: notifyRow }) {
 
   return (
     <TVPressable
+      ref={ref}
       onFocus={() => { setFoc(true); notifyRow?.(); }}
       onBlur={() => setFoc(false)}
       onPress={onPress}
@@ -159,10 +160,10 @@ function ContentCard({ item, onPress, onFocus: notifyRow }) {
       <Text style={[s.cardTitle, foc && s.cardTitleFoc]} numberOfLines={1}>{title}</Text>
     </TVPressable>
   );
-}
+});
 
 // ─── ContentRow ───────────────────────────────────────────────────────────────
-function ContentRow({ title, data, onSelect, onFocus }) {
+function ContentRow({ title, data, onSelect, onFocus, firstItemRef }) {
   const listRef = useRef(null);
 
   if (!data?.length) return null;
@@ -184,6 +185,7 @@ function ContentRow({ title, data, onSelect, onFocus }) {
           onScrollToIndexFailed={() => {}}
           renderItem={({ item, index }) => (
             <ContentCard
+              ref={index === 0 ? firstItemRef : undefined}
               item={item}
               onPress={() => onSelect(item)}
               onFocus={() => {
@@ -205,7 +207,7 @@ function ContentRow({ title, data, onSelect, onFocus }) {
 }
 
 // ─── HeroBtn ──────────────────────────────────────────────────────────────────
-function HeroBtn({ icon, label, primary, onPress, onFocus, hasTVPreferredFocus }) {
+function HeroBtn({ icon, label, primary, onPress, onFocus, hasTVPreferredFocus, nextFocusDown }) {
   const [foc, setFoc] = useState(false);
   return (
     <TVPressable
@@ -213,6 +215,7 @@ function HeroBtn({ icon, label, primary, onPress, onFocus, hasTVPreferredFocus }
       onPress={onPress}
       onFocus={() => { setFoc(true); onFocus?.(); }}
       onBlur={() => setFoc(false)}
+      nextFocusDown={nextFocusDown}
       style={[s.heroBtn, primary ? s.heroBtnPri : s.heroBtnSec, foc && s.heroBtnFoc]}
     >
       <View style={s.heroBtnRow}>
@@ -279,7 +282,7 @@ const GRID_GAP  = r(10);
 const CATALOG_COLS = 6; // grade de catalogo completo (Filmes/Series) usa a tela toda
 
 // ─── Grid card (search results) ───────────────────────────────────────────────
-function GridCard({ item, onPress, onFocus: notifyRow }) {
+const GridCard = React.forwardRef(function GridCard({ item, onPress, onFocus: notifyRow }, ref) {
   const [foc, setFoc] = useState(false);
   const [imgOk, setImgOk] = useState(true);
   const img   = item.poster_url || item.backdrop_url;
@@ -288,6 +291,7 @@ function GridCard({ item, onPress, onFocus: notifyRow }) {
   const isSer = item.total_seasons !== undefined || item.content_type === 'series';
   return (
     <TVPressable
+      ref={ref}
       onFocus={() => { setFoc(true); notifyRow?.(); }}
       onBlur={() => setFoc(false)}
       onPress={onPress}
@@ -318,7 +322,7 @@ function GridCard({ item, onPress, onFocus: notifyRow }) {
       <Text style={[s.gridTitle, foc && s.gridTitleFoc]} numberOfLines={1}>{title}</Text>
     </TVPressable>
   );
-}
+});
 
 // ─── Netflix-style search panel ───────────────────────────────────────────────
 function SearchPanel({ query, onKey, results, defaultItems = [], placeholder, loading, onSelect, onFocus: notifyFocus }) {
@@ -515,6 +519,11 @@ export default function HomeScreen({ navigation }) {
   const navRefs = useRef(NAV.map(() => React.createRef())).current;
   const sairRef = useRef(null);
   const contentLandingRef = useRef(null);
+  // Primeiro card focável abaixo do herói (linha 0 do carrossel, ou primeiro
+  // item da grade de catálogo) — o botão "Assistir" aponta pra ele
+  // explicitamente, senão o algoritmo espacial do Android escolhia o item
+  // "Início" da sidebar ao apertar BAIXO (os dois ficam perto do topo).
+  const firstContentRef = useRef(null);
 
   // Sidebar animation
   useEffect(() => {
@@ -920,8 +929,16 @@ export default function HomeScreen({ navigation }) {
                       {heroItem.synopsis}
                     </Text>
                     <View style={s.heroActions}>
-                      <HeroBtn icon="play" label="Assistir" primary hasTVPreferredFocus onPress={playFeatured} onFocus={onContentFoc} />
-                      <HeroBtn icon="information-circle-outline" label="Mais Info" onPress={() => openDetail(heroItem, isSeries(heroItem) ? 'series' : 'movie')} onFocus={onContentFoc} />
+                      <HeroBtn
+                        icon="play" label="Assistir" primary hasTVPreferredFocus
+                        onPress={playFeatured} onFocus={onContentFoc}
+                        nextFocusDown={findNodeHandle(firstContentRef.current)}
+                      />
+                      <HeroBtn
+                        icon="information-circle-outline" label="Mais Info"
+                        onPress={() => openDetail(heroItem, isSeries(heroItem) ? 'series' : 'movie')} onFocus={onContentFoc}
+                        nextFocusDown={findNodeHandle(firstContentRef.current)}
+                      />
                     </View>
                   </>
                 )}
@@ -987,8 +1004,9 @@ export default function HomeScreen({ navigation }) {
                           title={activeNav === 1 ? 'Nenhum filme encontrado' : 'Nenhuma série encontrada'}
                         />
                       ) : null}
-                      renderItem={({ item }) => (
+                      renderItem={({ item, index }) => (
                         <GridCard
+                          ref={index === 0 ? firstContentRef : undefined}
                           item={item}
                           onPress={() => openDetail(item, activeNav === 1 ? 'movie' : 'series')}
                           onFocus={onContentFoc}
@@ -1006,6 +1024,7 @@ export default function HomeScreen({ navigation }) {
                       data={sec.data}
                       onSelect={item => openDetail(item, item.content_type || sec.type || 'movie')}
                       onFocus={onContentFoc}
+                      firstItemRef={i === 0 ? firstContentRef : undefined}
                     />
                   ))}
                   <View style={{ height: r(40) }} />
