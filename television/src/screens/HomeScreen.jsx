@@ -424,13 +424,19 @@ function SearchPanel({ query, onKey, results, defaultItems = [], placeholder, lo
 }
 
 // ─── Genre filter dropdown (Filmes/Series) ────────────────────────────────────
-function GenreButton({ label, open, onPress, onFocus }) {
+const GenreButton = React.forwardRef(function GenreButton(
+  { label, open, onPress, onFocus, nextFocusUp, nextFocusDown, nextFocusRight }, ref
+) {
   const [foc, setFoc] = useState(false);
   return (
     <TVPressable
+      ref={ref}
       onPress={onPress}
       onFocus={() => { setFoc(true); onFocus?.(); }}
       onBlur={() => setFoc(false)}
+      nextFocusUp={nextFocusUp}
+      nextFocusDown={nextFocusDown}
+      nextFocusRight={nextFocusRight}
       style={[s.genreBtn, foc && s.genreBtnFoc]}
     >
       <Ionicons name="options-outline" size={r(16)} color={foc ? '#fff' : '#ccc'} />
@@ -440,21 +446,27 @@ function GenreButton({ label, open, onPress, onFocus }) {
       <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={r(14)} color={foc ? '#fff' : '#888'} />
     </TVPressable>
   );
-}
+});
 
-function SectionSearchBtn({ onPress, onFocus }) {
+const SectionSearchBtn = React.forwardRef(function SectionSearchBtn(
+  { onPress, onFocus, nextFocusUp, nextFocusDown, nextFocusLeft }, ref
+) {
   const [foc, setFoc] = useState(false);
   return (
     <TVPressable
+      ref={ref}
       onPress={onPress}
       onFocus={() => { setFoc(true); onFocus?.(); }}
       onBlur={() => setFoc(false)}
+      nextFocusUp={nextFocusUp}
+      nextFocusDown={nextFocusDown}
+      nextFocusLeft={nextFocusLeft}
       style={[s.sectionSearchBtn, foc && s.sectionSearchBtnFoc]}
     >
       <Ionicons name="search" size={r(20)} color={foc ? '#fff' : '#ccc'} />
     </TVPressable>
   );
-}
+});
 
 function GenreOption({ label, selected, onPress, hasTVPreferredFocus }) {
   const [foc, setFoc] = useState(false);
@@ -537,10 +549,22 @@ export default function HomeScreen({ navigation }) {
   // também é o alvo do BAIXO a partir do herói.
   const assistirRef = useRef(null);
   const maisInfoRef = useRef(null);
+  const genreBtnRef = useRef(null);
+  const searchBtnRef = useRef(null);
   const rowRefsMap = useRef({}).current;
   function getRowRef(i) {
     if (!rowRefsMap[i]) rowRefsMap[i] = { current: null };
     return rowRefsMap[i];
+  }
+  // Alvo do BAIXO a partir do herói: nas telas de Filmes/Series existe uma
+  // barra de categoria/busca ENTRE o herói e a grade — sem isso o BAIXO do
+  // herói pulava direto pra grade, tornando os dois botões da barra
+  // inalcançáveis (nunca recebiam foco vindo de lugar nenhum).
+  function catalogFirstFocusRef() {
+    if (activeNav === 1 || activeNav === 2) {
+      return (catalogGenres.length > 0 ? genreBtnRef.current : searchBtnRef.current) || getRowRef(0).current;
+    }
+    return getRowRef(0).current;
   }
   // Scroll manual das fileiras (home/Minha Lista): o auto-scroll padrão do
   // Android só rola o mínimo pra deixar o card focado visível, cortando a
@@ -793,7 +817,7 @@ export default function HomeScreen({ navigation }) {
   // estejam preenchidos na hora de calcular o wiring de foco.
   useEffect(() => {
     if (heroItem) forceFocusRewire(v => v + 1);
-  }, [heroItem, sections, filteredCatalog]);
+  }, [heroItem, sections, filteredCatalog, catalogGenres]);
 
   function playFeatured() {
     if (!heroItem) return;
@@ -989,14 +1013,14 @@ export default function HomeScreen({ navigation }) {
                         ref={assistirRef}
                         icon="play" label="Assistir" primary hasTVPreferredFocus
                         onPress={playFeatured} onFocus={() => { onContentFoc(); homeScrollRef.current?.scrollTo({ y: 0, animated: true }); }}
-                        nextFocusDown={findNodeHandle(getRowRef(0).current)}
+                        nextFocusDown={findNodeHandle(catalogFirstFocusRef())}
                         nextFocusUp={findNodeHandle(assistirRef.current)}
                       />
                       <HeroBtn
                         ref={maisInfoRef}
                         icon="information-circle-outline" label="Mais Info"
                         onPress={() => openDetail(heroItem, isSeries(heroItem) ? 'series' : 'movie')} onFocus={() => { onContentFoc(); homeScrollRef.current?.scrollTo({ y: 0, animated: true }); }}
-                        nextFocusDown={findNodeHandle(getRowRef(0).current)}
+                        nextFocusDown={findNodeHandle(catalogFirstFocusRef())}
                         nextFocusUp={findNodeHandle(maisInfoRef.current)}
                       />
                     </View>
@@ -1019,10 +1043,14 @@ export default function HomeScreen({ navigation }) {
                     {catalogGenres.length > 0 ? (
                       <View style={s.genreDropdownWrap}>
                         <GenreButton
+                          ref={genreBtnRef}
                           label={catalogGenre || 'Todas'}
                           open={genreOpen}
                           onFocus={onContentFoc}
                           onPress={() => setGenreOpen(o => !o)}
+                          nextFocusUp={findNodeHandle(assistirRef.current)}
+                          nextFocusDown={findNodeHandle(getRowRef(0).current)}
+                          nextFocusRight={findNodeHandle(searchBtnRef.current)}
                         />
 
                         {genreOpen && (
@@ -1039,8 +1067,12 @@ export default function HomeScreen({ navigation }) {
                     ) : <View />}
 
                     <SectionSearchBtn
+                      ref={searchBtnRef}
                       onPress={() => openSectionSearch(activeNav === 1 ? 'movie' : 'series')}
                       onFocus={onContentFoc}
+                      nextFocusUp={findNodeHandle(assistirRef.current)}
+                      nextFocusDown={findNodeHandle(getRowRef(0).current)}
+                      nextFocusLeft={catalogGenres.length > 0 ? findNodeHandle(genreBtnRef.current) : undefined}
                     />
                   </View>
 
@@ -1070,7 +1102,7 @@ export default function HomeScreen({ navigation }) {
                           item={item}
                           onPress={() => openDetail(item, activeNav === 1 ? 'movie' : 'series')}
                           onFocus={onContentFoc}
-                          nextFocusUp={index < CATALOG_COLS ? findNodeHandle(assistirRef.current) : undefined}
+                          nextFocusUp={index < CATALOG_COLS ? findNodeHandle(catalogGenres.length > 0 ? genreBtnRef.current : searchBtnRef.current) : undefined}
                         />
                       )}
                     />
