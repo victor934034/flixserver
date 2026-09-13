@@ -683,9 +683,20 @@ export default function HomeScreen({ navigation }) {
       const continuing = hist2
         .filter(h => !h.completed && h.progress > 0 && h.duration > 0 && h.title)
         .map(h => ({
-          id: h.content_id, title: h.title, poster_url: h.poster_url,
+          // Pra episódio, content_id é o ID do EPISÓDIO, não da série — a tela
+          // de detalhes espera o ID da série (busca em /series/:id). Usar o
+          // content_id aqui direto abria a tela de detalhes em branco/cinza,
+          // já que /series/{id_do_episodio} não existe.
+          id: h.content_type === 'episode' ? h.series_id : h.content_id,
+          title: h.title, poster_url: h.poster_url,
           content_type: h.content_type === 'episode' ? 'series' : 'movie',
-        }));
+        }))
+        .filter(it => it.id != null)
+        // Duas séries diferentes com episódios em andamento agora colidem no
+        // mesmo id (o da série) — sem isso, a FlatList reclamava de key
+        // duplicada. hist2 já vem ordenado por mais recente primeiro, então
+        // o primeiro que aparece de cada série é o que fica.
+        .filter((it, idx, arr) => arr.findIndex(o => o.id === it.id && o.content_type === it.content_type) === idx);
 
       setSections([
         ...(continuing.length > 0 ? [{ title: 'Continuar Assistindo', data: continuing, type: 'mixed' }] : []),

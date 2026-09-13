@@ -7,7 +7,8 @@ import { VideoView, useVideoPlayer } from 'expo-video';
 import { useEvent } from 'expo';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import api from '../lib/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import api, { BASE_URL } from '../lib/api';
 import { useProfile } from '../contexts/ProfileContext';
 
 const { width: W, height: H } = Dimensions.get('window');
@@ -253,6 +254,9 @@ export default function PlayerScreen({ navigation, route }) {
   const [grabSub,     setGrabSub]    = useState(false);
   const [grabPrev,    setGrabPrev]   = useState(false);
   const [grabNext,    setGrabNext]   = useState(false);
+  const [remuxActive, setRemuxActive] = useState(false);
+  const autoRemuxTriedRef = useRef(false);
+  const [, forceFocusRewire] = useState(0);
 
   const currentUrl = tracks[trackKey] || initialUrl;
 
@@ -260,6 +264,16 @@ export default function PlayerScreen({ navigation, route }) {
   playingRef.current = isPlaying;
 
   const showSkip = !!skipIntroTo && displayPos > 8000 && displayPos < skipIntroTo;
+
+  // Os refs dos botoes da fileira inferior (usados no focusNav() abaixo) só
+  // ficam preenchidos DEPOIS do primeiro commit — no render em que eles
+  // aparecem, nextFocusLeft/Right ainda leem null. Sem um re-render seguinte,
+  // essa prop fica presa em null pra sempre e trava a navegacao lateral.
+  // Mesma causa raiz já corrigida na Home; aqui a cadeia muda de tamanho
+  // conforme prevEp/nextEp/showSkip/availTracks/availSubs ficam disponíveis.
+  useEffect(() => {
+    forceFocusRewire(v => v + 1);
+  }, [loaded, prevEp, nextEp, showSkip, availTracks.length, availSubs.length]);
 
   // Carrega e parseia VTT externo quando a legenda muda (overlay manual)
   useEffect(() => {
@@ -302,7 +316,14 @@ export default function PlayerScreen({ navigation, route }) {
       }
     }
     if (status === 'error') {
-      setError(playerError?.message || 'Erro ao carregar o vídeo');
+      // Tenta o remux automaticamente uma vez antes de desistir (só uma vez
+      // por vídeo, pra não entrar em loop se o remux também falhar).
+      if (!remuxActive && !autoRemuxTriedRef.current) {
+        autoRemuxTriedRef.current = true;
+        activateRemux();
+      } else {
+        setError(playerError?.message || 'Erro ao carregar o vídeo');
+      }
     }
   }, [status]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -406,6 +427,27 @@ export default function PlayerScreen({ navigation, route }) {
   function switchSub(key) {
     setSubKey(key);
     closePanel('sub');
+  }
+
+  // Alguns arquivos tem audio AC3/DTS/HE-AAC surround que o decoder padrao do
+  // Android (ExoPlayer via expo-video) nao consegue tocar — o video roda
+  // normal mas sem nenhum som, sem disparar erro nenhum (o ExoPlayer so
+  // desativa a faixa de audio incompativel em silencio). Mesmo endpoint de
+  // remux ao vivo (video copiado, audio reencodado pra AAC) ja usado no
+  // player web pra esse mesmo problema.
+  async function activateRemux() {
+    if (remuxActive) return;
+    const saved = positionRef.current;
+    switchPosRef.current = saved;
+    wasLoadedRef.current = false;
+    endedRef.current = false;
+    setLoaded(false);
+    setError(null);
+    setRemuxActive(true);
+    closePanel('audio');
+    const token = await AsyncStorage.getItem('token');
+    const remuxUrl = `${BASE_URL}/remux?url=${encodeURIComponent(currentUrl)}`;
+    player.replace({ uri: remuxUrl, headers: token ? { Authorization: `Bearer ${token}` } : undefined });
   }
 
   // Monta a cadeia de foco esquerda/direita da fileira de botoes inferior,
@@ -531,6 +573,13 @@ export default function PlayerScreen({ navigation, route }) {
                 onFocus={onBtnFocus}
               />
             ))}
+            <PanelOpt
+              label="Sem som?"
+              sub={remuxActive ? 'Já corrigido' : 'Corrigir áudio'}
+              active={remuxActive}
+              onPress={activateRemux}
+              onFocus={onBtnFocus}
+            />
           </View>
         )}
 
