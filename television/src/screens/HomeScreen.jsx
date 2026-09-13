@@ -114,7 +114,7 @@ function getVersionBadge(item) {
 }
 
 // ─── ContentCard ──────────────────────────────────────────────────────────────
-const ContentCard = React.forwardRef(function ContentCard({ item, onPress, onFocus: notifyRow }, ref) {
+const ContentCard = React.forwardRef(function ContentCard({ item, onPress, onFocus: notifyRow, nextFocusUp }, ref) {
   const [foc, setFoc]   = useState(false);
   const [imgOk, setImgOk] = useState(true);
 
@@ -133,6 +133,7 @@ const ContentCard = React.forwardRef(function ContentCard({ item, onPress, onFoc
       onFocus={() => { setFoc(true); notifyRow?.(); }}
       onBlur={() => setFoc(false)}
       onPress={onPress}
+      nextFocusUp={nextFocusUp}
       style={{ marginRight: CARD_GAP }}
     >
       <View style={[s.cardFrame, foc && s.cardFrameFoc]}>
@@ -163,7 +164,7 @@ const ContentCard = React.forwardRef(function ContentCard({ item, onPress, onFoc
 });
 
 // ─── ContentRow ───────────────────────────────────────────────────────────────
-function ContentRow({ title, data, onSelect, onFocus, firstItemRef }) {
+function ContentRow({ title, data, onSelect, onFocus, firstItemRef, upRef }) {
   const listRef = useRef(null);
 
   if (!data?.length) return null;
@@ -188,6 +189,7 @@ function ContentRow({ title, data, onSelect, onFocus, firstItemRef }) {
               ref={index === 0 ? firstItemRef : undefined}
               item={item}
               onPress={() => onSelect(item)}
+              nextFocusUp={index === 0 ? findNodeHandle(upRef?.current) : undefined}
               onFocus={() => {
                 onFocus?.();
                 try { listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.15 }); } catch {}
@@ -207,15 +209,19 @@ function ContentRow({ title, data, onSelect, onFocus, firstItemRef }) {
 }
 
 // ─── HeroBtn ──────────────────────────────────────────────────────────────────
-function HeroBtn({ icon, label, primary, onPress, onFocus, hasTVPreferredFocus, nextFocusDown }) {
+const HeroBtn = React.forwardRef(function HeroBtn(
+  { icon, label, primary, onPress, onFocus, hasTVPreferredFocus, nextFocusDown, nextFocusUp }, ref
+) {
   const [foc, setFoc] = useState(false);
   return (
     <TVPressable
+      ref={ref}
       hasTVPreferredFocus={hasTVPreferredFocus}
       onPress={onPress}
       onFocus={() => { setFoc(true); onFocus?.(); }}
       onBlur={() => setFoc(false)}
       nextFocusDown={nextFocusDown}
+      nextFocusUp={nextFocusUp}
       style={[s.heroBtn, primary ? s.heroBtnPri : s.heroBtnSec, foc && s.heroBtnFoc]}
     >
       <View style={s.heroBtnRow}>
@@ -224,7 +230,7 @@ function HeroBtn({ icon, label, primary, onPress, onFocus, hasTVPreferredFocus, 
       </View>
     </TVPressable>
   );
-}
+});
 
 // ─── Keyboard key ─────────────────────────────────────────────────────────────
 function KeyBtn({ label, onPress, wide, hasTVPreferredFocus }) {
@@ -282,7 +288,7 @@ const GRID_GAP  = r(10);
 const CATALOG_COLS = 6; // grade de catalogo completo (Filmes/Series) usa a tela toda
 
 // ─── Grid card (search results) ───────────────────────────────────────────────
-const GridCard = React.forwardRef(function GridCard({ item, onPress, onFocus: notifyRow }, ref) {
+const GridCard = React.forwardRef(function GridCard({ item, onPress, onFocus: notifyRow, nextFocusUp }, ref) {
   const [foc, setFoc] = useState(false);
   const [imgOk, setImgOk] = useState(true);
   const img   = item.poster_url || item.backdrop_url;
@@ -295,6 +301,7 @@ const GridCard = React.forwardRef(function GridCard({ item, onPress, onFocus: no
       onFocus={() => { setFoc(true); notifyRow?.(); }}
       onBlur={() => setFoc(false)}
       onPress={onPress}
+      nextFocusUp={nextFocusUp}
       style={s.gridItem}
     >
       <View style={[s.gridFrame, foc && s.gridFrameFoc]}>
@@ -523,7 +530,18 @@ export default function HomeScreen({ navigation }) {
   // item da grade de catálogo) — o botão "Assistir" aponta pra ele
   // explicitamente, senão o algoritmo espacial do Android escolhia o item
   // "Início" da sidebar ao apertar BAIXO (os dois ficam perto do topo).
-  const firstContentRef = useRef(null);
+  // Refs de foco pra travar CIMA/BAIXO dentro do conteúdo, sem nunca vazar
+  // pra sidebar: os botões do herói se auto-travam no CIMA (fica no mesmo
+  // lugar) e cada fileira (ou a grade de catálogo) aponta CIMA pro primeiro
+  // item da fileira anterior — ou pro herói, na primeira. getRowRef(0)
+  // também é o alvo do BAIXO a partir do herói.
+  const assistirRef = useRef(null);
+  const maisInfoRef = useRef(null);
+  const rowRefsMap = useRef({}).current;
+  function getRowRef(i) {
+    if (!rowRefsMap[i]) rowRefsMap[i] = { current: null };
+    return rowRefsMap[i];
+  }
 
   // Sidebar animation
   useEffect(() => {
@@ -930,14 +948,18 @@ export default function HomeScreen({ navigation }) {
                     </Text>
                     <View style={s.heroActions}>
                       <HeroBtn
+                        ref={assistirRef}
                         icon="play" label="Assistir" primary hasTVPreferredFocus
                         onPress={playFeatured} onFocus={onContentFoc}
-                        nextFocusDown={findNodeHandle(firstContentRef.current)}
+                        nextFocusDown={findNodeHandle(getRowRef(0).current)}
+                        nextFocusUp={findNodeHandle(assistirRef.current)}
                       />
                       <HeroBtn
+                        ref={maisInfoRef}
                         icon="information-circle-outline" label="Mais Info"
                         onPress={() => openDetail(heroItem, isSeries(heroItem) ? 'series' : 'movie')} onFocus={onContentFoc}
-                        nextFocusDown={findNodeHandle(firstContentRef.current)}
+                        nextFocusDown={findNodeHandle(getRowRef(0).current)}
+                        nextFocusUp={findNodeHandle(maisInfoRef.current)}
                       />
                     </View>
                   </>
@@ -1006,10 +1028,11 @@ export default function HomeScreen({ navigation }) {
                       ) : null}
                       renderItem={({ item, index }) => (
                         <GridCard
-                          ref={index === 0 ? firstContentRef : undefined}
+                          ref={index === 0 ? getRowRef(0) : undefined}
                           item={item}
                           onPress={() => openDetail(item, activeNav === 1 ? 'movie' : 'series')}
                           onFocus={onContentFoc}
+                          nextFocusUp={index < CATALOG_COLS ? findNodeHandle(assistirRef.current) : undefined}
                         />
                       )}
                     />
@@ -1024,7 +1047,8 @@ export default function HomeScreen({ navigation }) {
                       data={sec.data}
                       onSelect={item => openDetail(item, item.content_type || sec.type || 'movie')}
                       onFocus={onContentFoc}
-                      firstItemRef={i === 0 ? firstContentRef : undefined}
+                      firstItemRef={getRowRef(i)}
+                      upRef={i === 0 ? assistirRef : getRowRef(i - 1)}
                     />
                   ))}
                   <View style={{ height: r(40) }} />
