@@ -38,6 +38,7 @@ export default function VideoPlayer({ content, onProgress, startAt = 0, onClose,
   const lastReportRef = useRef(0); // throttle do onProgress (timeupdate dispara várias vezes/s)
   const autoRemuxTriedRef = useRef(false); // evita loop se o remux também falhar
   const resumeAppliedRef = useRef(false); // aplica startAt só na primeira carga do vídeo
+  const sessionIdRef = useRef(Math.random().toString(36).slice(2) + Date.now());
 
   const [version,      setVersion]      = useState('dubbing');
   const [subtitle,     setSubtitle]     = useState('none');
@@ -56,6 +57,8 @@ export default function VideoPlayer({ content, onProgress, startAt = 0, onClose,
   const [flashIcon,    setFlashIcon]    = useState(null); // 'play' | 'pause'
   const [hoverTime,    setHoverTime]    = useState(null); // { pct, time }
   const [showNextCard, setShowNextCard] = useState(false);
+  const [streamBlocked,  setStreamBlocked]  = useState(false);
+  const [streamBlockInfo, setStreamBlockInfo] = useState(null);
 
   const versions = [
     { key: 'dubbing',    label: 'Dublado',   url: content.file_dubbing },
@@ -149,6 +152,36 @@ export default function VideoPlayer({ content, onProgress, startAt = 0, onClose,
       onProgress?.(video.currentTime, video.duration);
     };
   }, [onProgress, onNextEpisode]);
+
+  // Limite de telas simultâneas por conta — mesmo endpoint/regra usados pelo
+  // app mobile (backend conta por user_id, sem distinguir plataforma). Sem
+  // isso, assistir pela web nunca contava nem era bloqueado pelo limite do
+  // plano, deixando o controle furável (TV/web ficavam de fora da conta).
+  useEffect(() => {
+    let alive = true;
+    const sessionId = sessionIdRef.current;
+    api.post('/streams/start', { session_id: sessionId, content_title: content.title || content.name || '' })
+      .then(() => {
+        if (!alive) { api.delete(`/streams/${sessionId}`).catch(() => {}); return; }
+      })
+      .catch(e => {
+        if (!alive) return;
+        if (e.response?.status === 429) {
+          const v = videoRef.current;
+          if (v) v.pause();
+          setStreamBlocked(true);
+          setStreamBlockInfo(e.response.data);
+        }
+      });
+    const heartbeat = setInterval(() => {
+      api.post(`/streams/heartbeat/${sessionId}`).catch(() => {});
+    }, 30000);
+    return () => {
+      alive = false;
+      clearInterval(heartbeat);
+      api.delete(`/streams/${sessionId}`).catch(() => {});
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Autoplay + tela cheia assim que o player abre (é acionado a partir do
   // clique em "Assistir"/"Play", então o gesto do usuário ainda vale pro
@@ -325,6 +358,34 @@ export default function VideoPlayer({ content, onProgress, startAt = 0, onClose,
           <track key={s.key} kind="subtitles" src={vttUrl(s.url)} srcLang={s.key} label={s.label} />
         ))}
       </video>
+
+      {/* Limite de telas simultâneas atingido */}
+      {streamBlocked && (
+        <div
+          onClick={e => e.stopPropagation()}
+          style={{
+            position: 'absolute', inset: 0, zIndex: 50,
+            background: 'rgba(0,0,0,0.95)', display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center', textAlign: 'center', gap: 14, padding: 32,
+          }}
+        >
+          <div style={{ fontSize: 44 }}>📺</div>
+          <div style={{ color: '#fff', fontSize: 20, fontWeight: 800 }}>Limite de telas atingido</div>
+          <div style={{ color: '#aaa', fontSize: 14, maxWidth: 420, lineHeight: 1.6 }}>
+            Já há {streamBlockInfo?.active ?? streamBlockInfo?.max_streams ?? 1}{' '}
+            {streamBlockInfo?.active === 1 ? 'dispositivo reproduzindo' : 'dispositivos reproduzindo'} nesta conta.
+            Pare em outro aparelho pra assistir por aqui.
+          </div>
+          {onClose && (
+            <button
+              onClick={onClose}
+              style={{ marginTop: 10, padding: '12px 28px', background: '#E50914', border: 'none', borderRadius: 8, color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}
+            >
+              Voltar
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Top bar (título + voltar) */}
       {(onClose || overlayTitle || content.title) && (

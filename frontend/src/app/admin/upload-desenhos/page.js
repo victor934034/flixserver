@@ -263,6 +263,40 @@ export default function UploadDesenhosPage() {
     ));
   }
 
+  // MP4 sem faststart → moov atom no final → abertura lenta (6-10s).
+  // Espera terminar (nao dispara em segundo plano) - como cada episodio
+  // ja processa em sequencia aqui, isso garante que so 1 ffmpeg de
+  // remux roda por vez no servidor. Disparar sem esperar (como era
+  // antes) deixava um remux por episodio rodando AO MESMO TEMPO num
+  // upload em lote, sobrecarregando o servidor e derrubando varios
+  // silenciosamente - exatamente o "todo episodio demora pra abrir"
+  // reportado, ja que a otimizacao simplesmente nao completava.
+  // Compartilhada entre o fluxo de upload e o botão de "tentar de novo"
+  // do badge de erro, pra não duplicar a lógica.
+  async function runFaststart(epNum, cdnUrl, movieId) {
+    updateEp(epNum, { optimizing: true, faststartError: false, faststartErrorMsg: null });
+    try {
+      await api.post('/upload/fix-faststart', {
+        cdnUrl,
+        movieId,
+        movieType: 'series',
+        field: `file_${version}`,
+      }, { timeout: 600_000 });
+      updateEp(epNum, { optimizing: false });
+    } catch (e) {
+      // e.message do axios é só "Request failed with status code 500" —
+      // o motivo real (ffmpeg, B2, etc.) vem no corpo da resposta.
+      const realReason = e.response?.data?.error || e.message;
+      console.warn(`[faststart] ep ${epNum}:`, realReason);
+      updateEp(epNum, { optimizing: false, faststartError: true, faststartErrorMsg: realReason });
+    }
+  }
+
+  function retryFaststart(ep) {
+    if (!ep.cdnUrl || !ep.dbId) return;
+    runFaststart(ep.episode_number, ep.cdnUrl, ep.dbId);
+  }
+
   // ── Upload all assigned episodes ──
   async function startUpload() {
     const toUpload = episodes.filter(ep => ep.file && ep.status === 'pending');
@@ -297,7 +331,7 @@ export default function UploadDesenhosPage() {
         };
 
         const { data: saveResult } = await api.post('/admin/episodes', epData);
-        updateEp(ep.episode_number, { status: 'done', progress: 100, cdnUrl, error: null });
+        updateEp(ep.episode_number, { status: 'done', progress: 100, cdnUrl, error: null, dbId: saveResult?.id });
 
         // MP4 sem faststart → moov atom no final → abertura lenta (6-10s).
         // Espera terminar (nao dispara em segundo plano) - como cada episodio
@@ -307,20 +341,8 @@ export default function UploadDesenhosPage() {
         // upload em lote, sobrecarregando o servidor e derrubando varios
         // silenciosamente - exatamente o "todo episodio demora pra abrir"
         // reportado, ja que a otimizacao simplesmente nao completava.
-        if (/\.mp4$/i.test(ep.file.name) && saveResult?.id) {
-          updateEp(ep.episode_number, { optimizing: true });
-          try {
-            await api.post('/upload/fix-faststart', {
-              cdnUrl,
-              movieId: saveResult.id,
-              movieType: 'series',
-              field: `file_${version}`,
-            }, { timeout: 600_000 });
-            updateEp(ep.episode_number, { optimizing: false });
-          } catch (e) {
-            console.warn(`[faststart] ep ${ep.episode_number}:`, e.message);
-            updateEp(ep.episode_number, { optimizing: false, faststartError: true });
-          }
+        if (/\.(mp4|mkv)$/i.test(ep.file.name) && saveResult?.id) {
+          await runFaststart(ep.episode_number, cdnUrl, saveResult.id);
         }
         delete abortRefs.current[ep.episode_number];
       } catch (err) {
@@ -521,9 +543,21 @@ export default function UploadDesenhosPage() {
                     <div className={styles.epActions}>
                       {ep.status === 'done' && ep.optimizing && <span className={styles.badgeUploading}>Otimizando…</span>}
                       {ep.status === 'done' && !ep.optimizing && ep.faststartError && (
-                        <span className={styles.badgeError} title="Vídeo enviado, mas a otimização de abertura rápida falhou — pode demorar mais pra abrir">
-                          ✓ Enviado (sem otimizar)
-                        </span>
+                        <>
+                          <span
+                            className={styles.badgeError}
+                            title={`Vídeo enviado, mas a otimização de abertura rápida falhou — pode demorar mais pra abrir.${ep.faststartErrorMsg ? ' Motivo: ' + ep.faststartErrorMsg : ''}`}
+                          >
+                            ✓ Enviado (sem otimizar)
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => retryFaststart(ep)}
+                            style={{ marginLeft: 6, fontSize: 11, padding: '2px 8px', borderRadius: 4, border: '1px solid #444', background: '#222', color: '#ccc', cursor: 'pointer' }}
+                          >
+                            Tentar de novo
+                          </button>
+                        </>
                       )}
                       {ep.status === 'done' && !ep.optimizing && !ep.faststartError && <span className={styles.badgeDone}>✓ Enviado</span>}
                       {ep.status === 'uploading' && <span className={styles.badgeUploading}>{ep.progress}%</span>}
