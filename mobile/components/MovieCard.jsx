@@ -1,6 +1,7 @@
 import { memo } from 'react';
-import { View, Text, Image, TouchableOpacity, StyleSheet, useWindowDimensions } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, useWindowDimensions } from 'react-native';
 import { useRouter } from 'expo-router';
+import CachedImage from './CachedImage';
 
 const DEFAULT_CARD_W = 110;
 const DEFAULT_CARD_H = 165;
@@ -40,7 +41,7 @@ function MovieCard({ item, type, compact = false, cardWidth, progress }) {
     >
       <View style={{ width: w, height: h, borderRadius: 7, overflow: 'hidden' }}>
         {item.poster_url ? (
-          <Image
+          <CachedImage
             source={{ uri: item.poster_url }}
             style={{ width: '100%', height: '100%' }}
             resizeMode="cover"

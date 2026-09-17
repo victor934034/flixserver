@@ -1,15 +1,17 @@
-﻿import { useEffect, useRef } from 'react';
+﻿import { useEffect, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 import { Stack, useRouter, useSegments, useRootNavigationState } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import NetInfo from '@react-native-community/netinfo';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { DownloadProvider } from '../contexts/DownloadContext';
 import { ParentalProvider } from '../contexts/ParentalContext';
 import { ProfileProvider, useProfile } from '../contexts/ProfileContext';
+import WhatsNewModal from '../components/WhatsNewModal';
 import api from '../lib/api';
 
 const isExpoGo = Constants.executionEnvironment === 'storeClient';
@@ -106,6 +108,31 @@ function AppGate() {
   const checkedRef = useRef(false);
   const appStateRef = useRef(AppState.currentState);
   const notifCheckedRef = useRef(false);
+  // null/true = considera online ate a primeira checagem real do NetInfo
+  // confirmar o contrario - evita falso positivo de "offline" no instante
+  // de abrir o app antes do NetInfo responder.
+  const [isOnline, setIsOnline] = useState(true);
+
+  useEffect(() => {
+    const unsub = NetInfo.addEventListener(state => {
+      setIsOnline(state.isConnected !== false);
+    });
+    return () => unsub();
+  }, []);
+
+  // Sem internet: manda direto pros downloads em vez de deixar o usuario
+  // preso em telas que dependem de rede (fotos/dados que nao carregam e
+  // ficam pretos). Nao mexe se ja estiver em downloads, no player (pode
+  // estar assistindo um download offline) ou nas telas de auth/perfil/assinatura.
+  useEffect(() => {
+    if (!navState?.key || loading || !token || !activeProfile || isOnline) return;
+    const seg0 = segments[0];
+    const onDownloadsTab = seg0 === '(tabs)' && segments[1] === 'downloads';
+    const skip = seg0 === '(auth)' || seg0 === 'profile-select' || seg0 === 'subscription'
+      || seg0 === 'player' || seg0 === 'iptv-player' || onDownloadsTab;
+    if (skip) return;
+    router.replace('/(tabs)/downloads');
+  }, [isOnline, token, loading, activeProfile, segments, navState?.key]);
 
   // Handle notification tap navigation (once nav is ready and user is logged in)
   useEffect(() => {
@@ -174,7 +201,9 @@ function AppGate() {
     }
   }, [token, loading, segments, navState?.key, activeProfile]);
 
-  return null;
+  // So mostra "novidades" depois de logado e com perfil escolhido - senao
+  // o modal aparece por cima da tela de login/selecao de perfil.
+  return token && activeProfile ? <WhatsNewModal /> : null;
 }
 
 export default function RootLayout() {

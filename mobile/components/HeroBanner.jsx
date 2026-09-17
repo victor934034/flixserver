@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef, memo } from 'react';
 import {
-  View, Text, Image, TouchableOpacity, StyleSheet,
+  View, Text, TouchableOpacity, StyleSheet,
   useWindowDimensions,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import CachedImage from './CachedImage';
 
 // Substitui qualidade "original" (~1920px) por w780 (~780px) para evitar
 // decode de JPEG enorme na thread JS — principal causa de queda de FPS na home.
@@ -43,7 +44,7 @@ function HeroBanner({ items = [] }) {
 
   return (
     <View style={{ width, height: bannerH }}>
-      <Image
+      <CachedImage
         source={{ uri: tmdbImg(item.backdrop_url) || tmdbImg(item.poster_url) }}
         style={StyleSheet.absoluteFill}
         resizeMode="cover"

@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Image, Linking } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Linking } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -8,6 +8,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useProfile, getAvatar } from '../../contexts/ProfileContext';
 import { useDownloads, fmtBytes } from '../../contexts/DownloadContext';
 import { useParental } from '../../contexts/ParentalContext';
+import CachedImage from '../../components/CachedImage';
 
 const APP_VERSION = Constants.expoConfig?.version ?? '1.0.5';
 
@@ -31,7 +32,7 @@ function ProfileAvatar({ profile, size = 88 }) {
   }
   if (isUrl(profile.avatar)) {
     return (
-      <Image
+      <CachedImage
         source={{ uri: profile.avatar }}
         style={[styles.avatarPhoto, { width: size, height: size, borderRadius: Math.round(size * 0.22) }]}
       />

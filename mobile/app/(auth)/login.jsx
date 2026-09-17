@@ -3,6 +3,7 @@ import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   KeyboardAvoidingView, Platform, ActivityIndicator, Alert, ScrollView,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter, Link } from 'expo-router';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -14,6 +15,7 @@ export default function LoginScreen() {
   const [pwEmail, setPwEmail] = useState('');
   const [pwPassword, setPwPassword] = useState('');
   const [pwLoading, setPwLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const [otpEmail, setOtpEmail] = useState('');
   const [otpLoading, setOtpLoading] = useState(false);
@@ -82,19 +84,28 @@ export default function LoginScreen() {
               keyboardType="email-address"
               autoComplete="email"
             />
-            <TextInput
-              style={styles.input}
-              placeholder="Senha"
-              placeholderTextColor="#666"
-              value={pwPassword}
-              onChangeText={setPwPassword}
-              secureTextEntry
-              autoCapitalize="none"
-              autoCorrect={false}
-              autoComplete="password"
-              returnKeyType="done"
-              onSubmitEditing={handlePasswordLogin}
-            />
+            <View style={styles.passwordWrap}>
+              <TextInput
+                style={styles.passwordInput}
+                placeholder="Senha"
+                placeholderTextColor="#666"
+                value={pwPassword}
+                onChangeText={setPwPassword}
+                secureTextEntry={!showPassword}
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="password"
+                returnKeyType="done"
+                onSubmitEditing={handlePasswordLogin}
+              />
+              <TouchableOpacity
+                style={styles.eyeBtn}
+                onPress={() => setShowPassword(v => !v)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons name={showPassword ? 'eye-off' : 'eye'} size={20} color="#888" />
+              </TouchableOpacity>
+            </View>
             <TouchableOpacity style={styles.button} onPress={handlePasswordLogin} disabled={pwLoading}>
               {pwLoading
                 ? <ActivityIndicator color="#fff" />
@@ -162,6 +173,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#1f1f1f', color: '#fff', padding: 16,
     borderRadius: 8, marginBottom: 14, fontSize: 16,
     borderWidth: 1, borderColor: '#2a2a2a',
+  },
+  passwordWrap: {
+    position: 'relative', justifyContent: 'center', marginBottom: 14,
+  },
+  passwordInput: {
+    backgroundColor: '#1f1f1f', color: '#fff', padding: 16, paddingRight: 48,
+    borderRadius: 8, fontSize: 16,
+    borderWidth: 1, borderColor: '#2a2a2a',
+  },
+  eyeBtn: {
+    position: 'absolute', right: 4, top: 0, bottom: 0,
+    width: 44, alignItems: 'center', justifyContent: 'center',
   },
   button: {
     backgroundColor: '#E50914', padding: 16,

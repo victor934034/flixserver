@@ -1,20 +1,21 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, FlatList,
-  Modal, TextInput, ScrollView, Alert, ActivityIndicator, Image,
+  Modal, TextInput, ScrollView, Alert, ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { useProfile, AVATARS, getAvatar } from '../contexts/ProfileContext';
 import api from '../lib/api';
+import CachedImage from '../components/CachedImage';
 
 const isUrl = (s) => typeof s === 'string' && s.startsWith('http');
 
 function AvatarCircle({ avatarId, size = 72 }) {
   if (isUrl(avatarId)) {
     return (
-      <Image
+      <CachedImage
         source={{ uri: avatarId }}
         style={{ width: size, height: size, borderRadius: Math.round(size * 0.22) }}
       />
@@ -269,7 +270,7 @@ export default function ProfileSelectScreen() {
                         style={[styles.avatarOpt, selected && styles.avatarOptSelected]}
                         activeOpacity={0.75}
                       >
-                        <Image source={{ uri: av.url }} style={styles.avatarOptImg} />
+                        <CachedImage source={{ uri: av.url }} style={styles.avatarOptImg} />
                         {selected && (
                           <View style={styles.selectedBadge}>
                             <Ionicons name="checkmark" size={12} color="#fff" />

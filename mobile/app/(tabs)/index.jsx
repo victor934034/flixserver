@@ -1,13 +1,14 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, ActivityIndicator,
-  Image, TouchableOpacity, useWindowDimensions,
+  TouchableOpacity, useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import HeroBanner from '../../components/HeroBanner';
 import ContentRow from '../../components/ContentRow';
 import SupportBanner from '../../components/SupportBanner';
+import CachedImage from '../../components/CachedImage';
 import api from '../../lib/api';
 import { useProfile } from '../../contexts/ProfileContext';
 
@@ -34,6 +35,43 @@ function ContinueCard({ item }) {
       const url = ep.file_dubbing || ep.file_subtitled || ep.file_cinema || ep.file_color || ep.file_bw;
       if (!url) { setPressing(false); return; }
       const seriesId = item.series_id || item.content_id;
+
+      // Busca a lista de episodios da serie so pra achar o proximo - sem
+      // isso (pulando direto do Continuar Assistindo pra o player) o botao
+      // de "proximo episodio" nunca aparecia, porque nextEpisode nunca era
+      // passado como parametro de navegacao (o player le nextEp so do
+      // param, nao calcula sozinho a partir do seriesId).
+      let nextEpisodeParam;
+      try {
+        const { data: allEps } = await api.get(`/series/${seriesId}/episodes`);
+        const sorted = (allEps || []).sort((a, b) =>
+          a.season_number !== b.season_number
+            ? a.season_number - b.season_number
+            : a.episode_number - b.episode_number
+        );
+        const idx = sorted.findIndex(e => e.id === ep.id);
+        const rawNext = idx >= 0 && idx + 1 < sorted.length ? sorted[idx + 1] : null;
+        const nextEp = rawNext && (rawNext.file_dubbing || rawNext.file_subtitled || rawNext.file_cinema || rawNext.file_color || rawNext.file_bw) ? rawNext : null;
+        if (nextEp) {
+          nextEpisodeParam = JSON.stringify({
+            id: nextEp.id,
+            title: nextEp.title || `Episódio ${nextEp.episode_number}`,
+            episode_number: nextEp.episode_number,
+            season_number: nextEp.season_number,
+            thumbnail_url: nextEp.thumbnail_url || null,
+            file_dubbing: nextEp.file_dubbing || null,
+            file_subtitled: nextEp.file_subtitled || null,
+            file_cinema: nextEp.file_cinema || null,
+            file_color: nextEp.file_color || null,
+            file_bw: nextEp.file_bw || null,
+            subtitle_pt: nextEp.subtitle_pt || null,
+            subtitle_en: nextEp.subtitle_en || null,
+            subtitle_es: nextEp.subtitle_es || null,
+            intro_end: nextEp.intro_end || null,
+          });
+        }
+      } catch {}
+
       const playerParams = {
         url,
         title: `${item.title || ''} · T${ep.season_number}E${String(ep.episode_number).padStart(2, '0')}${ep.title ? ` · ${ep.title}` : ''}`,
@@ -56,6 +94,7 @@ function ContinueCard({ item }) {
       };
       if (ep.intro_end) playerParams.introEnd = String(ep.intro_end);
       if (item.progress > 5) playerParams.startAt = String(Math.floor(item.progress));
+      if (nextEpisodeParam) playerParams.nextEpisode = nextEpisodeParam;
       router.push({ pathname: '/player', params: playerParams });
     } catch {}
     setPressing(false);
@@ -65,7 +104,7 @@ function ContinueCard({ item }) {
     <TouchableOpacity onPress={handlePress} style={styles.continueCard} activeOpacity={0.75} disabled={pressing}>
       <View style={{ width: W, height: H }}>
         {item.poster_url ? (
-          <Image source={{ uri: item.poster_url }} style={{ width: W, height: H, borderRadius: 6, opacity: pressing ? 0.5 : 1 }} resizeMode="cover" />
+          <CachedImage source={{ uri: item.poster_url }} style={{ width: W, height: H, borderRadius: 6, opacity: pressing ? 0.5 : 1 }} resizeMode="cover" />
         ) : (
           <View style={[styles.continuePlaceholder, { width: W, height: H }]} />
         )}
@@ -194,7 +233,7 @@ export default function HomeScreen() {
                 >
                   <View style={{ width: 150, height: 90 }}>
                     {ep.poster_url ? (
-                      <Image source={{ uri: ep.poster_url }} style={styles.recentEpThumb} resizeMode="cover" />
+                      <CachedImage source={{ uri: ep.poster_url }} style={styles.recentEpThumb} resizeMode="cover" />
                     ) : (
                       <View style={[styles.recentEpThumb, styles.collectionCoverPlaceholder]} />
                     )}
@@ -226,7 +265,7 @@ export default function HomeScreen() {
                   onPress={() => router.push(`/cronologia/${c.slug}`)}
                 >
                   {c.cover_url ? (
-                    <Image source={{ uri: c.cover_url }} style={styles.collectionCover} resizeMode="cover" />
+                    <CachedImage source={{ uri: c.cover_url }} style={styles.collectionCover} resizeMode="cover" />
                   ) : (
                     <View style={[styles.collectionCover, styles.collectionCoverPlaceholder]}>
                       <Text style={styles.collectionCoverText}>{c.name?.[0]}</Text>

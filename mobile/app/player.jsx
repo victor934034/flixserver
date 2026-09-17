@@ -1012,8 +1012,15 @@ export default function PlayerScreen() {
                 {/* Chromecast — toque no ícone abre a lista de dispositivos nativa */}
                 {!isLocal && (
                   <View style={styles.castOption}>
+                    {/* O CastButton nativo ignora tintColor de forma inconsistente no
+                        Android (fica cinza escuro em cima do fundo escuro, quase
+                        invisivel) - por isso ele fica por cima totalmente transparente
+                        so pra continuar abrindo a lista de dispositivos ao tocar,
+                        enquanto o icone visivel e o nosso, com a cor que a gente
+                        controla de verdade. */}
                     <View style={[styles.castIconBox, isCasting && { backgroundColor: '#E50914' }]}>
-                      <CastButton style={{ width: 24, height: 24 }} tintColor="#fff" />
+                      <Ionicons name="tv-outline" size={22} color="#fff" />
+                      <CastButton style={StyleSheet.absoluteFillObject} tintColor="transparent" />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.castOptionTitle}>Chromecast</Text>
