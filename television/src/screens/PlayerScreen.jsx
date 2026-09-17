@@ -262,6 +262,9 @@ export default function PlayerScreen({ navigation, route }) {
   const [remuxActive, setRemuxActive] = useState(false);
   const autoRemuxTriedRef = useRef(false);
   const [, forceFocusRewire] = useState(0);
+  const sessionIdRef = useRef(Math.random().toString(36).slice(2) + Date.now());
+  const [streamBlocked, setStreamBlocked] = useState(false);
+  const [streamBlockInfo, setStreamBlockInfo] = useState(null);
 
   const currentUrl = tracks[trackKey] || initialUrl;
 
@@ -279,6 +282,35 @@ export default function PlayerScreen({ navigation, route }) {
   useEffect(() => {
     forceFocusRewire(v => v + 1);
   }, [loaded, prevEp, nextEp, showSkip, availTracks.length, availSubs.length]);
+
+  // Limite de telas simultâneas por conta — mesmo endpoint/regra do app
+  // mobile (backend conta por user_id, sem distinguir plataforma). Sem
+  // isso, assistir pela TV nunca contava nem era bloqueado pelo limite
+  // do plano.
+  useEffect(() => {
+    let alive = true;
+    const sessionId = sessionIdRef.current;
+    api.post('/streams/start', { session_id: sessionId, content_title: title })
+      .then(() => {
+        if (!alive) { api.delete(`/streams/${sessionId}`).catch(() => {}); return; }
+      })
+      .catch(e => {
+        if (!alive) return;
+        if (e.response?.status === 429) {
+          player.pause();
+          setStreamBlocked(true);
+          setStreamBlockInfo(e.response.data);
+        }
+      });
+    const heartbeat = setInterval(() => {
+      api.post(`/streams/heartbeat/${sessionId}`).catch(() => {});
+    }, 30000);
+    return () => {
+      alive = false;
+      clearInterval(heartbeat);
+      api.delete(`/streams/${sessionId}`).catch(() => {});
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Carrega e parseia VTT externo quando a legenda muda (overlay manual)
   useEffect(() => {
@@ -508,6 +540,19 @@ export default function PlayerScreen({ navigation, route }) {
           <Ionicons name="alert-circle" size={r(56)} color={ACCENT} />
           <Text style={s.errTitle}>Não foi possível reproduzir</Text>
           <Text style={s.errMsg}>{error}</Text>
+          <Text style={s.errHint}>Pressione Voltar para sair</Text>
+        </View>
+      )}
+
+      {/* Limite de telas simultâneas atingido */}
+      {streamBlocked && (
+        <View style={[s.center, { backgroundColor: 'rgba(0,0,0,0.96)' }]}>
+          <Ionicons name="tv" size={r(56)} color={ACCENT} />
+          <Text style={s.errTitle}>Limite de telas atingido</Text>
+          <Text style={s.errMsg}>
+            Já há {streamBlockInfo?.active ?? streamBlockInfo?.max_streams ?? 1}{' '}
+            {streamBlockInfo?.active === 1 ? 'dispositivo reproduzindo' : 'dispositivos reproduzindo'} nesta conta.
+          </Text>
           <Text style={s.errHint}>Pressione Voltar para sair</Text>
         </View>
       )}
