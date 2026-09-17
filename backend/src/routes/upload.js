@@ -730,19 +730,39 @@ function convertSrtToVtt(srt) {
     .trim();
 }
 
+// stderr do ffmpeg sempre começa com o banner de versão/config (que sozinho
+// já passa de 400 caracteres) — cortar do INÍCIO só mostra esse banner e
+// nunca o erro de verdade, que fica nas últimas linhas ("Unknown option",
+// "No such filter", "Conversion failed!" etc.). Pega o final em vez do início.
+function ffmpegErrTail(e, n = 800) {
+  const raw = (e && (e.stderr || e.message)) || 'erro desconhecido';
+  return raw.length > n ? '…' + raw.slice(-n) : raw;
+}
+
 // MP4 usa "moov atom" no início (faststart); MKV usa "Cues" (índice) no
 // início — mesmo objetivo (abrir/dar seek sem baixar o arquivo inteiro
-// primeiro), sintaxe de ffmpeg diferente por container. `cues_to_front`
-// é o equivalente do Matroska pro `+faststart` do MP4.
+// primeiro), sintaxe de ffmpeg diferente por container.
+//
+// `-cues_to_front` NÃO existe no muxer matroska do ffmpeg estático usado em
+// produção (build de 2017/2018) - confirmado testando `-h muxer=matroska`
+// localmente num build da mesma época, só aparece `-reserve_index_space`.
+// Usar uma opção inexistente fazia TODO episódio mkv falhar (ffmpeg nem
+// chegava a rodar, só imprimia o erro de opção desconhecida). O jeito que
+// existe nessa versão: reservar espaço no início do arquivo pro índice;
+// o ffmpeg escreve as Cues nesse espaço reservado ao final do processo
+// (sem precisar de segunda passada). 300KB cobre confortavelmente um
+// episódio de TV inteiro (cada entrada de Cue tem só ~15-20 bytes).
 const OPTIMIZABLE_EXT_RE = /\.(mp4|mkv)$/i;
+const MKV_RESERVED_INDEX_BYTES = 300_000;
 function remuxArgsFor(ext, input, output, extraInputArgs = []) {
   const isMkv = ext.toLowerCase() === '.mkv';
   return [
+    '-hide_banner',
     ...extraInputArgs,
     '-i', input,
     '-c', 'copy',
     '-avoid_negative_ts', 'make_zero',
-    ...(isMkv ? ['-cues_to_front', '1'] : ['-movflags', '+faststart']),
+    ...(isMkv ? ['-reserve_index_space', String(MKV_RESERVED_INDEX_BYTES)] : ['-movflags', '+faststart']),
     '-y', output,
   ];
 }
@@ -773,7 +793,7 @@ router.post('/fix-faststart', async (req, res) => {
         { maxBuffer: 10 * 1024 * 1024, timeout: 7_200_000 },
       );
     } catch (e) {
-      throw new Error('ffmpeg falhou: ' + e.message?.slice(0, 200));
+      throw new Error('ffmpeg falhou: ' + ffmpegErrTail(e));
     }
 
     const { uploadFileFromPath } = require('../services/backblaze');
@@ -908,7 +928,7 @@ router.post('/batch-fix-faststart', async (_req, res) => {
         console.log(`[batch-faststart] ${job.done}/${job.total} OK: ${origName}`);
       } catch (e) {
         job.errors++;
-        job.lastError = (e.stderr || e.message || 'erro desconhecido').slice(0, 400);
+        job.lastError = ffmpegErrTail(e);
         console.error(`[batch-faststart] ERRO (${item.table}#${item.id} ${item.field}):`, e.stderr || e.message);
       } finally {
         try { if (tmpIn)  fs.unlinkSync(tmpIn);  } catch {}
@@ -1035,7 +1055,7 @@ router.post('/fix-series-faststart', async (req, res) => {
         console.log(`[fix-series-faststart] ${job.done}/${job.total} OK: ${origName}`);
       } catch (e) {
         job.errors++;
-        job.lastError = (e.stderr || e.message || 'erro desconhecido').slice(0, 400);
+        job.lastError = ffmpegErrTail(e);
         console.error(`[fix-series-faststart] ERRO (episodes#${item.id} ${item.field}):`, e.stderr || e.message);
       } finally {
         try { if (tmpIn)  fs.unlinkSync(tmpIn);  } catch {}
