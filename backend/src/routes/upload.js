@@ -730,36 +730,54 @@ function convertSrtToVtt(srt) {
     .trim();
 }
 
-// Corrige faststart de um MP4 já no B2 (baixa, processa, re-envia com mesmo nome)
+// MP4 usa "moov atom" no início (faststart); MKV usa "Cues" (índice) no
+// início — mesmo objetivo (abrir/dar seek sem baixar o arquivo inteiro
+// primeiro), sintaxe de ffmpeg diferente por container. `cues_to_front`
+// é o equivalente do Matroska pro `+faststart` do MP4.
+const OPTIMIZABLE_EXT_RE = /\.(mp4|mkv)$/i;
+function remuxArgsFor(ext, input, output, extraInputArgs = []) {
+  const isMkv = ext.toLowerCase() === '.mkv';
+  return [
+    ...extraInputArgs,
+    '-i', input,
+    '-c', 'copy',
+    '-avoid_negative_ts', 'make_zero',
+    ...(isMkv ? ['-cues_to_front', '1'] : ['-movflags', '+faststart']),
+    '-y', output,
+  ];
+}
+function contentTypeFor(ext) {
+  return ext.toLowerCase() === '.mkv' ? 'video/x-matroska' : 'video/mp4';
+}
+
+// Corrige faststart/cues de um MP4 ou MKV já no B2 (baixa, processa, re-envia com mesmo nome)
 router.post('/fix-faststart', async (req, res) => {
   const { cdnUrl, movieId, movieType, field } = req.body;
   if (!cdnUrl) return res.status(400).json({ error: 'cdnUrl é obrigatório' });
-  if (!/\.mp4$/i.test(cdnUrl)) return res.json({ skipped: true, reason: 'Não é MP4' });
+  if (!OPTIMIZABLE_EXT_RE.test(cdnUrl)) return res.json({ skipped: true, reason: 'Não é MP4/MKV' });
 
   let tmpOutput = null;
   try {
     const origName = decodeURIComponent(new URL(cdnUrl).pathname.replace(/^\//, ''));
+    const ext = path.extname(origName) || '.mp4';
     const { url: b2Url, token: b2Token } = await getDirectDownloadInfo(origName);
     const b2AuthHdr = `Authorization: ${b2Token}\r\nUser-Agent: ${UA}\r\n`;
 
-    tmpOutput = path.join(os.tmpdir(), `fh_fs_${Date.now()}.mp4`);
+    tmpOutput = path.join(os.tmpdir(), `fh_fs_${Date.now()}${ext}`);
     console.log(`[fix-faststart] processando ${origName}`);
 
     try {
-      await execFileAsync(ffmpegPath, [
-        '-headers', b2AuthHdr,
-        '-i', b2Url,
-        '-c', 'copy',
-        '-avoid_negative_ts', 'make_zero',
-        '-movflags', '+faststart',
-        '-y', tmpOutput,
-      ], { maxBuffer: 10 * 1024 * 1024, timeout: 7_200_000 });
+      await execFileAsync(
+        ffmpegPath,
+        remuxArgsFor(ext, b2Url, tmpOutput, ['-headers', b2AuthHdr]),
+        { maxBuffer: 10 * 1024 * 1024, timeout: 7_200_000 },
+      );
     } catch (e) {
       throw new Error('ffmpeg falhou: ' + e.message?.slice(0, 200));
     }
 
     const { uploadFileFromPath } = require('../services/backblaze');
-    const result = await uploadFileFromPath(tmpOutput, origName, 'video/mp4');
+    const result = await uploadFileFromPath(tmpOutput, origName, contentTypeFor(ext));
 
     if (movieId && field) {
       const { supabase } = require('../services/supabase');
@@ -817,7 +835,7 @@ router.post('/batch-fix-faststart', async (_req, res) => {
     const items = [];
     for (const row of data || []) {
       for (const f of fields) {
-        if (row[f] && /\.mp4$/i.test(row[f])) {
+        if (row[f] && OPTIMIZABLE_EXT_RE.test(row[f])) {
           items.push({ table, id: row.id, field: f, cdnUrl: row[f] });
         }
       }
@@ -834,7 +852,7 @@ router.post('/batch-fix-faststart', async (_req, res) => {
   }
 
   if (allItems.length === 0) {
-    return res.json({ ok: true, jobId: null, total: 0, message: 'Nenhum arquivo MP4 encontrado.' });
+    return res.json({ ok: true, jobId: null, total: 0, message: 'Nenhum arquivo MP4/MKV encontrado.' });
   }
 
   // Filtra os que já foram processados em rodadas anteriores (persiste no Supabase)
@@ -864,25 +882,26 @@ router.post('/batch-fix-faststart', async (_req, res) => {
       try {
         const origName = decodeURIComponent(new URL(item.cdnUrl).pathname.replace(/^\//, ''));
         job.lastFile = origName.slice(-60);
+        const ext = path.extname(origName) || '.mp4';
 
         // URL do B2 com token já embutido — axios baixa sem header extra
         const { url: b2AuthUrl } = await getDirectDownloadInfo(origName);
         const ts = Date.now();
-        tmpIn  = path.join(os.tmpdir(), `fh_bfs_in_${ts}.mp4`);
-        tmpOut = path.join(os.tmpdir(), `fh_bfs_${ts}.mp4`);
+        tmpIn  = path.join(os.tmpdir(), `fh_bfs_in_${ts}${ext}`);
+        tmpOut = path.join(os.tmpdir(), `fh_bfs_${ts}${ext}`);
 
         // Baixa para disco primeiro — FFmpeg bundled pode não suportar HTTPS
         console.log(`[batch-faststart] baixando ${origName}...`);
         await downloadB2File(b2AuthUrl, null, tmpIn, 5);
 
-        // Remux local: move moov atom para início (faststart)
-        await execFileAsync(ffmpegPath, [
-          '-i', tmpIn,
-          '-c', 'copy', '-avoid_negative_ts', 'make_zero', '-movflags', '+faststart',
-          '-y', tmpOut,
-        ], { maxBuffer: 10 * 1024 * 1024, timeout: 7_200_000 });
+        // Remux local: move moov atom (mp4) / cues (mkv) para o início
+        await execFileAsync(
+          ffmpegPath,
+          remuxArgsFor(ext, tmpIn, tmpOut),
+          { maxBuffer: 10 * 1024 * 1024, timeout: 7_200_000 },
+        );
 
-        await uploadFileFromPath(tmpOut, origName, 'video/mp4');
+        await uploadFileFromPath(tmpOut, origName, contentTypeFor(ext));
         job.done++;
         doneSet.add(item.cdnUrl);
         saveFaststartDone(supabase, doneSet).catch(() => {}); // fire-and-forget, persiste no Supabase
@@ -929,7 +948,7 @@ router.post('/fix-series-faststart', async (req, res) => {
       if (epsErr) throw new Error(`Supabase episodes: ${epsErr.message}`);
       for (const row of eps || []) {
         for (const f of EPISODE_FIELDS) {
-          if (row[f] && /\.mp4$/i.test(row[f])) {
+          if (row[f] && OPTIMIZABLE_EXT_RE.test(row[f])) {
             allItems.push({ table: 'episodes', id: row.id, field: f, cdnUrl: row[f] });
           }
         }
@@ -950,7 +969,7 @@ router.post('/fix-series-faststart', async (req, res) => {
 
         for (const row of eps || []) {
           for (const f of EPISODE_FIELDS) {
-            if (row[f] && /\.mp4$/i.test(row[f])) {
+            if (row[f] && OPTIMIZABLE_EXT_RE.test(row[f])) {
               allItems.push({ table: 'episodes', id: row.id, field: f, cdnUrl: row[f] });
             }
           }
@@ -965,8 +984,8 @@ router.post('/fix-series-faststart', async (req, res) => {
     return res.json({
       ok: true, jobId: null, total: 0,
       message: notFound.length
-        ? `Nenhum episódio .mp4 encontrado. Série(s) não encontrada(s): ${notFound.join(', ')}`
-        : 'Nenhum episódio .mp4 encontrado para essas séries.',
+        ? `Nenhum episódio .mp4/.mkv encontrado. Série(s) não encontrada(s): ${notFound.join(', ')}`
+        : 'Nenhum episódio .mp4/.mkv encontrado para essas séries.',
     });
   }
 
@@ -994,19 +1013,22 @@ router.post('/fix-series-faststart', async (req, res) => {
       try {
         const origName = decodeURIComponent(new URL(item.cdnUrl).pathname.replace(/^\//, ''));
         job.lastFile = origName.slice(-60);
+        const ext = path.extname(origName) || '.mp4';
         const { url: b2AuthUrl } = await getDirectDownloadInfo(origName);
         const ts = Date.now();
-        tmpIn  = path.join(os.tmpdir(), `fh_fss_in_${ts}.mp4`);
-        tmpOut = path.join(os.tmpdir(), `fh_fss_${ts}.mp4`);
+        tmpIn  = path.join(os.tmpdir(), `fh_fss_in_${ts}${ext}`);
+        tmpOut = path.join(os.tmpdir(), `fh_fss_${ts}${ext}`);
 
         console.log(`[fix-series-faststart] baixando ${origName}...`);
         await downloadB2File(b2AuthUrl, null, tmpIn, 5);
 
-        await execFileAsync(ffmpegPath, [
-          '-i', tmpIn, '-c', 'copy', '-avoid_negative_ts', 'make_zero', '-movflags', '+faststart', '-y', tmpOut,
-        ], { maxBuffer: 10 * 1024 * 1024, timeout: 7_200_000 });
+        await execFileAsync(
+          ffmpegPath,
+          remuxArgsFor(ext, tmpIn, tmpOut),
+          { maxBuffer: 10 * 1024 * 1024, timeout: 7_200_000 },
+        );
 
-        await uploadFileFromPath(tmpOut, origName, 'video/mp4');
+        await uploadFileFromPath(tmpOut, origName, contentTypeFor(ext));
         job.done++;
         doneSet.add(item.cdnUrl);
         saveFaststartDone(supabase, doneSet).catch(() => {});
