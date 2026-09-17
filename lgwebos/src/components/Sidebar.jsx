@@ -30,6 +30,14 @@ const NAV = [
     ),
   },
   {
+    key: 'minha-lista', label: 'Minha Lista',
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2z"/>
+      </svg>
+    ),
+  },
+  {
     key: 'search', label: 'Buscar',
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
@@ -42,14 +50,6 @@ const NAV = [
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
         <path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12zM9 10l6 3.5L9 17z"/>
-      </svg>
-    ),
-  },
-  {
-    key: 'minha-lista', label: 'Minha Lista',
-    icon: (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2z"/>
       </svg>
     ),
   },

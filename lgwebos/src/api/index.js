@@ -1,6 +1,7 @@
 import axios from 'axios';
 
 const BASE_URL = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) || '';
+export { BASE_URL };
 
 const api = axios.create({ baseURL: BASE_URL, timeout: 15000 });
 
@@ -67,6 +68,11 @@ export const castAPI = {
 // ── Genres ────────────────────────────────────────────────────────────────────
 export const genresAPI = {
   list: () => api.get('/api/genres'),
+};
+
+// ── Recommendations ───────────────────────────────────────────────────────────
+export const recommendationsAPI = {
+  get: (profileId) => api.get('/api/recommendations', profileId ? { params: { profile_id: profileId } } : {}),
 };
 
 // ── IPTV ──────────────────────────────────────────────────────────────────────

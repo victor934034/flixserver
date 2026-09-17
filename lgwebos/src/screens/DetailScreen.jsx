@@ -4,100 +4,191 @@ import api, { moviesAPI, seriesAPI, watchlistAPI, likesAPI } from '../api/index.
 import { KEY, useKeyDown } from '../hooks/useNav.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 
+const ACCENT = '#E50914';
+
 const VERSION_META = {
-  dubbing:   { label: 'Dublado',   color: '#E50914' },
-  subtitled: { label: 'Legendado', color: '#1a73e8' },
-  cinema:    { label: 'Original',  color: '#555' },
-  '4k':      { label: '4K',        color: '#f59e0b' },
-  color:     { label: 'Colorido',  color: '#10b981' },
-  bw:        { label: 'P&B',       color: '#8b5cf6' },
+  dubbing:   { label: 'Dublado',   sub: 'Áudio português', icon: '🔊' },
+  subtitled: { label: 'Legendado', sub: 'Áudio original',  icon: '💬' },
+  cinema:    { label: 'Cinema',    sub: null,              icon: '🎬' },
+  '4k':      { label: '4K HDR',    sub: 'Ultra HD',        icon: '💎' },
+  color:     { label: 'Colorido',  sub: 'Versão colorida', icon: '🎨' },
+  bw:        { label: 'P&B',       sub: 'Preto e branco',  icon: '⚫' },
 };
 
-// focusSection: 'back' | 'actions' | 'seasons' | 'episodes' | 'like'
-// focusIdx within each section
-
-function Btn({ focused, danger, accent, children, onClick, style = {} }) {
+// ── Back button ─────────────────────────────────────────────────────────────
+function BackBtn({ onClick }) {
   return (
     <div
       onClick={onClick}
       style={{
+        position: 'absolute', top: 20, left: 20, zIndex: 30,
         display: 'inline-flex', alignItems: 'center', gap: 8,
-        padding: '12px 24px', borderRadius: 30, cursor: 'none',
-        background: focused
-          ? (danger ? '#c0392b' : accent ? '#fff' : 'rgba(255,255,255,0.22)')
-          : (accent ? '#E50914' : danger ? 'rgba(229,9,20,0.15)' : 'rgba(255,255,255,0.10)'),
-        border: '2px solid ' + (focused ? '#fff' : 'transparent'),
-        color: focused && accent ? '#000' : '#fff',
-        fontWeight: 700, fontSize: 15,
-        ...style,
+        background: 'rgba(0,0,0,0.6)', borderRadius: 30,
+        padding: '9px 14px', border: '2px solid transparent', cursor: 'pointer',
+        color: '#fff', fontSize: 15, fontWeight: 700,
       }}
     >
-      {children}
+      ← Voltar
     </div>
   );
 }
 
-function EpisodeItem({ ep, focused, onClick, epProgress }) {
-  const url = ep.file_dubbing || ep.file_subtitled || ep.file_cinema || ep.file_color || ep.file_bw;
-  if (!url) return null;
-  const label = 'EP ' + String(ep.episode_number).padStart(2, '0');
+// ── Action button (stacked pill, left panel) ────────────────────────────────
+function ActionBtn({ label, sublabel, icon, focused, primary, danger, onClick }) {
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        borderRadius: 10, padding: '10px 16px',
+        border: '2px solid ' + (focused ? '#fff' : 'transparent'),
+        background: focused
+          ? (danger ? '#c0392b' : primary ? '#fff' : 'rgba(255,255,255,0.15)')
+          : (danger ? 'rgba(229,9,20,0.15)' : primary ? '#fff' : 'rgba(60,60,60,0.85)'),
+        cursor: 'pointer', marginBottom: 6,
+        display: 'flex', alignItems: 'center', gap: 12,
+      }}
+    >
+      <div style={{
+        width: 32, height: 32, borderRadius: 16, flexShrink: 0,
+        // Fundo do botao primario fica branco tanto focado quanto nao -
+        // a cor do circulo/texto tem que seguir so o `primary`, nunca o
+        // `focused` isolado, senao (focado + primario) virava texto branco
+        // em cima de fundo branco = "some" a escrita.
+        background: primary ? 'rgba(0,0,0,0.12)' : 'rgba(255,255,255,0.15)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15,
+      }}>
+        {icon}
+      </div>
+      <div>
+        <div style={{ fontSize: 16, fontWeight: 800, color: primary ? '#000' : '#fff' }}>{label}</div>
+        {!!sublabel && (
+          <div style={{ fontSize: 12, color: primary ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.55)', marginTop: 1 }}>
+            {sublabel}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Season dropdown ──────────────────────────────────────────────────────────
+function SeasonDropdown({ seasons, season, focused, open, focIdx }) {
+  if (seasons.length <= 1) return null;
+  return (
+    <div style={{ position: 'relative' }}>
+      <div style={{
+        display: 'inline-flex', alignItems: 'center', gap: 10,
+        padding: '10px 18px', borderRadius: 8, cursor: 'pointer',
+        border: '2px solid ' + (focused ? '#fff' : 'rgba(255,255,255,0.12)'),
+        background: focused ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.06)',
+        fontSize: 15, fontWeight: 800, color: '#fff',
+      }}>
+        Temporada {season}
+        <span style={{ fontSize: 11, opacity: 0.6 }}>{open ? '▲' : '▼'}</span>
+      </div>
+
+      {open && (
+        <div style={{
+          position: 'absolute', top: 52, left: 0, zIndex: 50,
+          minWidth: 240, background: 'rgba(12,12,14,0.98)',
+          borderRadius: 12, border: '1px solid rgba(255,255,255,0.10)',
+          padding: '10px 0', boxShadow: '0 8px 40px rgba(0,0,0,0.7)',
+        }}>
+          <div style={{ fontSize: 10, fontWeight: 800, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: 1.5, padding: '0 18px 8px' }}>
+            Temporadas
+          </div>
+          {seasons.map((sv, si) => (
+            <div
+              key={sv}
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '13px 18px', margin: '0 6px', borderRadius: 8,
+                border: '2px solid ' + (focIdx === si ? 'rgba(255,255,255,0.5)' : 'transparent'),
+                background: focIdx === si ? 'rgba(255,255,255,0.10)' : 'transparent',
+                fontSize: 15, fontWeight: sv === season ? 800 : 500,
+                color: sv === season ? '#fff' : 'rgba(255,255,255,0.65)',
+              }}
+            >
+              Temporada {sv}
+              {sv === season && <span style={{ color: ACCENT, fontSize: 16 }}>✓</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Episode item ─────────────────────────────────────────────────────────────
+function EpisodeItem({ ep, focused, onClick, epProgress, innerRef }) {
+  const hasFile = !!(ep.file_dubbing || ep.file_subtitled || ep.file_cinema || ep.file_color || ep.file_bw);
   const pct = epProgress > 0 ? Math.min(epProgress * 100, 100) : 0;
   return (
     <div
-      onClick={onClick}
+      ref={innerRef}
+      onClick={() => hasFile && onClick()}
       style={{
-        display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 16,
-        padding: '14px 20px', borderRadius: 12, marginBottom: 8,
-        background: focused ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.04)',
-        border: '2px solid ' + (focused ? '#fff' : 'transparent'),
-        cursor: 'none',
+        borderRadius: 10, marginBottom: 4, overflow: 'hidden', position: 'relative',
+        border: '2px solid ' + (focused ? 'rgba(255,255,255,0.18)' : 'transparent'),
+        background: focused ? 'rgba(255,255,255,0.07)' : 'transparent',
+        opacity: hasFile ? 1 : 0.35,
+        cursor: hasFile ? 'pointer' : 'default',
       }}
     >
-      <div style={{ width: 140, height: 78, borderRadius: 8, overflow: 'hidden', flexShrink: 0, background: '#1a1a1a', position: 'relative' }}>
-        {ep.thumbnail_url && <img src={ep.thumbnail_url} alt={label} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
-        {pct > 0 && (
-          <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 3, background: 'rgba(0,0,0,0.4)' }}>
-            <div style={{ height: '100%', width: pct + '%', background: '#E50914' }} />
-          </div>
-        )}
-      </div>
-      <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 13, color: '#E50914', fontWeight: 700, marginBottom: 4 }}>{label}</div>
-        <div style={{ fontSize: 15, color: focused ? '#fff' : '#ccc', fontWeight: 700, marginBottom: 4 }}>{ep.title || label}</div>
-        {ep.synopsis && (
-          <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', lineHeight: 1.4, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-            {ep.synopsis}
-          </div>
-        )}
-      </div>
-      {ep.duration && <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', flexShrink: 0 }}>{ep.duration} min</div>}
-    </div>
-  );
-}
+      {focused && <div style={{ position: 'absolute', left: 0, top: 10, bottom: 10, width: 3, background: ACCENT, borderRadius: 2 }} />}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 10 }}>
+        <div style={{
+          width: 200, height: 113, borderRadius: 6, overflow: 'hidden', flexShrink: 0,
+          background: '#161616', position: 'relative',
+          border: '2px solid ' + (focused ? 'rgba(255,255,255,0.3)' : 'transparent'),
+        }}>
+          {ep.thumbnail_url
+            ? <img src={ep.thumbnail_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#2a2a2a', fontSize: 28, fontWeight: 900 }}>{ep.episode_number}</div>
+          }
+          {pct > 0 && (
+            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 3, background: 'rgba(0,0,0,0.4)' }}>
+              <div style={{ height: '100%', width: pct + '%', background: ACCENT }} />
+            </div>
+          )}
+          {focused && hasFile && (
+            <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 34 }}>▶</div>
+          )}
+          {!focused && (
+            <div style={{ position: 'absolute', bottom: 4, right: 4, background: 'rgba(0,0,0,0.78)', padding: '2px 5px', borderRadius: 4, fontSize: 11, color: '#ccc', fontWeight: 600 }}>
+              {ep.duration ? ep.duration + 'm' : '—'}
+            </div>
+          )}
+        </div>
 
-function InfoCell({ label, value }) {
-  return (
-    <div>
-      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1.5, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', marginBottom: 5 }}>
-        {label}
-      </div>
-      <div style={{ fontSize: 15, fontWeight: 600, color: 'rgba(255,255,255,0.8)' }}>
-        {value}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ color: '#555', fontSize: 11, fontWeight: 700, marginBottom: 3, letterSpacing: 0.5 }}>
+            EP {String(ep.episode_number).padStart(2, '0')}
+          </div>
+          <div style={{
+            color: focused ? '#fff' : '#bbb', fontSize: 14, fontWeight: focused ? 800 : 600, marginBottom: 4,
+            overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+          }}>
+            {ep.title || 'Episódio ' + ep.episode_number}
+          </div>
+          {!!ep.synopsis && (
+            <div style={{
+              color: '#555', fontSize: 12, lineHeight: 1.4, overflow: 'hidden',
+              display: '-webkit-box', WebkitLineClamp: focused ? 3 : 2, WebkitBoxOrient: 'vertical',
+            }}>
+              {ep.synopsis}
+            </div>
+          )}
+          {!hasFile && <div style={{ color: '#3a3a3a', fontSize: 12, fontStyle: 'italic', marginTop: 4 }}>Não disponível</div>}
+        </div>
+
+        <div style={{
+          width: 28, height: 28, borderRadius: 14, background: ACCENT, flexShrink: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13,
+          opacity: focused ? 1 : 0,
+        }}>▶</div>
       </div>
     </div>
-  );
-}
-
-function SubtitleBadge({ label }) {
-  return (
-    <span style={{
-      padding: '6px 18px', borderRadius: 20,
-      background: 'rgba(255,255,255,0.06)',
-      border: '1.5px solid rgba(255,255,255,0.2)',
-      fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.55)',
-    }}>
-      {label}
-    </span>
   );
 }
 
@@ -118,32 +209,29 @@ export default function DetailScreen() {
   const [season,    setSeason]    = useState(seasonNum || 1);
   const [loading,   setLoading]   = useState(true);
   const [error,     setError]     = useState(null);
+  // Episodios (serie) chegam de um fetch separado do "detail" - sem essa
+  // trava, o botao "Assistir" podia renderizar antes de firstEp existir
+  // (rotulo/subtitulo incompletos ate os episodios carregarem).
+  const [episodesLoaded, setEpisodesLoaded] = useState(false);
 
-  // Watchlist
   const [wlItem,    setWlItem]    = useState(null);
-  const [wlLoading, setWlLoading] = useState(false);
-
-  // Likes
   const [likeData,  setLikeData]  = useState({ likes: 0, dislikes: 0, userVote: null });
 
-  // Episode watch progress map: ep.id → ratio (0–1) for progress bar
   const [epProgress, setEpProgress] = useState({});
-  // Episode seconds watched: ep.id → seconds (for resume)
   const [epSeconds, setEpSeconds] = useState({});
-  // Movie seconds watched (for resume)
   const [movieSeconds, setMovieSeconds] = useState(0);
 
-  // Whether we already auto-played via epId (avoid re-triggering)
   const autoPlayedRef = useRef(false);
+  // So trava a tela inteira no spinner na PRIMEIRA carga - trocar de
+  // temporada depois reseta episodesLoaded, mas nao deve voltar a tela toda
+  // pro spinner, so a lista de episodios atualiza quando estiver pronta.
+  const shownOnceRef = useRef(false);
 
-  // Focus
-  // sections: 'back'(0) | 'actions'(1) | 'seasons'(2) | 'episodes'(3)
-  // Within 'actions': back btn(0), play/version btns, watchlist, like, dislike
+  // section: 'actions' | 'seasons' | 'episodes'
   const [section,   setSection]   = useState('actions');
   const [secIdx,    setSecIdx]    = useState(0);
 
-  const epScrollRef = useRef(null);
-  const epRefs      = useRef([]);
+  const epRefs = useRef([]);
 
   useEffect(() => {
     if (!id) return;
@@ -157,23 +245,24 @@ export default function DetailScreen() {
       }
     }).catch(() => setError('Erro ao carregar')).finally(() => setLoading(false));
 
-    // Load watchlist
     const profileId = activeProfile && activeProfile.id;
     watchlistAPI.get(profileId).then(r => {
       const item = (r.data || []).find(i => i.content_id === id);
       setWlItem(item || null);
     }).catch(() => {});
 
-    // Load likes
     likesAPI.get(isSeries ? 'series' : 'movie', id).then(r => setLikeData(r.data)).catch(() => {});
   }, [id, isSeries]);
 
   useEffect(() => {
     if (!id || !isSeries) return;
-    seriesAPI.episodes(id, season).then(r => setEpisodes(r.data || [])).catch(() => setEpisodes([]));
+    setEpisodesLoaded(false);
+    seriesAPI.episodes(id, season)
+      .then(r => setEpisodes(r.data || []))
+      .catch(() => setEpisodes([]))
+      .finally(() => setEpisodesLoaded(true));
   }, [id, isSeries, season]);
 
-  // Auto-play matching episode when coming from Continue Watching (epId + startAt in URL)
   useEffect(() => {
     if (!epId || !isSeries || autoPlayedRef.current) return;
     const ep = episodes.find(e => String(e.id) === String(epId));
@@ -183,7 +272,6 @@ export default function DetailScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [episodes, epId]);
 
-  // Fetch episode watch history — progress bars + resume seconds
   useEffect(() => {
     if (!id || !isSeries) return;
     const profileId = activeProfile && activeProfile.id;
@@ -202,7 +290,6 @@ export default function DetailScreen() {
       }).catch(() => {});
   }, [id, isSeries, activeProfile]);
 
-  // Fetch movie watch history for resume
   useEffect(() => {
     if (!id || isSeries) return;
     const profileId = activeProfile && activeProfile.id;
@@ -216,7 +303,6 @@ export default function DetailScreen() {
       }).catch(() => {});
   }, [id, isSeries, activeProfile]);
 
-  // Scroll focused episode into view
   useEffect(() => {
     if (section !== 'episodes') return;
     const el = epRefs.current[secIdx];
@@ -225,18 +311,26 @@ export default function DetailScreen() {
 
   const versions = isSeries ? [] : ['dubbing','subtitled','cinema','4k','color','bw'].filter(k => detail && detail['file_' + k]);
   const currentEps = episodes.filter(e => e.season_number === season);
+  const firstEp = currentEps[0];
 
-  // Actions row items: [play/versions..., watchlist, like, dislike]
   function buildActions() {
     const acts = [];
     if (isSeries) {
-      acts.push({ id: 'play', label: '▶ ' + (currentEps[0] ? 'T' + currentEps[0].season_number + ' EP01' : 'Assistir') });
+      if (firstEp) {
+        acts.push({
+          id: 'play', label: 'Assistir', primary: true, icon: '▶',
+          sublabel: 'T' + firstEp.season_number + ' · EP ' + String(firstEp.episode_number).padStart(2,'0') + (firstEp.title ? ' — ' + firstEp.title : ''),
+        });
+      }
     } else {
-      versions.forEach(vk => acts.push({ id: 'play_' + vk, label: '▶ ' + (VERSION_META[vk] ? VERSION_META[vk].label : vk) }));
+      versions.forEach((vk, i) => {
+        const vm = VERSION_META[vk] || {};
+        acts.push({ id: 'play_' + vk, label: vm.label || vk, sublabel: vm.sub, icon: vm.icon || '▶', primary: i === 0 });
+      });
     }
-    acts.push({ id: 'watchlist', label: wlItem ? '♥ Minha lista' : '♡ Minha lista' });
-    acts.push({ id: 'like',    label: '👍 ' + (likeData.likes > 0 ? likeData.likes : 'Gostei') });
-    acts.push({ id: 'dislike', label: '👎 ' + (likeData.dislikes > 0 ? likeData.dislikes : 'Não gostei') });
+    acts.push({ id: 'watchlist', label: wlItem ? 'Na Minha Lista' : 'Minha Lista', icon: wlItem ? '✓' : '+' });
+    acts.push({ id: 'like',    label: 'Gostei' + (likeData.likes > 0 ? ' · ' + likeData.likes : ''), icon: '👍', active: likeData.userVote === 'like' });
+    acts.push({ id: 'dislike', label: 'Não gostei' + (likeData.dislikes > 0 ? ' · ' + likeData.dislikes : ''), icon: '👎', active: likeData.userVote === 'dislike', danger: likeData.userVote === 'dislike' });
     return acts;
   }
 
@@ -284,9 +378,8 @@ export default function DetailScreen() {
   async function activateAction(act) {
     if (!act) return;
     if (act.id.startsWith('play_')) { playMovie(act.id.replace('play_', ''), startAt || movieSeconds); return; }
-    if (act.id === 'play') { if (currentEps[0]) playEpisode(currentEps[0], startAt || epSeconds[currentEps[0].id] || 0); return; }
+    if (act.id === 'play') { if (firstEp) playEpisode(firstEp, startAt || epSeconds[firstEp.id] || 0); return; }
     if (act.id === 'watchlist') {
-      setWlLoading(true);
       const profileId = activeProfile && activeProfile.id;
       try {
         if (wlItem) {
@@ -296,52 +389,48 @@ export default function DetailScreen() {
           const r = await watchlistAPI.add(isSeries ? 'series' : 'movie', id, profileId);
           setWlItem(r.data);
         }
-      } catch {} finally { setWlLoading(false); }
+      } catch {}
       return;
     }
     if (act.id === 'like' || act.id === 'dislike') {
-      const vote = act.id;
       try {
-        await likesAPI.vote(isSeries ? 'series' : 'movie', id, vote);
+        await likesAPI.vote(isSeries ? 'series' : 'movie', id, act.id);
         const r = await likesAPI.get(isSeries ? 'series' : 'movie', id);
         setLikeData(r.data);
       } catch {}
     }
   }
 
-  // Keep mutable snapshot to avoid stale closures in key handler
   const st = useRef({});
-  st.current = { section, secIdx, seasons, currentEps, actions, isSeries, season, epSeconds };
+  st.current = { section, secIdx, seasons, currentEps, actions, isSeries, season, epSeconds, firstEp };
 
   useKeyDown(e => {
-    const { section, secIdx, seasons, currentEps, actions, isSeries, season, epSeconds } = st.current;
+    const { section, secIdx, seasons, currentEps, actions, isSeries, epSeconds } = st.current;
     const k = e.keyCode;
     if (k === KEY.BACK || k === KEY.BACKSPACE) { e.preventDefault(); navigate(-1); return; }
 
     if (section === 'actions') {
-      if (k === KEY.LEFT)  { e.preventDefault(); setSecIdx(i => Math.max(0, i - 1)); }
-      if (k === KEY.RIGHT) { e.preventDefault(); setSecIdx(i => Math.min(actions.length - 1, i + 1)); }
-      if (k === KEY.DOWN)  {
+      if (k === KEY.UP)   { e.preventDefault(); setSecIdx(i => Math.max(0, i - 1)); }
+      if (k === KEY.DOWN) { e.preventDefault(); setSecIdx(i => Math.min(actions.length - 1, i + 1)); }
+      if (k === KEY.RIGHT && isSeries) {
         e.preventDefault();
-        if (isSeries && seasons.length > 1) { setSection('seasons'); setSecIdx(-2); }
-        else if (isSeries && currentEps.length > 0) { setSection('episodes'); setSecIdx(0); }
+        if (seasons.length > 1) { setSection('seasons'); setSecIdx(-2); }
+        else if (currentEps.length > 0) { setSection('episodes'); setSecIdx(0); }
       }
       if (k === KEY.ENTER) { e.preventDefault(); activateAction(actions[secIdx]); }
       return;
     }
 
     if (section === 'seasons') {
-      // secIdx: -2 = botão fechado, -1 = dropdown aberto (navegando), 0+ = item do dropdown
+      // secIdx: -2 = botão fechado, 0+ = item do dropdown aberto
       if (secIdx === -2) {
-        // Foco no botão dropdown
-        if (k === KEY.UP)    { e.preventDefault(); setSection('actions'); setSecIdx(0); }
+        if (k === KEY.LEFT)  { e.preventDefault(); setSection('actions'); setSecIdx(0); }
         if (k === KEY.DOWN)  { e.preventDefault(); if (currentEps.length > 0) { setSection('episodes'); setSecIdx(0); } }
-        if (k === KEY.ENTER) { e.preventDefault(); setSecIdx(seasons.indexOf(season)); } // abre dropdown
+        if (k === KEY.ENTER) { e.preventDefault(); setSecIdx(Math.max(0, seasons.indexOf(st.current.season))); }
       } else {
-        // Dentro do dropdown
         if (k === KEY.UP) {
           e.preventDefault();
-          if (secIdx <= 0) setSecIdx(-2); // fecha e volta para o botão
+          if (secIdx <= 0) setSecIdx(-2);
           else setSecIdx(i => i - 1);
         }
         if (k === KEY.DOWN)  { e.preventDefault(); setSecIdx(i => Math.min(seasons.length - 1, i + 1)); }
@@ -355,270 +444,158 @@ export default function DetailScreen() {
     }
 
     if (section === 'episodes') {
+      if (k === KEY.LEFT)  { e.preventDefault(); setSection('actions'); setSecIdx(0); }
       if (k === KEY.UP) {
         e.preventDefault();
         if (secIdx > 0) setSecIdx(i => i - 1);
         else if (seasons.length > 1) { setSection('seasons'); setSecIdx(-2); }
-        else { setSection('actions'); setSecIdx(0); }
       }
       if (k === KEY.DOWN)  { e.preventDefault(); setSecIdx(i => Math.min(currentEps.length - 1, i + 1)); }
       if (k === KEY.ENTER) { e.preventDefault(); if (currentEps[secIdx]) playEpisode(currentEps[secIdx], epSeconds[currentEps[secIdx].id] || 0); }
     }
   });
 
-  if (loading) return (
-    <div style={{ width: '100%', height: '100%', background: '#141414', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ width: 48, height: 48, border: '4px solid rgba(255,255,255,0.1)', borderTopColor: '#E50914', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+  // So mostra o conteudo quando TUDO que os botoes de acao dependem ja
+  // chegou - detail (titulo/sinopse) e, pra serie, os episodios (o botao
+  // "Assistir" precisa do primeiro episodio pra montar rotulo/subtitulo).
+  // Sem essa trava, a tela podia renderizar a barra de acoes antes de
+  // firstEp existir, com o botao Assistir aparecendo sem texto ate os
+  // episodios chegarem. So vale pra PRIMEIRA carga - trocar de temporada
+  // depois nao deve travar a tela toda de novo.
+  const dataReady = !loading && (!isSeries || episodesLoaded);
+  if (dataReady) shownOnceRef.current = true;
+  if (!shownOnceRef.current) return (
+    <div style={{ width: '100%', height: '100%', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ width: 48, height: 48, border: '4px solid rgba(255,255,255,0.1)', borderTopColor: ACCENT, borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
     </div>
   );
 
   if (error || !detail) return (
-    <div style={{ width: '100%', height: '100%', background: '#141414', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 20, color: '#fff' }}>
+    <div style={{ width: '100%', height: '100%', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 20, color: '#fff' }}>
       <div style={{ fontSize: 20 }}>{error || 'Conteúdo não encontrado'}</div>
-      <button onClick={() => navigate(-1)} style={{ padding: '12px 28px', background: '#E50914', border: 'none', borderRadius: 30, color: '#fff', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}>Voltar</button>
+      <button onClick={() => navigate(-1)} style={{ padding: '12px 28px', background: ACCENT, border: 'none', borderRadius: 30, color: '#fff', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}>Voltar</button>
     </div>
   );
 
-  const backdrop = detail.backdrop_url || detail.poster_url;
-  const title    = detail.title || detail.name || '';
-  const year     = detail.year || detail.year_start;
+  const title = detail.title || detail.name || '';
+  const seasonOpen = section === 'seasons' && secIdx >= 0;
+  const seasonFoc  = section === 'seasons';
 
   return (
-    <div style={{ width: '100%', height: '100%', background: '#0d0d0d', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      {/* Back */}
-      <div style={{ position: 'absolute', top: 24, left: 36, zIndex: 10 }}>
-        <div
-          onClick={() => navigate(-1)}
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: 8,
-            background: 'rgba(0,0,0,0.6)', borderRadius: 30,
-            padding: '8px 20px', border: '2px solid rgba(255,255,255,0.12)', cursor: 'none',
-          }}
-        >
-          <span style={{ color: '#fff', fontSize: 14 }}>← Voltar</span>
-        </div>
-      </div>
+    <div style={{ width: '100%', height: '100%', background: '#000', position: 'relative', overflow: 'hidden' }}>
+      {/* Full-screen backdrop */}
+      {detail.backdrop_url
+        ? <img src={detail.backdrop_url} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+        : <div style={{ position: 'absolute', inset: 0, background: '#0d0d0d' }} />
+      }
+      {/* Bottom-to-top dark overlay */}
+      <div style={{
+        position: 'absolute', inset: 0,
+        background: 'linear-gradient(to top, #000 0%, rgba(0,0,0,0.92) 15%, rgba(0,0,0,0.55) 35%, rgba(0,0,0,0) 60%)',
+      }} />
+      {/* Left panel overlay */}
+      <div style={{
+        position: 'absolute', inset: 0, width: '52%',
+        background: 'linear-gradient(to right, rgba(0,0,0,0.97) 0%, rgba(0,0,0,0.7) 55%, transparent 100%)',
+      }} />
 
-      {/* Top — backdrop + info */}
-      <div style={{ position: 'relative', height: isSeries ? 400 : 440, flexShrink: 0 }}>
-        {backdrop && (
-          <>
-            <img src={backdrop} alt={title} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
-            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to right, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.5) 55%, transparent 100%)' }} />
-            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, #0d0d0d 0%, transparent 45%)' }} />
-          </>
-        )}
-        <div style={{ position: 'absolute', bottom: 36, left: 60, maxWidth: 620 }}>
-          <div style={{ fontSize: 38, fontWeight: 900, color: '#fff', lineHeight: 1.1, marginBottom: 10, textShadow: '0 2px 16px rgba(0,0,0,0.8)' }}>
-            {title}
-          </div>
-          <div style={{ display: 'flex', gap: 12, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-            {year     && <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.55)' }}>{year}</span>}
-            {detail.rating > 0 && <span style={{ fontSize: 13, color: '#f5c518', fontWeight: 700 }}>★ {Number(detail.rating).toFixed(1)}</span>}
-            {detail.age_rating && <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 4, padding: '1px 5px' }}>{detail.age_rating}</span>}
-            {isSeries && detail.total_seasons && <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.45)' }}>{detail.total_seasons} temporada{detail.total_seasons > 1 ? 's' : ''}</span>}
-          </div>
-          {detail.synopsis && (
-            <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.65)', lineHeight: 1.55, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', marginBottom: 20 }}>
-              {detail.synopsis}
-            </div>
-          )}
+      <BackBtn onClick={() => navigate(-1)} />
 
-          {/* Action buttons */}
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            {actions.map((act, i) => {
-              const isFoc = section === 'actions' && secIdx === i;
-              const isWl  = act.id === 'watchlist';
-              const isLike = act.id === 'like';
-              const isDislike = act.id === 'dislike';
-              const isPlay = act.id === 'play' || act.id.startsWith('play_');
-              return (
-                <Btn
-                  key={act.id}
-                  focused={isFoc}
-                  accent={isPlay}
-                  danger={isDislike && likeData.userVote === 'dislike'}
-                  onClick={() => activateAction(act)}
-                  style={
-                    isLike && likeData.userVote === 'like' ? { background: isFoc ? '#2ecc71' : 'rgba(46,204,113,0.2)', border: '2px solid ' + (isFoc ? '#fff' : '#2ecc71') } :
-                    isDislike && likeData.userVote === 'dislike' ? { background: isFoc ? '#E50914' : 'rgba(229,9,20,0.2)', border: '2px solid ' + (isFoc ? '#fff' : '#E50914') } :
-                    isWl && wlItem ? { background: isFoc ? '#fff' : 'rgba(229,9,20,0.2)', border: '2px solid ' + (isFoc ? '#fff' : '#E50914'), color: isFoc ? '#000' : '#E50914' } : {}
-                  }
-                >
-                  {act.label}
-                </Btn>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-
-      {/* Bottom — episodes (series) */}
-      {isSeries && (
-        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 60px 40px', scrollbarWidth: 'none' }} ref={epScrollRef}>
-          {seasons.length > 1 && (() => {
-            // secIdx === -2 → botão com foco (dropdown fechado)
-            // secIdx >= 0  → dropdown aberto, item focado
-            const dropOpen = section === 'seasons' && secIdx >= 0;
-            const btnFoc   = section === 'seasons';
-            return (
-              <div style={{ position: 'relative', marginBottom: 20, display: 'inline-block' }}>
-                {/* Dropdown button */}
-                <div
-                  onClick={() => {
-                    if (dropOpen) { setSection('seasons'); setSecIdx(-2); }
-                    else { setSection('seasons'); setSecIdx(Math.max(0, seasons.indexOf(season))); }
-                  }}
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 10,
-                    padding: '10px 20px', borderRadius: 8, cursor: 'none',
-                    background: 'rgba(255,255,255,0.07)',
-                    border: '2px solid ' + (btnFoc ? '#fff' : 'rgba(255,255,255,0.15)'),
-                    fontSize: 15, fontWeight: 800, color: '#fff',
-                  }}
-                >
-                  Temporada {season}
-                  <span style={{ fontSize: 11, opacity: 0.6 }}>{dropOpen ? '▲' : '▼'}</span>
-                </div>
-
-                {/* Dropdown panel */}
-                {dropOpen && (
-                  <div style={{
-                    position: 'absolute', top: '110%', left: 0, zIndex: 50,
-                    minWidth: 220,
-                    background: 'rgba(12,12,14,0.98)',
-                    borderRadius: 12,
-                    border: '1px solid rgba(255,255,255,0.12)',
-                    padding: '10px 0',
-                    boxShadow: '0 8px 40px rgba(0,0,0,0.7)',
-                  }}>
-                    <div style={{ fontSize: 10, fontWeight: 800, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: 1.5, padding: '0 18px 8px' }}>
-                      Temporadas
-                    </div>
-                    {seasons.map((sv, si) => {
-                      const isFoc = secIdx === si;
-                      return (
-                        <div
-                          key={sv}
-                          onClick={() => { setSeason(sv); setSection('seasons'); setSecIdx(-2); }}
-                          style={{
-                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                            padding: '12px 18px', margin: '0 6px', borderRadius: 8, cursor: 'none',
-                            background: isFoc ? 'rgba(255,255,255,0.10)' : 'transparent',
-                            border: '2px solid ' + (isFoc ? 'rgba(255,255,255,0.5)' : 'transparent'),
-                            fontSize: 15, fontWeight: sv === season ? 800 : 500,
-                            color: sv === season ? '#fff' : 'rgba(255,255,255,0.65)',
-                          }}
-                        >
-                          Temporada {sv}
-                          {sv === season && <span style={{ color: '#E50914', fontSize: 16 }}>✓</span>}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-          {currentEps.length === 0 && (
-            <div style={{ color: '#555', fontSize: 15, marginTop: 20 }}>Nenhum episódio encontrado.</div>
-          )}
-          {currentEps.map((ep, ei) => (
-            <div key={ep.id} ref={el => { epRefs.current[ei] = el; }}>
-              <EpisodeItem
-                ep={ep}
-                focused={section === 'episodes' && secIdx === ei}
-                onClick={() => playEpisode(ep, epSeconds[ep.id] || 0)}
-                epProgress={epProgress[ep.id] || 0}
-              />
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Bottom — movie info panel */}
-      {!isSeries && detail && (
-        <div style={{ flex: 1, overflowY: 'auto', padding: '28px 60px 48px', scrollbarWidth: 'none', display: 'flex', flexDirection: 'column', gap: 28 }}>
-
-          {/* Genres */}
-          {detail.genres && detail.genres.length > 0 && (
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              {detail.genres.map(g => (
-                <span key={g} style={{
-                  padding: '6px 16px', borderRadius: 20,
-                  background: 'rgba(255,255,255,0.07)',
-                  border: '1px solid rgba(255,255,255,0.12)',
-                  fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.75)',
-                }}>
-                  {g}
+      <div style={{ position: 'relative', height: '100%', display: 'flex' }}>
+        {/* Left: info */}
+        <div style={{
+          width: '44%', paddingTop: 68, paddingLeft: 44, paddingRight: 44, paddingBottom: 28,
+          display: 'flex', flexDirection: 'column', justifyContent: 'space-between', overflow: 'hidden',
+        }}>
+          <div>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+              {!!detail.age_rating && (
+                <span style={{ background: ACCENT, borderRadius: 4, padding: '3px 8px', color: '#fff', fontSize: 12, fontWeight: 900 }}>{detail.age_rating}+</span>
+              )}
+              {isSeries && !!detail.total_seasons && (
+                <span style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 4, padding: '3px 10px', color: '#ccc', fontSize: 12, fontWeight: 600 }}>
+                  {detail.total_seasons} temporada{detail.total_seasons > 1 ? 's' : ''}
                 </span>
-              ))}
+              )}
             </div>
-          )}
 
-          {/* Details grid */}
-          <div style={{ display: 'flex', gap: 48, flexWrap: 'wrap' }}>
-            {detail.year && <InfoCell label="Ano" value={detail.year} />}
-            {detail.duration && <InfoCell label="Duração" value={detail.duration + ' min'} />}
-            {detail.director && <InfoCell label="Direção" value={detail.director} />}
-            {detail.country && <InfoCell label="País" value={detail.country} />}
-            {detail.language && <InfoCell label="Idioma" value={detail.language} />}
-            {detail.studio && <InfoCell label="Estúdio" value={detail.studio} />}
-          </div>
-
-          {/* Available versions */}
-          {versions.length > 0 && (
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 2, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', marginBottom: 12 }}>
-                Disponível em
-              </div>
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                {versions.map(vk => {
-                  const vm = VERSION_META[vk];
-                  return (
-                    <span key={vk} style={{
-                      padding: '6px 18px', borderRadius: 20,
-                      background: (vm ? vm.color : '#444') + '22',
-                      border: '1.5px solid ' + (vm ? vm.color : '#444'),
-                      fontSize: 13, fontWeight: 700,
-                      color: vm ? vm.color : '#fff',
-                    }}>
-                      {vm ? vm.label : vk}
-                    </span>
-                  );
-                })}
-                {detail.subtitle_pt && <SubtitleBadge label="Legenda PT" />}
-                {detail.subtitle_en && <SubtitleBadge label="Legenda EN" />}
-                {detail.subtitle_es && <SubtitleBadge label="Legenda ES" />}
-              </div>
+            <div style={{ fontSize: 42, fontWeight: 900, color: '#fff', lineHeight: 1.15, marginBottom: 10, textShadow: '0 2px 6px rgba(0,0,0,0.9)' }}>
+              {title}
             </div>
-          )}
 
-          {/* Synopsis full */}
-          {detail.synopsis && (
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 2, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', marginBottom: 10 }}>
-                Sinopse
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
+              {!!(detail.year || detail.year_start) && <span style={{ color: '#888', fontSize: 14 }}>{detail.year || detail.year_start}</span>}
+              {!!detail.duration && <span style={{ color: '#888', fontSize: 14 }}>{detail.duration} min</span>}
+              {detail.rating > 0 && (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'rgba(245,158,11,0.12)', borderRadius: 6, padding: '2px 8px', color: '#f59e0b', fontSize: 14, fontWeight: 700 }}>
+                  ★ {Number(detail.rating).toFixed(1)}
+                </span>
+              )}
+            </div>
+
+            {Array.isArray(detail.genres) && detail.genres.length > 0 && (
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
+                {detail.genres.slice(0, 4).map(g => (
+                  <span key={g} style={{ border: '1px solid rgba(255,255,255,0.13)', borderRadius: 16, padding: '3px 10px', color: '#888', fontSize: 12 }}>{g}</span>
+                ))}
               </div>
-              <div style={{ fontSize: 15, color: 'rgba(255,255,255,0.65)', lineHeight: 1.7, maxWidth: 860 }}>
+            )}
+
+            {detail.synopsis && (
+              <div style={{
+                color: '#aaa', fontSize: 15, lineHeight: 1.6, marginBottom: 16,
+                overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 6, WebkitBoxOrient: 'vertical',
+              }}>
                 {detail.synopsis}
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
-          {/* Cast */}
-          {detail.cast && detail.cast.length > 0 && (
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 2, color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', marginBottom: 12 }}>
-                Elenco
-              </div>
-              <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', lineHeight: 1.8 }}>
-                {(Array.isArray(detail.cast) ? detail.cast.join(', ') : detail.cast)}
-              </div>
-            </div>
-          )}
+          <div>
+            {actions.map((act, i) => (
+              <ActionBtn
+                key={act.id}
+                label={act.label}
+                sublabel={act.sublabel}
+                icon={act.icon}
+                primary={act.primary}
+                danger={act.danger}
+                focused={section === 'actions' && secIdx === i}
+                onClick={() => activateAction(act)}
+              />
+            ))}
+          </div>
         </div>
-      )}
+
+        {/* Right: episodes */}
+        {isSeries && (
+          <div style={{ flex: 1, paddingTop: 20, paddingLeft: 8, paddingRight: 28, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div
+              onClick={() => { setSection('seasons'); setSecIdx(seasonOpen ? -2 : Math.max(0, seasons.indexOf(season))); }}
+              style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 8 }}
+            >
+              <SeasonDropdown seasons={seasons} season={season} focused={seasonFoc && secIdx === -2} open={seasonOpen} focIdx={secIdx} />
+              <span style={{ color: '#444', fontSize: 13, fontWeight: 600 }}>{currentEps.length} ep.</span>
+            </div>
+            <div style={{ height: 1, background: 'rgba(255,255,255,0.07)', marginBottom: 8 }} />
+            <div style={{ flex: 1, overflowY: 'auto', scrollbarWidth: 'none', paddingBottom: 40 }}>
+              {currentEps.length === 0 && (
+                <div style={{ color: '#555', fontSize: 15, marginTop: 20 }}>Nenhum episódio encontrado.</div>
+              )}
+              {currentEps.map((ep, ei) => (
+                <EpisodeItem
+                  key={ep.id}
+                  innerRef={el => { epRefs.current[ei] = el; }}
+                  ep={ep}
+                  focused={section === 'episodes' && secIdx === ei}
+                  onClick={() => playEpisode(ep, epSeconds[ep.id] || 0)}
+                  epProgress={epProgress[ep.id] || 0}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
