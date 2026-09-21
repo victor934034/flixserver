@@ -22,7 +22,7 @@ import { useProfile } from '../contexts/ProfileContext';
 import { useDownloads } from '../contexts/DownloadContext';
 import NetInfo from '@react-native-community/netinfo';
 import { getPref } from '../lib/prefs';
-import { normalizeVersions, altMediaUrl } from '../lib/mediaUrl';
+import { normalizeVersions, altMediaUrl, normalizeMediaUrl } from '../lib/mediaUrl';
 
 let Brightness = null;
 try { Brightness = require('expo-brightness'); } catch {}
@@ -622,19 +622,46 @@ export default function PlayerScreen() {
     setSheet(null);
   };
 
-  // Tenta recarregar a mesma fonte — alguns dispositivos falham na decodificação
-  // de vídeo (tela preta com áudio tocando) em falhas transitórias que um reload resolve.
-  const retryPlayback = () => {
-    setSavedPosSec(currentTime);
-    // Toque manual alterna a forma da URL (barras reais <-> %2F): resolve o
-    // 404 que aparece só em alguns aparelhos.
-    altToggleRef.current = !altToggleRef.current;
-    player.replace({ uri: altToggleRef.current ? altMediaUrl(versions[activeVer]) : versions[activeVer] });
+  // "Tentar novamente": cada toque tenta algo diferente em vez de repetir a
+  // mesma URL que ja falhou -
+  //   1o: forma alternativa da URL (barras reais <-> %2F)
+  //   2o em diante: busca a URL ATUAL no servidor - se o arquivo foi
+  //   reprocessado/convertido (ex: .ts -> .mp4, correcao de audio) o link
+  //   antigo que o app tinha em maos da 404 mesmo com o video no ar.
+  const [retrying, setRetrying] = useState(false);
+  const retryCountRef = useRef(0);
+  const freshUrlFor = async () => {
+    try {
+      const { data } = await api.get(type === 'episode' ? `/episodes/${id}` : `/movies/${id}`);
+      const pick = data[`file_${activeVer}`]
+        || ['dubbing', 'subtitled', 'cinema', 'color', 'bw', '4k'].map(k => data[`file_${k}`]).find(Boolean);
+      return pick ? normalizeMediaUrl(pick) : null;
+    } catch { return null; }
   };
+  const retryPlayback = async () => {
+    if (retrying) return;
+    setRetrying(true);
+    setTimeout(() => setRetrying(false), 12000);
+    setSavedPosSec(currentTime);
+    retryCountRef.current += 1;
+    let next = versions[activeVer];
+    if (retryCountRef.current === 1) {
+      next = altMediaUrl(versions[activeVer]) || next;
+    } else {
+      const fresh = await freshUrlFor();
+      if (fresh) {
+        versions[activeVer] = fresh;
+        next = retryCountRef.current % 2 === 0 ? fresh : (altMediaUrl(fresh) || fresh);
+      } else {
+        next = retryCountRef.current % 2 === 0 ? versions[activeVer] : (altMediaUrl(versions[activeVer]) || versions[activeVer]);
+      }
+    }
+    player.replace({ uri: next });
+  };
+  useEffect(() => { if (status !== 'error') setRetrying(false); }, [status]);
 
   // 404 do player: tenta sozinho uma vez a forma alternativa da URL antes
   // de mostrar o erro pro usuário.
-  const altToggleRef = useRef(false);
   const autoAltTriedRef = useRef(false);
   useEffect(() => {
     if (status !== 'error' || autoAltTriedRef.current) return;
@@ -642,7 +669,6 @@ export default function PlayerScreen() {
     const alt = altMediaUrl(versions[activeVer]);
     if (!alt || alt === versions[activeVer]) return;
     autoAltTriedRef.current = true;
-    altToggleRef.current = true;
     setSavedPosSec(currentTime);
     player.replace({ uri: alt });
   }, [status]);
@@ -877,25 +903,6 @@ export default function PlayerScreen() {
         </View>
       )}
 
-      {/* Erro de reprodução — antes ficava tela preta com só o áudio, sem nenhum aviso */}
-      {status === 'error' && (
-        <View style={styles.errorOverlay}>
-          <Ionicons name="alert-circle-outline" size={44} color="#E50914" />
-          <Text style={styles.errorTitle}>Não foi possível reproduzir o vídeo</Text>
-          {!!playerError?.message && <Text style={styles.errorMsg} numberOfLines={2}>{playerError.message}</Text>}
-          <View style={styles.errorBtnRow}>
-            <TouchableOpacity style={styles.errorBtn} onPress={retryPlayback}>
-              <Text style={styles.errorBtnText}>Tentar novamente</Text>
-            </TouchableOpacity>
-            {availVer.length > 1 && (
-              <TouchableOpacity style={[styles.errorBtn, styles.errorBtnOutline]} onPress={() => openSheet('audio')}>
-                <Text style={styles.errorBtnText}>Trocar versão</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
-      )}
-
       {/* Legenda overlay (VTT externo parseado — sempre visível) */}
       {!isCasting && subtitleCues.length > 0 && (() => {
         const cue = subtitleCues.find(c => currentTime >= c.start && currentTime <= c.end);
@@ -962,7 +969,7 @@ export default function PlayerScreen() {
       )}
 
       {/* ── CONTROLES ── */}
-      {!locked && (
+      {!locked && status !== 'error' && (
         <Animated.View
           style={[StyleSheet.absoluteFill, { opacity: ctrlOpacity }]}
           pointerEvents={ctrlVisible ? 'box-none' : 'none'}
@@ -1189,6 +1196,40 @@ export default function PlayerScreen() {
           }}>
             <Ionicons name="play" size={15} color="#000" />
           </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Erro de reprodução — renderizado POR ÚLTIMO (acima dos controles): antes
+          ficava por baixo da camada de controles e o toque em "Tentar
+          novamente" caía nos botões de play/seek do centro. */}
+      {status === 'error' && (
+        <View style={styles.errorOverlay}>
+          <TouchableOpacity
+            style={{ position: 'absolute', top: Math.max(insets.top, 12), left: 16, padding: 8 }}
+            onPress={() => { saveProgress(); router.back(); }}
+          >
+            <Ionicons name="arrow-back" size={24} color="#fff" />
+          </TouchableOpacity>
+          <Ionicons name="alert-circle-outline" size={44} color="#E50914" />
+          <Text style={styles.errorTitle}>Não foi possível reproduzir o vídeo</Text>
+          {!!playerError?.message && <Text style={styles.errorMsg} numberOfLines={2}>{playerError.message}</Text>}
+          {retrying ? (
+            <View style={{ alignItems: 'center', gap: 8, marginTop: 14 }}>
+              <ActivityIndicator color="#fff" />
+              <Text style={styles.errorMsg}>Tentando de novo…</Text>
+            </View>
+          ) : (
+            <View style={styles.errorBtnRow}>
+              <TouchableOpacity style={styles.errorBtn} onPress={retryPlayback}>
+                <Text style={styles.errorBtnText}>Tentar novamente</Text>
+              </TouchableOpacity>
+              {availVer.length > 1 && (
+                <TouchableOpacity style={[styles.errorBtn, styles.errorBtnOutline]} onPress={() => openSheet('audio')}>
+                  <Text style={styles.errorBtnText}>Trocar versão</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
         </View>
       )}
 
