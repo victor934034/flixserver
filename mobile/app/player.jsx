@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, PanResponder,
   ActivityIndicator, StatusBar, useWindowDimensions,
-  Animated, FlatList, Image, Share, Platform, Linking, AppState,
+  Animated, FlatList, Image, Share, Platform, Linking, AppState, ScrollView,
 } from 'react-native';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { useEvent } from 'expo';
@@ -787,7 +787,24 @@ export default function PlayerScreen() {
     intro_end: ep.intro_end || null,
   });
 
+  const SheetBody = sheet === 'episodes' ? View : ScrollView;
+
+  // Progresso por episodio (barra + "assistido") vem do historico do perfil
+  const [epProgressMap, setEpProgressMap] = useState({});
+  const loadEpProgress = () => {
+    if (!activeProfile?.id) return;
+    api.get('/history', { params: { limit: 200, profile_id: activeProfile.id } }).then(r => {
+      const m = {};
+      (r.data || []).forEach(h => {
+        const eid = h.episode_id || (h.content_type === 'episode' ? h.content_id : null);
+        if (eid && h.duration > 0) m[String(eid)] = { ratio: Math.min(h.progress / h.duration, 1), done: !!h.completed || h.progress / h.duration > 0.92 };
+      });
+      setEpProgressMap(m);
+    }).catch(() => {});
+  };
+
   const openEpisodesSheet = () => {
+    loadEpProgress();
     const cur = sortedEps.find(e => String(e.id) === String(id));
     setActiveSheetSeason(cur?.season_number || seasonNums[0] || 1);
     openSheet('episodes');
@@ -1178,7 +1195,14 @@ export default function PlayerScreen() {
       {/* ── SHEETS ── */}
       {sheet && (
         <TouchableOpacity style={styles.sheetBg} onPress={() => setSheet(null)} activeOpacity={1}>
-          <TouchableOpacity activeOpacity={1} style={styles.sheet}>
+          <TouchableOpacity
+            activeOpacity={1}
+            style={[styles.sheet, { paddingTop: Math.max(insets.top, 10), paddingBottom: Math.max(insets.bottom, 10), paddingRight: Math.max(insets.right, 0) }]}
+          >
+          <SheetBody
+            style={sheet === 'episodes' ? { flex: 1 } : { flex: 1 }}
+            {...(sheet === 'episodes' ? {} : { showsVerticalScrollIndicator: false, contentContainerStyle: { paddingBottom: 24 } })}
+          >
 
             {sheet === 'speed' && <>
               <Text style={styles.sheetTitle}>Velocidade de reprodução</Text>
@@ -1423,7 +1447,9 @@ export default function PlayerScreen() {
                     ref={sheetListRef}
                     data={sheetSeasonEps}
                     keyExtractor={e => String(e.id)}
-                    style={{ maxHeight: seasonNums.length > 1 ? 300 : 360 }}
+                    style={{ flex: 1 }}
+                    contentContainerStyle={{ paddingBottom: 16 }}
+                    showsVerticalScrollIndicator={false}
                     onLayout={() => {
                       // Abre ja rolado no episodio que esta tocando
                       const i = sheetSeasonEps.findIndex(e => String(e.id) === String(id));
@@ -1433,33 +1459,51 @@ export default function PlayerScreen() {
                     renderItem={({ item: ep }) => {
                       const epUrl = ep.file_dubbing || ep.file_subtitled || ep.file_cinema || ep.file_color || ep.file_bw;
                       const isActive = String(ep.id) === String(id);
+                      const prog = epProgressMap[String(ep.id)];
+                      const ver = ep.file_dubbing ? 'dubbing' : ep.file_subtitled ? 'subtitled' : ep.file_cinema ? 'cinema' : ep.file_color ? 'color' : 'bw';
+                      const isDownloaded = !!epUrl && getDownloadStatus?.(ep.id, ver)?.state === 'done';
                       return (
                         <TouchableOpacity
                           style={[styles.epRow, isActive && styles.epRowActive]}
                           disabled={!epUrl}
                           onPress={() => { setSheet(null); openEpisode(ep); }}
+                          activeOpacity={0.7}
                         >
-                          {ep.thumbnail_url
-                            ? <Image source={{ uri: ep.thumbnail_url }} style={styles.epThumb} />
-                            : <View style={styles.epThumbPlaceholder}>
-                                <Ionicons name="film-outline" size={18} color="#333" />
+                          <View style={styles.epThumbWrap}>
+                            {ep.thumbnail_url
+                              ? <CachedImage source={{ uri: ep.thumbnail_url }} style={styles.epThumb} resizeMode="cover" />
+                              : <View style={styles.epThumbPlaceholder}>
+                                  <Ionicons name="film-outline" size={18} color="#333" />
+                                </View>}
+                            {ep.duration > 0 && (
+                              <View style={styles.epThumbDur}>
+                                <Text style={styles.epThumbDurText}>{Math.round(ep.duration / 60)} min</Text>
                               </View>
-                          }
+                            )}
+                            {!!prog && prog.ratio > 0.02 && (
+                              <View style={styles.epProg}>
+                                <View style={[styles.epProgFill, { width: `${prog.ratio * 100}%` }]} />
+                              </View>
+                            )}
+                          </View>
                           <View style={styles.epInfo}>
-                            <Text style={styles.epNum}>E{pad(ep.episode_number)}</Text>
+                            <Text style={styles.epNum}>
+                              E{pad(ep.episode_number)}{prog?.done ? '  ·  ✓ Assistido' : ''}
+                            </Text>
                             <Text style={[styles.epTitle, !epUrl && { opacity: 0.3 }]} numberOfLines={2}>
                               {ep.title || `Episódio ${ep.episode_number}`}
                             </Text>
-                            {ep.duration > 0 && (
-                              <Text style={styles.epDuration}>{Math.round(ep.duration / 60)} min</Text>
+                            {!!ep.synopsis && isActive && (
+                              <Text style={styles.epSynopsis} numberOfLines={2}>{ep.synopsis}</Text>
                             )}
                           </View>
                           {isActive
-                            ? <Ionicons name="play-circle" size={22} color="#E50914" style={{ marginRight: 4 }} />
+                            ? <Ionicons name="play-circle" size={22} color="#E50914" />
                             : !epUrl
-                            ? <Ionicons name="lock-closed-outline" size={16} color="#444" style={{ marginRight: 4 }} />
-                            : null
-                          }
+                            ? <Ionicons name="lock-closed-outline" size={16} color="#444" />
+                            : isDownloaded
+                            ? <Ionicons name="checkmark-circle" size={18} color="#46d369" />
+                            : null}
                         </TouchableOpacity>
                       );
                     }}
@@ -1468,6 +1512,7 @@ export default function PlayerScreen() {
               }
             </>}
 
+          </SheetBody>
           </TouchableOpacity>
         </TouchableOpacity>
       )}
@@ -1603,17 +1648,23 @@ const styles = StyleSheet.create({
   seasonTabActive: { backgroundColor: '#E50914' },
   seasonTabText: { color: '#888', fontSize: 13, fontWeight: '600' },
   seasonTabTextActive: { color: '#fff' },
-  epRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 16, gap: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.04)' },
+  epRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 14, gap: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.04)' },
   epRowActive: { backgroundColor: 'rgba(229,9,20,0.07)' },
-  epThumb: { width: 88, height: 52, borderRadius: 5, backgroundColor: '#1a1a1a' },
-  epThumbPlaceholder: { width: 88, height: 52, borderRadius: 5, backgroundColor: '#141414', justifyContent: 'center', alignItems: 'center' },
+  epThumbWrap: { width: 118, height: 66, borderRadius: 6, overflow: 'hidden', backgroundColor: '#1a1a1a' },
+  epThumb: { width: '100%', height: '100%' },
+  epThumbPlaceholder: { width: '100%', height: '100%', backgroundColor: '#141414', justifyContent: 'center', alignItems: 'center' },
+  epThumbDur: { position: 'absolute', right: 4, bottom: 5, backgroundColor: 'rgba(0,0,0,0.75)', borderRadius: 3, paddingHorizontal: 4, paddingVertical: 1 },
+  epThumbDurText: { color: '#ddd', fontSize: 9, fontWeight: '700' },
+  epProg: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 3, backgroundColor: 'rgba(255,255,255,0.18)' },
+  epProgFill: { height: '100%', backgroundColor: '#E50914' },
+  epSynopsis: { color: '#777', fontSize: 11, lineHeight: 15, marginTop: 3 },
   epInfo: { flex: 1 },
   epNum: { color: '#555', fontSize: 11, fontWeight: '700', marginBottom: 2 },
   epTitle: { color: '#ddd', fontSize: 13, lineHeight: 18 },
   epDuration: { color: '#555', fontSize: 11, marginTop: 3 },
 
-  sheetBg: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: '#141414', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingTop: 8, paddingBottom: 40, maxHeight: '72%' },
+  sheetBg: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)', flexDirection: 'row', justifyContent: 'flex-end' },
+  sheet: { backgroundColor: '#141414', borderTopLeftRadius: 20, borderBottomLeftRadius: 20, width: '52%', maxWidth: 460, minWidth: 300, height: '100%' },
   sheetTitle: {
     color: '#fff', fontSize: 16, fontWeight: '700', textAlign: 'center',
     paddingVertical: 14, paddingHorizontal: 20,
