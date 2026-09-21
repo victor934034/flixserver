@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, Image, TouchableOpacity,
-  ActivityIndicator, useWindowDimensions, Alert,
+  ActivityIndicator, useWindowDimensions, Alert, Linking,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -220,7 +220,14 @@ export default function FilmeDetail() {
           {hasAny && firstVersion && (
             <TouchableOpacity style={styles.btnPlay} onPress={() => play(firstVersion)}>
               <Ionicons name="play" size={18} color="#000" />
-              <Text style={styles.btnPlayText}>Assistir</Text>
+              <Text style={styles.btnPlayText}>
+                {(movieProgress > 5 || Number(startAt) > 5) ? 'Continuar assistindo' : 'Assistir'}
+              </Text>
+            </TouchableOpacity>
+          )}
+          {!!movie.trailer_url && (
+            <TouchableOpacity style={styles.btnList} onPress={() => Linking.openURL(movie.trailer_url).catch(() => Alert.alert('Trailer', 'Não foi possível abrir o trailer.'))}>
+              <Ionicons name="logo-youtube" size={22} color="#fff" />
             </TouchableOpacity>
           )}
           <TouchableOpacity style={styles.btnList} onPress={toggleList} disabled={listLoading}>

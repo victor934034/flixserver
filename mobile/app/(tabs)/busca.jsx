@@ -6,6 +6,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 import MovieCard from '../../components/MovieCard';
 import api from '../../lib/api';
 
@@ -49,6 +50,7 @@ export default function BuscaScreen() {
   const [genreLoading, setGenreLoading] = useState(false);
   const timer = useRef(null);
   const inputRef = useRef(null);
+  const [listening, setListening] = useState(false);
 
   const GAP = 8;
   const PAD = 16;
@@ -98,6 +100,23 @@ export default function BuscaScreen() {
     }, 350);
   };
 
+  // Busca por voz (pt-BR). O texto reconhecido cai no mesmo fluxo de busca
+  // digitada, entao acento/hifen/etc sao tratados pelo backend igual.
+  useSpeechRecognitionEvent('start', () => setListening(true));
+  useSpeechRecognitionEvent('end', () => setListening(false));
+  useSpeechRecognitionEvent('error', () => setListening(false));
+  useSpeechRecognitionEvent('result', (e) => {
+    const text = e.results?.[0]?.transcript?.trim();
+    if (text) { setQuery(text); search(text); }
+  });
+
+  const toggleVoice = async () => {
+    if (listening) { ExpoSpeechRecognitionModule.stop(); return; }
+    const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+    if (!perm.granted) return;
+    ExpoSpeechRecognitionModule.start({ lang: 'pt-BR', interimResults: true, maxAlternatives: 1 });
+  };
+
   const clear = () => {
     setQuery('');
     setResults({ movies: [], series: [], episodes: [] });
@@ -136,6 +155,9 @@ export default function BuscaScreen() {
             <Ionicons name="close-circle" size={20} color="#555" />
           </TouchableOpacity>
         )}
+        <TouchableOpacity onPress={toggleVoice} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={{ marginLeft: 10 }}>
+          <Ionicons name={listening ? 'mic' : 'mic-outline'} size={22} color={listening ? '#E50914' : '#888'} />
+        </TouchableOpacity>
       </View>
 
       {/* Chips de gênero */}

@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Linking } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Linking, Switch } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -9,6 +9,7 @@ import { useProfile, getAvatar } from '../../contexts/ProfileContext';
 import { useDownloads, fmtBytes } from '../../contexts/DownloadContext';
 import { useParental } from '../../contexts/ParentalContext';
 import CachedImage from '../../components/CachedImage';
+import { usePrefs, setPref } from '../../lib/prefs';
 
 const APP_VERSION = Constants.expoConfig?.version ?? '1.0.5';
 
@@ -53,6 +54,7 @@ export default function PerfilScreen() {
   const router = useRouter();
   const { downloads, active, totalBytes } = useDownloads();
   const { config: parentalConfig } = useParental();
+  const prefs = usePrefs();
 
   useFocusEffect(useCallback(() => { refreshUser(); }, []));
 
@@ -175,6 +177,27 @@ export default function PerfilScreen() {
       </View>
 
       <View style={styles.section}>
+        <Text style={styles.sectionLabel}>Downloads</Text>
+        <View style={styles.card}>
+          <ToggleItem
+            icon="cloud-download-outline"
+            label="Baixar próximo episódio"
+            desc="Enquanto você assiste, já baixa o próximo (só no Wi-Fi)"
+            value={prefs.autoDownloadNext}
+            onChange={v => setPref('autoDownloadNext', v)}
+          />
+          <View style={styles.divider} />
+          <ToggleItem
+            icon="trash-outline"
+            label="Apagar depois de assistir"
+            desc="Remove o episódio baixado quando você termina"
+            value={prefs.autoDeleteWatched}
+            onChange={v => setPref('autoDeleteWatched', v)}
+          />
+        </View>
+      </View>
+
+      <View style={styles.section}>
         <Text style={styles.sectionLabel}>Suporte</Text>
         <View style={styles.card}>
           <MenuItem
@@ -208,6 +231,26 @@ export default function PerfilScreen() {
 
       <Text style={styles.version}>v{APP_VERSION}</Text>
     </ScrollView>
+  );
+}
+
+function ToggleItem({ icon, label, desc, value, onChange }) {
+  return (
+    <View style={styles.menuItem}>
+      <View style={styles.menuIcon}>
+        <Ionicons name={icon} size={20} color="#b3b3b3" />
+      </View>
+      <View style={styles.menuText}>
+        <Text style={styles.menuLabel}>{label}</Text>
+        {desc && <Text style={styles.menuDesc}>{desc}</Text>}
+      </View>
+      <Switch
+        value={value}
+        onValueChange={onChange}
+        trackColor={{ false: '#2a2a2a', true: '#E50914' }}
+        thumbColor="#fff"
+      />
+    </View>
   );
 }
 

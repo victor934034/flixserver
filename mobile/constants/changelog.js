@@ -4,6 +4,20 @@
 // mais novas que a última vista (guardado no AsyncStorage).
 export const CHANGELOG = [
   {
+    version: '1.0.7',
+    items: [
+      'Busca muito melhor: "homem aranha" acha "Homem-Aranha", "hercules" acha "Hércules" — ignora acento e hífen (em todos os apps). Agora também dá pra buscar por voz.',
+      'Nova fileira "Recomendados pra você" na Home, baseada no que você já assistiu.',
+      'Aviso por notificação quando sai episódio novo de uma série da sua Minha Lista.',
+      'Detalhes: o botão vira "Continuar assistindo" (e "Continuar T2 E05" nas séries) quando você já começou.',
+      'Player: "Próximo episódio" e "Ep. anterior" mais confiáveis (funcionam em qualquer entrada, pulam episódios sem vídeo), lista de episódios abre já no que você está vendo.',
+      'Chromecast redesenhado: barra de progresso e tempo da TV, volume, mudo, legendas, trocar áudio/episódio e parar transmissão, tudo pelo celular.',
+      'Picture-in-Picture: continue assistindo com o app minimizado. Trailer na tela de detalhes.',
+      'Downloads: baixar temporada inteira em fila, baixar o próximo episódio sozinho (Wi-Fi) e apagar depois de assistir (opcional, em Perfil).',
+      'Corrigido erro 404 ao reproduzir em alguns celulares.',
+    ],
+  },
+  {
     version: '1.0.6',
     items: [
       'Login: botão de mostrar/ocultar senha pra conferir o que foi digitado.',

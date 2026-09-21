@@ -160,35 +160,29 @@ app.get('/api/search', async (req, res) => {
   const search = `%${titleQ}%`;
 
   try {
-    let moviesQ = supabase.from('movies').select('id, title, year, poster_url, rating, genres').ilike('title', search).eq('is_active', true).limit(lim);
-    let seriesQ = supabase.from('series').select('id, title, year_start, poster_url, rating, genres').ilike('title', search).eq('is_active', true).limit(lim);
-    let episodesQ = supabase.from('episodes').select('id, title, season_number, episode_number, thumbnail_url, series_id, series:series_id(id, title, poster_url)').ilike('title', search).limit(lim);
-
-    if (genre) {
-      moviesQ = moviesQ.contains('genres', [genre]);
-      seriesQ = seriesQ.contains('genres', [genre]);
-    }
-
-    const [moviesResult, seriesResult, episodesResult] = await Promise.all([
-      // Se tem referência de episódio (3x1, S03E01…), não busca filmes
-      (type === 'series' || type === 'episode' || !!epRef) ? Promise.resolve({ data: [] }) : moviesQ,
-      type === 'movie' || type === 'episode' ? Promise.resolve({ data: [] }) : seriesQ,
-      type === 'movie' || type === 'series' ? Promise.resolve({ data: [] }) : episodesQ,
+    const { searchIds, orderByIds } = require('./services/titleSearch');
+    const [mIds, sIds, eIds] = await Promise.all([
+      (type === 'series' || type === 'episode' || !!epRef) ? [] : searchIds('movies', titleQ, lim),
+      type === 'movie' || type === 'episode' ? [] : searchIds('series', titleQ, lim),
+      type === 'movie' || type === 'series' ? [] : searchIds('episodes', titleQ, lim),
     ]);
 
-    // Fallback fuzzy para séries: ignora ":", "·", traços extras no título
-    // Ex: "Chicago P.D Distrito 21" encontra "Chicago P.D.: Distrito 21"
+    const byIds = async (table, cols, ids, withGenre) => {
+      if (!ids.length) return { data: [] };
+      let q = supabase.from(table).select(cols).in('id', ids);
+      if (table !== 'episodes') q = q.eq('is_active', true);
+      if (genre && withGenre) q = q.contains('genres', [genre]);
+      const r = await q;
+      return { data: orderByIds(r.data || [], ids) };
+    };
+
+    const [moviesResult, seriesResult, episodesResult] = await Promise.all([
+      byIds('movies', 'id, title, year, poster_url, rating, genres', mIds, true),
+      byIds('series', 'id, title, year_start, poster_url, rating, genres', sIds, true),
+      byIds('episodes', 'id, title, season_number, episode_number, thumbnail_url, series_id, series:series_id(id, title, poster_url)', eIds, false),
+    ]);
+
     let seriesData = seriesResult.data || [];
-    if (seriesData.length === 0 && titleQ.length >= 4 && type !== 'movie' && type !== 'episode') {
-      const fuzzy = '%' + titleQ.trim().split(/\s+/).filter(Boolean).join('%') + '%';
-      const { data: fuzzyData } = await supabase
-        .from('series')
-        .select('id, title, year_start, poster_url, rating, genres')
-        .ilike('title', fuzzy)
-        .eq('is_active', true)
-        .limit(lim);
-      if (fuzzyData && fuzzyData.length > 0) seriesData = fuzzyData;
-    }
 
     let episodes = (episodesResult.data || []).map(e => ({
       ...e, type: 'episode',
@@ -310,4 +304,11 @@ app.listen(PORT, () => {
   setTimeout(runExpiryWarnings, 2 * 60 * 1000);
   // Depois, a cada 12 horas
   setInterval(runExpiryWarnings, 12 * 60 * 60 * 1000);
+
+  // Cron: avisa quem tem a série na "Minha Lista" quando sai episódio novo
+  const { sendNewEpisodeAlerts } = require('./services/notifications');
+  const runEpisodeAlerts = () =>
+    sendNewEpisodeAlerts(supabase).catch(e => console.error('[cron] episode alerts:', e.message));
+  setTimeout(runEpisodeAlerts, 3 * 60 * 1000);
+  setInterval(runEpisodeAlerts, 30 * 60 * 1000);
 });

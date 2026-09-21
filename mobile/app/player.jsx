@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, PanResponder,
   ActivityIndicator, StatusBar, useWindowDimensions,
@@ -13,11 +13,16 @@ import * as KeepAwake from 'expo-keep-awake';
 import * as NavigationBar from 'expo-navigation-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
-  CastButton, CastState, MediaPlayerState,
+  CastButton, CastState, MediaPlayerState, MediaPlayerIdleReason, SessionManager,
   useCastDevice, useCastState, useMediaStatus, useRemoteMediaClient, useStreamPosition,
 } from 'react-native-google-cast';
+import CachedImage from '../components/CachedImage';
 import api from '../lib/api';
 import { useProfile } from '../contexts/ProfileContext';
+import { useDownloads } from '../contexts/DownloadContext';
+import NetInfo from '@react-native-community/netinfo';
+import { getPref } from '../lib/prefs';
+import { normalizeVersions, altMediaUrl } from '../lib/mediaUrl';
 
 let Brightness = null;
 try { Brightness = require('expo-brightness'); } catch {}
@@ -84,6 +89,32 @@ function parseVtt(text) {
 const SLIDER_H = 140;
 
 function pad(n) { return String(n).padStart(2, '0'); }
+
+// Content-Type que o receiver precisa pra escolher o decoder - mandar sempre
+// "video/mp4" quebrava MKV/HLS na TV.
+function castContentType(url) {
+  const u = String(url || '').split('?')[0].toLowerCase();
+  if (u.endsWith('.mkv')) return 'video/x-matroska';
+  if (u.endsWith('.m3u8')) return 'application/x-mpegURL';
+  if (u.endsWith('.webm')) return 'video/webm';
+  return 'video/mp4';
+}
+
+const epHasFile = e => !!(e.file_dubbing || e.file_subtitled || e.file_cinema || e.file_color || e.file_bw);
+const sortEps = list => [...list].sort((a, b) =>
+  a.season_number !== b.season_number ? a.season_number - b.season_number : a.episode_number - b.episode_number
+);
+// Proximo/anterior episodio JOGAVEL (pula os sem arquivo) e atravessa
+// temporadas - antes so olhava idx+1 e parava num episodio sem video.
+function pickAdjacentEp(list, curId, dir) {
+  const sorted = sortEps(list);
+  const i = sorted.findIndex(e => String(e.id) === String(curId));
+  if (i < 0) return null;
+  for (let j = i + dir; j >= 0 && j < sorted.length; j += dir) {
+    if (epHasFile(sorted[j])) return sorted[j];
+  }
+  return null;
+}
 function fmtSec(sec) {
   if (!sec || sec < 0) return '0:00';
   const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = Math.floor(sec % 60);
@@ -102,12 +133,25 @@ export default function PlayerScreen() {
   const { width, height } = useWindowDimensions();
 
   // Parse params (stable — route params don't change)
-  const versions = useRef(params.versions ? JSON.parse(params.versions) : { dubbing: params.url }).current;
+  const versions = useRef(normalizeVersions(params.versions ? JSON.parse(params.versions) : { dubbing: params.url })).current;
   const availVer = useRef(Object.keys(versions).filter(k => versions[k])).current;
   const initVer = useRef((params.currentVersion && versions[params.currentVersion]) ? params.currentVersion : availVer[0]).current;
   const subtitles = useRef(params.subtitles ? JSON.parse(params.subtitles) : {}).current;
   const availSubs = useRef(Object.entries(subtitles).filter(([, u]) => u)).current;
-  const nextEp = useRef(params.nextEpisode && params.nextEpisode !== 'undefined' ? JSON.parse(params.nextEpisode) : null).current;
+  const paramNextEp = useRef(params.nextEpisode && params.nextEpisode !== 'undefined' ? JSON.parse(params.nextEpisode) : null).current;
+  const [episodes, setEpisodes] = useState([]);
+  // Antes o "proximo episodio" dependia 100% do param de navegacao - qualquer
+  // entrada que nao o passasse (Continuar Assistindo, notificacao, download)
+  // ficava sem o botao. Agora o player calcula sozinho pela lista da serie;
+  // o param so serve de resposta imediata ate a lista carregar.
+  const nextEp = useMemo(() => {
+    if (type === 'episode' && episodes.length) return pickAdjacentEp(episodes, id, 1);
+    return paramNextEp;
+  }, [type, episodes, id, paramNextEp]);
+  const prevEp = useMemo(
+    () => (type === 'episode' && episodes.length ? pickAdjacentEp(episodes, id, -1) : null),
+    [type, episodes, id],
+  );
   const introEnd = params.introEnd && params.introEnd !== 'undefined' ? Number(params.introEnd) : 0;
   const startAt = params.startAt && params.startAt !== 'undefined' ? Number(params.startAt) : 0;
 
@@ -125,13 +169,32 @@ export default function PlayerScreen() {
   const { isPlaying = false } = useEvent(player, 'playingChange', { isPlaying: false });
   const { status = 'idle', error: playerError } = useEvent(player, 'statusChange', { status: 'idle' });
 
-  // Derived values (seconds)
-  const durSec = player.duration || 0;
-  const remainSec = Math.max(0, durSec - currentTime);
-  const progress = durSec > 0 ? currentTime / durSec : 0;
-  const isBuffering = status === 'loading';
-  const isEnded = !isPlaying && durSec > 0 && currentTime > 0 && remainSec < 1.5;
-  const showSkipIntro = introEnd > 0 && currentTime < introEnd && currentTime > 2;
+  // ─── Google Cast (Chromecast) — hooks ─────────────────────────────────────
+  const castClient = useRemoteMediaClient();
+  const castState = useCastState();
+  const castDevice = useCastDevice();
+  const mediaStatus = useMediaStatus();
+  const remotePosition = useStreamPosition();
+  const isCasting = castState === CastState.CONNECTED && !!castClient;
+  const remoteState = mediaStatus?.playerState;
+  const remoteIsPlaying = remoteState === MediaPlayerState.PLAYING || remoteState === MediaPlayerState.BUFFERING;
+  const remoteLoading = remoteState === MediaPlayerState.LOADING || remoteState === MediaPlayerState.BUFFERING;
+  const remoteFinished = remoteState === MediaPlayerState.IDLE && mediaStatus?.idleReason === MediaPlayerIdleReason.FINISHED;
+
+  // Derived values (seconds) - durante a transmissao tudo (barra, tempo,
+  // "proximo episodio", historico) passa a seguir a posicao da TV, nao a do
+  // player local (que fica pausado no ponto onde a transmissao comecou).
+  const localDur = player.duration || 0;
+  const durSec = isCasting ? (mediaStatus?.mediaInfo?.streamDuration || localDur) : localDur;
+  const posSec = isCasting ? (remotePosition ?? currentTime) : currentTime;
+  const uiPlaying = isCasting ? remoteIsPlaying : isPlaying;
+  const remainSec = Math.max(0, durSec - posSec);
+  const progress = durSec > 0 ? posSec / durSec : 0;
+  const isBuffering = isCasting ? remoteLoading : status === 'loading';
+  const isEnded = isCasting
+    ? remoteFinished
+    : (!isPlaying && durSec > 0 && currentTime > 0 && remainSec < 1.5);
+  const showSkipIntro = introEnd > 0 && posSec < introEnd && posSec > 2;
   const showNextEpCard = nextEp && ((remainSec > 0 && remainSec < 30) || isEnded);
   const showNextMovieCard = !nextEp && type !== 'episode' && nextMovie && ((remainSec > 0 && remainSec < 60) || isEnded);
   const showNextCard = showNextEpCard;
@@ -151,57 +214,119 @@ export default function PlayerScreen() {
   const [castSent, setCastSent] = useState(false);
   const [timerRemaining, setTimerRemaining] = useState(null);
   const [nextCountdown, setNextCountdown] = useState(null);
-  const [episodes, setEpisodes] = useState([]);
   const [activeSheetSeason, setActiveSheetSeason] = useState(1);
   const [nextMovie, setNextMovie] = useState(null);
   const { activeProfile } = useProfile();
+  const { getStatus: getDownloadStatus, startDownload, deleteDownload } = useDownloads();
   const [streamBlocked, setStreamBlocked] = useState(false);
   const [streamBlockInfo, setStreamBlockInfo] = useState(null);
   const [dragProgress, setDragProgress] = useState(null);
   // Computed after dragProgress to avoid TDZ / forward-reference
   const displayProgress = dragProgress !== null ? dragProgress : progress;
 
-  // ─── Google Cast (Chromecast) ─────────────────────────────────────────────
-  const castClient = useRemoteMediaClient();
-  const castState = useCastState();
-  const castDevice = useCastDevice();
-  const mediaStatus = useMediaStatus();
-  const remotePosition = useStreamPosition();
-  const isCasting = castState === CastState.CONNECTED && !!castClient;
-  const remoteIsPlaying = mediaStatus?.playerState === MediaPlayerState.PLAYING
-    || mediaStatus?.playerState === MediaPlayerState.BUFFERING;
+  // ─── Google Cast (Chromecast) — sessão ────────────────────────────────────
   const wasCastingRef = useRef(false);
+  const lastRemotePosRef = useRef(0);
+  const [castError, setCastError] = useState(null);
+  if (isCasting && remotePosition != null) lastRemotePosRef.current = remotePosition;
+
+  // Legendas na TV: o receiver só entende WebVTT, e a maioria das nossas é
+  // .srt — a rota /subtitle converte na hora (mesma usada no player web).
+  const castSubTracks = useMemo(() => {
+    const base = String(api.defaults?.baseURL || '').replace(/\/$/, '');
+    return availSubs.map(([lang, url], i) => ({
+      id: i + 1,
+      type: 'text',
+      subtype: 'subtitles',
+      contentId: `${base}/subtitle?url=${encodeURIComponent(url)}`,
+      contentType: 'text/vtt',
+      language: lang,
+      name: SUB_LABELS[lang] || lang,
+    }));
+  }, [availSubs]);
+  const castActiveTrackIds = (subKey) => {
+    const t = castSubTracks.find(x => x.language === subKey);
+    return t ? [t.id] : [];
+  };
+
+  // Manda (ou troca) o vídeo na TV. Usado ao conectar e ao trocar de versão.
+  const loadOnCast = (client, videoUrl, startSec) => {
+    if (!videoUrl) return Promise.resolve();
+    if (String(videoUrl).startsWith('file://')) {
+      setCastError('Vídeos baixados só tocam no celular — abra a versão online pra transmitir.');
+      return Promise.resolve();
+    }
+    setCastError(null);
+    const isEp = type === 'episode';
+    return client.loadMedia({
+      mediaInfo: {
+        contentUrl: videoUrl,
+        contentType: castContentType(videoUrl),
+        mediaTracks: castSubTracks,
+        metadata: {
+          type: isEp ? 'tvShow' : 'movie',
+          title: String(title || ''),
+          ...(isEp && seriesName ? { seriesTitle: seriesName } : {}),
+          images: posterUrl ? [{ url: String(posterUrl) }] : [],
+        },
+      },
+      startTime: Math.max(0, Math.floor(startSec || 0)),
+      autoplay: true,
+      activeTrackIds: castActiveTrackIds(activeSub),
+    }).catch(() => setCastError('Não foi possível iniciar a transmissão. Verifique se a TV está na mesma rede.'));
+  };
 
   // Ao conectar num Chromecast: pausa o vídeo local (senão toca nos dois ao
-  // mesmo tempo) e manda a versão/posição atual pro receiver. Ao desconectar:
-  // retoma local de onde a TV parou.
+  // mesmo tempo) e manda a versão/posição atual pro receiver. Ao desconectar
+  // (ou se a TV cair): retoma local de onde a TV parou.
   useEffect(() => {
     if (isCasting && !wasCastingRef.current) {
       wasCastingRef.current = true;
-      const videoUrl = versions[activeVer];
-      if (videoUrl) {
-        player.pause();
-        castClient.loadMedia({
-          mediaInfo: {
-            contentUrl: videoUrl,
-            contentType: 'video/mp4',
-            metadata: {
-              type: 'movie',
-              title: String(title || ''),
-              images: posterUrl ? [{ url: String(posterUrl) }] : [],
-            },
-          },
-          startTime: Math.floor(currentTime),
-          autoplay: true,
-        }).catch(() => {});
-      }
+      player.pause();
+      loadOnCast(castClient, versions[activeVer], currentTime);
     } else if (!isCasting && wasCastingRef.current) {
       wasCastingRef.current = false;
-      if (remotePosition != null) player.currentTime = remotePosition;
+      const back = lastRemotePosRef.current;
+      if (back > 1) player.currentTime = back;
       player.play();
     }
   }, [isCasting]);
-  const displayTime     = dragProgress !== null ? dragProgress * durSec : currentTime;
+
+  // Legenda escolhida no celular vale também na TV
+  useEffect(() => {
+    if (isCasting) castClient.setActiveTrackIds(castActiveTrackIds(activeSub)).catch(() => {});
+  }, [activeSub, isCasting]);
+
+  const seekTo = (sec) => {
+    const t = Math.max(0, sec);
+    if (isCasting) {
+      castClient.seek({ position: t, resumeState: remoteIsPlaying ? 'play' : 'pause' }).catch(() => {});
+    } else {
+      player.currentTime = t;
+    }
+  };
+  // Refs pra handlers criados uma vez só (PanResponder) enxergarem o valor atual
+  const isCastingRef = useRef(false);
+  isCastingRef.current = isCasting;
+  const castClientRef = useRef(null);
+  castClientRef.current = castClient;
+  const seekToRef = useRef(null);
+  seekToRef.current = seekTo;
+  const durRef = useRef(0);
+  durRef.current = durSec;
+
+  const castVolume = mediaStatus?.volume ?? 1;
+  const castMuted = !!mediaStatus?.isMuted;
+  const changeCastVolume = (delta) => {
+    if (!isCasting) return;
+    const v = Math.max(0, Math.min(1, Math.round((castVolume + delta) * 10) / 10));
+    castClient.setStreamVolume(v).catch(() => {});
+    if (castMuted && delta > 0) castClient.setStreamMuted(false).catch(() => {});
+  };
+  const toggleCastMute = () => { if (isCasting) castClient.setStreamMuted(!castMuted).catch(() => {}); };
+  const stopCasting = () => { SessionManager.endCurrentSession(true).catch(() => {}); };
+
+  const displayTime     = dragProgress !== null ? dragProgress * durSec : posSec;
   const sessionId = useRef(`${Date.now()}_${Math.random().toString(36).substr(2, 9)}`).current;
   const heartbeatRef = useRef(null);
   const brightnessRef = useRef(0.8);
@@ -210,6 +335,7 @@ export default function PlayerScreen() {
   const schedHideRef = useRef(null);
   const sleepRef = useRef(null);
   const nextCountRef = useRef(null);
+  const sheetListRef = useRef(null);
   const timerEndRef = useRef(null);
   const progressBarW = useRef(0);
 
@@ -381,8 +507,8 @@ export default function PlayerScreen() {
     onPanResponderRelease: (_, g) => {
       if (progressBarW.current > 0) {
         const ratio = Math.max(0, Math.min(1, (pStartX + g.dx) / progressBarW.current));
-        const dur = player.duration;
-        if (dur > 0) player.currentTime = ratio * dur;
+        const dur = durRef.current;
+        if (dur > 0) seekToRef.current(ratio * dur);
       }
       setDragProgress(null);
       schedHideRef.current?.();
@@ -393,8 +519,11 @@ export default function PlayerScreen() {
   // ─── Control helpers ──────────────────────────────────────────────────────
   const schedHide = useCallback(() => {
     clearTimeout(hideTimerRef.current);
+    // Transmitindo, os controles ficam sempre na tela (e o controle remoto
+    // da TV nao faz sentido esconder).
+    if (isCasting) return;
     hideTimerRef.current = setTimeout(() => { if (!sheet) fadeCtrl(false); }, 4000);
-  }, [sheet]);
+  }, [sheet, isCasting]);
   schedHideRef.current = schedHide;
 
   const fadeCtrl = (show) => {
@@ -402,9 +531,14 @@ export default function PlayerScreen() {
     Animated.timing(ctrlOpacity, { toValue: show ? 1 : 0, duration: 220, useNativeDriver: true }).start();
   };
 
+  useEffect(() => {
+    if (isCasting) { clearTimeout(hideTimerRef.current); fadeCtrl(true); }
+  }, [isCasting]);
+
   const onTap = () => {
     if (locked) return;
     if (sheet) { setSheet(null); return; }
+    if (isCasting) return;
     const next = !ctrlVisible;
     fadeCtrl(next);
     if (next) schedHide();
@@ -431,7 +565,7 @@ export default function PlayerScreen() {
   };
 
   const seekToRatio = (ratio) => {
-    if (durSec > 0) player.currentTime = Math.max(0, Math.min(1, ratio)) * durSec;
+    if (durSec > 0) seekTo(Math.max(0, Math.min(1, ratio)) * durSec);
   };
 
   const openSheet = (name) => {
@@ -443,8 +577,8 @@ export default function PlayerScreen() {
   // Ref holds the latest save function so the interval never needs to restart
   const saveProgressRef = useRef(null);
   saveProgressRef.current = async () => {
-    const ct = player.currentTime;
-    const dur = player.duration || 0;
+    const ct = isCasting ? lastRemotePosRef.current : player.currentTime;
+    const dur = isCasting ? (durRef.current || 0) : (player.duration || 0);
     if (!id || ct < 5) return;
     try {
       await api.post('/history', {
@@ -476,8 +610,12 @@ export default function PlayerScreen() {
         const track = findTrackForVer(audioTracks, v);
         if (track) setActiveAudio(track);
       } else {
-        setSavedPosSec(currentTime);
-        player.replace({ uri: versions[v] });
+        if (isCasting) {
+          loadOnCast(castClient, versions[v], posSec);
+        } else {
+          setSavedPosSec(currentTime);
+          player.replace({ uri: versions[v] });
+        }
       }
       setActiveVer(v);
     }
@@ -488,8 +626,26 @@ export default function PlayerScreen() {
   // de vídeo (tela preta com áudio tocando) em falhas transitórias que um reload resolve.
   const retryPlayback = () => {
     setSavedPosSec(currentTime);
-    player.replace({ uri: versions[activeVer] });
+    // Toque manual alterna a forma da URL (barras reais <-> %2F): resolve o
+    // 404 que aparece só em alguns aparelhos.
+    altToggleRef.current = !altToggleRef.current;
+    player.replace({ uri: altToggleRef.current ? altMediaUrl(versions[activeVer]) : versions[activeVer] });
   };
+
+  // 404 do player: tenta sozinho uma vez a forma alternativa da URL antes
+  // de mostrar o erro pro usuário.
+  const altToggleRef = useRef(false);
+  const autoAltTriedRef = useRef(false);
+  useEffect(() => {
+    if (status !== 'error' || autoAltTriedRef.current) return;
+    if (!/404|403|Source error/i.test(playerError?.message || '')) return;
+    const alt = altMediaUrl(versions[activeVer]);
+    if (!alt || alt === versions[activeVer]) return;
+    autoAltTriedRef.current = true;
+    altToggleRef.current = true;
+    setSavedPosSec(currentTime);
+    player.replace({ uri: alt });
+  }, [status]);
 
   const startTimer = (ms) => {
     clearInterval(sleepRef.current);
@@ -501,6 +657,7 @@ export default function PlayerScreen() {
         setTimerRemaining(null);
         timerEndRef.current = null;
         player.pause();
+        if (isCastingRef.current) castClientRef.current?.pause().catch(() => {});
         clearInterval(sleepRef.current);
       } else { setTimerRemaining(rem); }
     }, 1000);
@@ -513,27 +670,83 @@ export default function PlayerScreen() {
     setTimerRemaining(null);
   };
 
-  const goNextEp = () => {
-    if (!nextEp) return;
+  // Nome da serie vem do titulo do episodio atual ("Serie · T1E2 · Nome"),
+  // pra o titulo do proximo nao perder o nome da serie.
+  const seriesName = useMemo(() => {
+    const m = String(title || '').match(/^(.*?)\s·\sT\d+E\d+/);
+    return m ? m[1] : '';
+  }, [title]);
+
+  // Baixa o proximo episodio sozinho (opcional, so no Wi-Fi) quando passar da
+  // metade do atual - assim a maratona continua mesmo se a internet cair.
+  const autoDlNextRef = useRef(false);
+  useEffect(() => {
+    if (autoDlNextRef.current) return;
+    if (type !== 'episode' || !nextEp || durSec <= 0 || posSec / durSec < 0.5) return;
+    autoDlNextRef.current = true;
+    (async () => {
+      try {
+        if (!(await getPref('autoDownloadNext'))) return;
+        const net = await NetInfo.fetch();
+        if (net.type !== 'wifi') return;
+        const ver = nextEp[`file_${activeVer}`] ? activeVer
+          : ['dubbing', 'subtitled', 'cinema', 'color', 'bw'].find(k => nextEp[`file_${k}`]);
+        if (!ver) return;
+        if (getDownloadStatus(nextEp.id, ver).state !== 'none') return;
+        startDownload(nextEp.id, ver, nextEp[`file_${ver}`], {
+          title: seriesName || String(title || ''),
+          type: 'episode',
+          episodeLabel: `T${nextEp.season_number}E${pad(nextEp.episode_number)}${nextEp.title ? ` · ${nextEp.title}` : ''}`,
+          thumbnailUrl: nextEp.thumbnail_url,
+          posterUrl: posterUrl ? String(posterUrl) : null,
+          seriesId: seriesId ? String(seriesId) : null,
+        });
+      } catch {}
+    })();
+  }, [posSec, durSec, nextEp]);
+
+  // Apaga o download quando o episodio termina (opcional).
+  const autoDeletedRef = useRef(false);
+  useEffect(() => {
+    if (!isEnded || autoDeletedRef.current || type !== 'episode') return;
+    autoDeletedRef.current = true;
+    (async () => {
+      try {
+        if (!(await getPref('autoDeleteWatched'))) return;
+        if (getDownloadStatus(id, activeVer).state === 'done') deleteDownload(id, activeVer);
+      } catch {}
+    })();
+  }, [isEnded]);
+
+  // Abre qualquer episodio (proximo, anterior, lista) do mesmo jeito: salva o
+  // progresso, mantem a versao de audio escolhida, usa o arquivo baixado se
+  // existir e ja calcula o "proximo" do novo episodio.
+  const openEpisode = (ep) => {
+    if (!ep || !epHasFile(ep)) return;
     clearTimeout(nextCountRef.current);
     setNextCountdown(null);
     saveProgress();
-    const url = nextEp.file_dubbing || nextEp.file_subtitled || nextEp.file_cinema || nextEp.file_color || nextEp.file_bw;
-    if (!url) return;
-    const nextNext = findNextEp(nextEp.id);
-    const nextParams = {
-      url,
-      title: `T${nextEp.season_number}E${pad(nextEp.episode_number)}${nextEp.title ? ` · ${nextEp.title}` : ''}`,
-      id: String(nextEp.id), type: 'episode',
-      currentVersion: activeVer,
-      versions: JSON.stringify({ dubbing: nextEp.file_dubbing || null, subtitled: nextEp.file_subtitled || null, cinema: nextEp.file_cinema || null, color: nextEp.file_color || null, bw: nextEp.file_bw || null }),
-      subtitles: JSON.stringify({ pt: nextEp.subtitle_pt || null, en: nextEp.subtitle_en || null, es: nextEp.subtitle_es || null }),
+    const vers = { dubbing: ep.file_dubbing || null, subtitled: ep.file_subtitled || null, cinema: ep.file_cinema || null, color: ep.file_color || null, bw: ep.file_bw || null };
+    const ver = vers[activeVer] ? activeVer : Object.keys(vers).find(k => vers[k]);
+    const dl = getDownloadStatus?.(ep.id, ver);
+    if (!isCasting && dl?.state === 'done' && dl.filePath) vers[ver] = dl.filePath;
+    const after = pickAdjacentEp(episodes, ep.id, 1);
+    const navParams = {
+      url: vers[ver],
+      title: `${seriesName ? seriesName + ' · ' : ''}T${ep.season_number}E${pad(ep.episode_number)}${ep.title ? ` · ${ep.title}` : ''}`,
+      id: String(ep.id), type: 'episode',
+      currentVersion: ver,
+      versions: JSON.stringify(vers),
+      subtitles: JSON.stringify({ pt: ep.subtitle_pt || null, en: ep.subtitle_en || null, es: ep.subtitle_es || null }),
     };
-    if (seriesId) nextParams.seriesId = seriesId;
-    if (nextNext) nextParams.nextEpisode = JSON.stringify(buildNavEpParam(nextNext));
-    if (nextEp.intro_end) nextParams.introEnd = String(nextEp.intro_end);
-    router.replace({ pathname: '/player', params: nextParams });
+    if (seriesId) navParams.seriesId = seriesId;
+    if (after) navParams.nextEpisode = JSON.stringify(buildNavEpParam(after));
+    if (ep.intro_end) navParams.introEnd = String(ep.intro_end);
+    router.replace({ pathname: '/player', params: navParams });
   };
+
+  const goNextEp = () => openEpisode(nextEp);
+  const goPrevEp = () => openEpisode(prevEp);
 
   const sendCastToTV = useCallback(async () => {
     const videoUrl = versions[activeVer];
@@ -542,14 +755,14 @@ export default function PlayerScreen() {
       await api.post('/cast', {
         url: videoUrl,
         title,
-        position: Math.floor(currentTime),
+        position: Math.floor(posSec),
         subtitleUrl: activeSub ? subtitles[activeSub] : null,
         version: activeVer,
       });
       setCastSent(true);
       setTimeout(() => setCastSent(false), 4000);
     } catch {}
-  }, [versions, activeVer, title, currentTime, activeSub, subtitles, castSent]);
+  }, [versions, activeVer, title, posSec, activeSub, subtitles, castSent]);
 
   const sortedEps = [...episodes].sort((a, b) =>
     a.season_number !== b.season_number ? a.season_number - b.season_number : a.episode_number - b.episode_number
@@ -573,12 +786,6 @@ export default function PlayerScreen() {
     subtitle_es: ep.subtitle_es || null,
     intro_end: ep.intro_end || null,
   });
-
-  const findNextEp = (epId) => {
-    const idx = sortedEps.findIndex(e => String(e.id) === String(epId));
-    const raw = idx >= 0 && idx + 1 < sortedEps.length ? sortedEps[idx + 1] : null;
-    return raw && (raw.file_dubbing || raw.file_subtitled || raw.file_cinema || raw.file_color || raw.file_bw) ? raw : null;
-  };
 
   const openEpisodesSheet = () => {
     const cur = sortedEps.find(e => String(e.id) === String(id));
@@ -631,6 +838,8 @@ export default function PlayerScreen() {
         surfaceType="textureView"
         fullscreenOptions={{ isFullscreenSupported: false }}
         allowsExternalPlayback={true}
+        allowsPictureInPicture
+        startsPictureInPictureAutomatically
         requiresLinearPlayback={false}
         bufferOptions={{
           // Android (ExoPlayer): pré-carrega até 2 min para aguentar quedas de rede
@@ -671,7 +880,7 @@ export default function PlayerScreen() {
       )}
 
       {/* Legenda overlay (VTT externo parseado — sempre visível) */}
-      {subtitleCues.length > 0 && (() => {
+      {!isCasting && subtitleCues.length > 0 && (() => {
         const cue = subtitleCues.find(c => currentTime >= c.start && currentTime <= c.end);
         return cue ? (
           <View style={styles.subtitleOverlay} pointerEvents="none">
@@ -683,24 +892,53 @@ export default function PlayerScreen() {
       {/* Tap area */}
       <TouchableOpacity style={StyleSheet.absoluteFill} onPress={onTap} activeOpacity={1} />
 
-      {/* Transmitindo para Chromecast — vídeo local fica pausado, controles
-          básicos aqui atuam sobre o RemoteMediaClient. Renderizado depois da
-          "Tap area" pra ficar por cima dela e receber os toques. */}
+      {/* Transmitindo para Chromecast — o vídeo local fica pausado; os controles
+          de baixo (play, seek, barra, legenda, versão, episódios) atuam na TV.
+          Aqui fica o cartão do dispositivo, volume e "parar". Renderizado
+          antes dos controles pra eles ficarem por cima. */}
       {isCasting && (
         <View style={styles.castingOverlay} pointerEvents="box-none">
-          <Ionicons name="tv" size={64} color="rgba(255,255,255,0.85)" />
-          <Text style={styles.castingText}>
-            Transmitindo para {castDevice?.friendlyName || 'a TV'}
-          </Text>
-          <View style={styles.castingControls}>
-            <TouchableOpacity style={styles.seekBtn} onPress={() => seekBy(-10)} activeOpacity={0.7}>
-              <Ionicons name="refresh" size={34} color="#fff" style={{ transform: [{ scaleX: -1 }] }} />
+          <View style={styles.castCard} pointerEvents="none">
+            {posterUrl
+              ? <CachedImage source={{ uri: String(posterUrl) }} style={styles.castPoster} resizeMode="cover" />
+              : <View style={[styles.castPoster, { alignItems: 'center', justifyContent: 'center' }]}>
+                  <Ionicons name="tv" size={30} color="rgba(255,255,255,0.6)" />
+                </View>}
+            <View style={{ flexShrink: 1 }}>
+              <View style={styles.castLive}>
+                <View style={[styles.castDot, { backgroundColor: castError ? '#E50914' : remoteIsPlaying ? '#46d369' : '#f5a623' }]} />
+                <Text style={styles.castLiveText}>
+                  {castError ? 'Erro' : remoteLoading ? 'Carregando na TV…' : remoteIsPlaying ? 'Transmitindo' : 'Pausado'}
+                </Text>
+              </View>
+              <Text style={styles.castDevice} numberOfLines={1}>{castDevice?.friendlyName || 'Chromecast'}</Text>
+              <Text style={styles.castTitle} numberOfLines={2}>{title}</Text>
+            </View>
+          </View>
+
+          {!!castError && (
+            <View style={styles.castErrorBox}>
+              <Text style={styles.castErrorText}>{castError}</Text>
+              <TouchableOpacity style={styles.castErrorBtn} onPress={stopCasting}>
+                <Text style={styles.castErrorBtnText}>Assistir no celular</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Volume da TV + parar transmissão (coluna direita) */}
+          <View style={styles.castSide}>
+            <TouchableOpacity style={styles.castSideBtn} onPress={() => changeCastVolume(0.1)} activeOpacity={0.7}>
+              <Ionicons name="add" size={20} color="#fff" />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.playPauseBtn} onPress={togglePlay} activeOpacity={0.8}>
-              <Ionicons name={remoteIsPlaying ? 'pause' : 'play'} size={40} color="#fff" style={!remoteIsPlaying ? { marginLeft: 4 } : undefined} />
+            <TouchableOpacity style={styles.castSideBtn} onPress={toggleCastMute} activeOpacity={0.7}>
+              <Ionicons name={castMuted || castVolume === 0 ? 'volume-mute' : 'volume-high'} size={18} color={castMuted ? '#E50914' : '#fff'} />
+              <Text style={styles.castVolText}>{castMuted ? '—' : Math.round(castVolume * 100)}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.seekBtn} onPress={() => seekBy(10)} activeOpacity={0.7}>
-              <Ionicons name="refresh" size={34} color="#fff" />
+            <TouchableOpacity style={styles.castSideBtn} onPress={() => changeCastVolume(-0.1)} activeOpacity={0.7}>
+              <Ionicons name="remove" size={20} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.castSideBtn, styles.castStopBtn]} onPress={stopCasting} activeOpacity={0.8}>
+              <Ionicons name="stop-circle-outline" size={20} color="#fff" />
             </TouchableOpacity>
           </View>
         </View>
@@ -723,7 +961,10 @@ export default function PlayerScreen() {
                 <Text style={styles.verBadgeText}>{VER_SHORT[activeVer]}</Text>
               </View>
             )}
-            <CastButton style={styles.castHeaderBtn} tintColor="#fff" />
+            <View style={styles.castHeaderBox}>
+              <Ionicons name={isCasting ? 'tv' : 'tv-outline'} size={20} color={isCasting ? '#E50914' : '#fff'} />
+              <CastButton style={[StyleSheet.absoluteFillObject, { opacity: 0 }]} tintColor="transparent" />
+            </View>
             <TouchableOpacity style={styles.timerBtn} onPress={() => openSheet('timer')}>
               <Ionicons name="timer-outline" size={18} color="#fff" />
               <Text style={styles.timerBtnText}>
@@ -755,8 +996,8 @@ export default function PlayerScreen() {
 
               <TouchableOpacity style={styles.playPauseBtn} onPress={togglePlay} activeOpacity={0.8}>
                 <Ionicons
-                  name={isPlaying ? 'pause' : 'play'} size={56} color="#fff"
-                  style={!isPlaying ? { marginLeft: 5 } : undefined}
+                  name={uiPlaying ? 'pause' : 'play'} size={56} color="#fff"
+                  style={!uiPlaying ? { marginLeft: 5 } : undefined}
                 />
               </TouchableOpacity>
 
@@ -775,7 +1016,7 @@ export default function PlayerScreen() {
           {showSkipIntro && (
             <TouchableOpacity
               style={styles.skipIntroBtn}
-              onPress={() => player.currentTime = introEnd}
+              onPress={() => seekTo(introEnd)}
               activeOpacity={0.85}
             >
               <Text style={styles.skipIntroText}>Pular Abertura</Text>
@@ -849,6 +1090,13 @@ export default function PlayerScreen() {
                 <Ionicons name="tv-outline" size={15} color="#fff" />
                 <Text style={styles.actionBtnText}>Transmitir</Text>
               </TouchableOpacity>
+              {prevEp && <>
+                <View style={styles.actionDiv} />
+                <TouchableOpacity style={styles.actionBtn} onPress={goPrevEp}>
+                  <Ionicons name="play-skip-back-outline" size={15} color="#fff" />
+                  <Text style={styles.actionBtnText}>Ep. anterior</Text>
+                </TouchableOpacity>
+              </>}
               {nextEp && <>
                 <View style={styles.actionDiv} />
                 <TouchableOpacity style={styles.actionBtn} onPress={goNextEp}>
@@ -1020,7 +1268,7 @@ export default function PlayerScreen() {
                         controla de verdade. */}
                     <View style={[styles.castIconBox, isCasting && { backgroundColor: '#E50914' }]}>
                       <Ionicons name="tv-outline" size={22} color="#fff" />
-                      <CastButton style={StyleSheet.absoluteFillObject} tintColor="transparent" />
+                      <CastButton style={[StyleSheet.absoluteFillObject, { opacity: 0 }]} tintColor="transparent" />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.castOptionTitle}>Chromecast</Text>
@@ -1143,12 +1391,6 @@ export default function PlayerScreen() {
                   </TouchableOpacity>
                 )}
 
-                <View style={styles.castNote}>
-                  <Ionicons name="information-circle-outline" size={14} color="#555" />
-                  <Text style={styles.castNoteText}>
-                    Chromecast não está disponível pois alguns filmes usam áudio AAC, que é incompatível com o Cast do Google.
-                  </Text>
-                </View>
               </>;
             })()}
 
@@ -1178,34 +1420,24 @@ export default function PlayerScreen() {
                     />
                   )}
                   <FlatList
+                    ref={sheetListRef}
                     data={sheetSeasonEps}
                     keyExtractor={e => String(e.id)}
                     style={{ maxHeight: seasonNums.length > 1 ? 300 : 360 }}
+                    onLayout={() => {
+                      // Abre ja rolado no episodio que esta tocando
+                      const i = sheetSeasonEps.findIndex(e => String(e.id) === String(id));
+                      if (i > 0) sheetListRef.current?.scrollToIndex({ index: i, animated: false, viewPosition: 0.3 });
+                    }}
+                    onScrollToIndexFailed={() => {}}
                     renderItem={({ item: ep }) => {
                       const epUrl = ep.file_dubbing || ep.file_subtitled || ep.file_cinema || ep.file_color || ep.file_bw;
                       const isActive = String(ep.id) === String(id);
-                      const nextForNav = findNextEp(ep.id);
                       return (
                         <TouchableOpacity
                           style={[styles.epRow, isActive && styles.epRowActive]}
                           disabled={!epUrl}
-                          onPress={() => {
-                            if (!epUrl) return;
-                            setSheet(null);
-                            const navParams = {
-                              url: epUrl,
-                              id: String(ep.id),
-                              type: 'episode',
-                              title: `T${ep.season_number}E${pad(ep.episode_number)}${ep.title ? ` · ${ep.title}` : ''}`,
-                              seriesId: seriesId || undefined,
-                              currentVersion: activeVer,
-                              versions: JSON.stringify({ dubbing: ep.file_dubbing || null, subtitled: ep.file_subtitled || null, cinema: ep.file_cinema || null, color: ep.file_color || null, bw: ep.file_bw || null }),
-                              subtitles: JSON.stringify({ pt: ep.subtitle_pt || null, en: ep.subtitle_en || null, es: ep.subtitle_es || null }),
-                              introEnd: ep.intro_end ? String(ep.intro_end) : undefined,
-                            };
-                            if (nextForNav) navParams.nextEpisode = JSON.stringify(buildNavEpParam(nextForNav));
-                            router.replace({ pathname: '/player', params: navParams });
-                          }}
+                          onPress={() => { setSheet(null); openEpisode(ep); }}
                         >
                           {ep.thumbnail_url
                             ? <Image source={{ uri: ep.thumbnail_url }} style={styles.epThumb} />
@@ -1262,9 +1494,23 @@ const styles = StyleSheet.create({
   timerBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 7 },
   timerBtnText: { color: '#fff', fontSize: 13 },
   castHeaderBtn: { width: 24, height: 24, marginHorizontal: 6 },
-  castingOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', gap: 16, backgroundColor: 'rgba(0,0,0,0.4)' },
-  castingText: { color: '#fff', fontSize: 15, fontWeight: '600' },
-  castingControls: { flexDirection: 'row', alignItems: 'center', gap: 28, marginTop: 8 },
+  castHeaderBox: { width: 36, height: 36, marginHorizontal: 4, alignItems: 'center', justifyContent: 'center' },
+  castingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(8,8,10,0.94)' },
+  castCard: { position: 'absolute', top: 64, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 14, maxWidth: '62%' },
+  castPoster: { width: 64, height: 92, borderRadius: 8, backgroundColor: '#1a1a1a' },
+  castLive: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
+  castDot: { width: 8, height: 8, borderRadius: 4 },
+  castLiveText: { color: '#aaa', fontSize: 11, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase' },
+  castDevice: { color: '#fff', fontSize: 16, fontWeight: '800', marginBottom: 2 },
+  castTitle: { color: '#8a8a8a', fontSize: 12, lineHeight: 16 },
+  castErrorBox: { position: 'absolute', bottom: 150, alignSelf: 'center', alignItems: 'center', gap: 10, maxWidth: '70%' },
+  castErrorText: { color: '#ff8a8a', fontSize: 13, textAlign: 'center', lineHeight: 18 },
+  castErrorBtn: { backgroundColor: '#E50914', paddingHorizontal: 18, paddingVertical: 9, borderRadius: 8 },
+  castErrorBtnText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  castSide: { position: 'absolute', right: 18, top: 0, bottom: 0, justifyContent: 'center', gap: 8 },
+  castSideBtn: { width: 44, minHeight: 40, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.10)', alignItems: 'center', justifyContent: 'center', paddingVertical: 6 },
+  castVolText: { color: '#ddd', fontSize: 10, fontWeight: '700', marginTop: 1 },
+  castStopBtn: { backgroundColor: 'rgba(229,9,20,0.75)', marginTop: 6 },
   verBadge: {
     backgroundColor: 'rgba(229,9,20,0.85)', borderRadius: 4,
     paddingHorizontal: 7, paddingVertical: 3, marginRight: 4,

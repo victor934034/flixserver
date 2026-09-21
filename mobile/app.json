@@ -2,7 +2,7 @@
   "expo": {
     "name": "Flixhome",
     "slug": "flixhome",
-    "version": "1.0.6",
+    "version": "1.0.7",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "icon": "./assets/icon.png",
@@ -12,7 +12,7 @@
     "android": {
       "package": "com.flixhome.app",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 9,
+      "versionCode": 10,
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#0a0a0a"
@@ -33,8 +33,9 @@
     "plugins": [
       "expo-router",
       "expo-screen-orientation",
-      "expo-video",
+      ["expo-video", { "supportsBackgroundPlayback": true, "supportsPictureInPicture": true }],
       "expo-font",
+      ["expo-speech-recognition", { "microphonePermission": "O Flixhome usa o microfone para a busca por voz.", "speechRecognitionPermission": "O Flixhome usa o reconhecimento de fala para a busca por voz." }],
       "expo-image-picker",
       "./plugins/withAndroidQueries",
       [

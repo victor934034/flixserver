@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect, useRef, useCallback } f
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
+import { normalizeMediaUrl } from '../lib/mediaUrl';
 
 const STORE_KEY = 'flixhome_dl_v1';
 const DL_DIR = FileSystem.documentDirectory + 'flixhome_dl/';
@@ -69,6 +70,7 @@ export function DownloadProvider({ children }) {
     const id = dlId(contentId, version);
     if (active[id] || downloads.find(d => d.id === id)) return;
 
+    url = normalizeMediaUrl(url);
     const ext  = extFromUrl(url);
     const path = DL_DIR + id + '.' + ext;
 

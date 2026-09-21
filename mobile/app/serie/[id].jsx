@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, Image, TouchableOpacity,
-  ActivityIndicator, useWindowDimensions, Alert, Modal,
+  ActivityIndicator, useWindowDimensions, Alert, Modal, Linking,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -31,6 +31,7 @@ export default function SerieDetail() {
   const { checkAccess } = useParental();
   const { activeProfile } = useProfile();
   const [epSeconds, setEpSeconds] = useState({});
+  const [resumeEpId, setResumeEpId] = useState(null); // ep mais recente em andamento desta serie
 
   useEffect(() => {
     Promise.all([
@@ -79,13 +80,19 @@ export default function SerieDetail() {
     api.get('/history', { params: { limit: 200, profile_id: activeProfile.id } })
       .then(r => {
         const map = {};
+        const inSeries = new Set(episodes.map(e => String(e.id)));
+        let resume = null;
+        // O historico vem do mais recente pro mais antigo: o primeiro
+        // episodio DESTA serie ainda em andamento e o que "continua".
         (r.data || []).forEach(h => {
           const epId = h.episode_id || (h.content_type === 'episode' ? h.content_id : null);
           if (epId && h.progress > 5 && !h.completed) {
             map[String(epId)] = h.progress;
+            if (!resume && inSeries.has(String(epId))) resume = String(epId);
           }
         });
         setEpSeconds(map);
+        setResumeEpId(resume);
       }).catch(() => {});
   }, [id, activeProfile?.id, episodes.length]);
 
@@ -121,6 +128,47 @@ export default function SerieDetail() {
     subtitle_es: ep.subtitle_es || null,
     intro_end: ep.intro_end || null,
   });
+
+  // Baixa a temporada toda em fila (um por vez, pra nao saturar rede/disco).
+  // Ja baixados/em andamento sao pulados; tocar de novo cancela a fila.
+  const seasonQueueAbort = useRef(false);
+  const [seasonQueueRunning, setSeasonQueueRunning] = useState(false);
+  const handleSeasonDownload = async () => {
+    if (seasonQueueRunning) { seasonQueueAbort.current = true; return; }
+    const pending = currentEps.filter(ep => {
+      const url = ep.file_dubbing || ep.file_subtitled || ep.file_cinema || ep.file_color || ep.file_bw;
+      if (!url) return false;
+      const version = ep.file_dubbing ? 'dubbing' : ep.file_subtitled ? 'subtitled' : ep.file_cinema ? 'cinema' : ep.file_color ? 'color' : 'bw';
+      return getStatus(ep.id, version).state === 'none';
+    });
+    if (pending.length === 0) { Alert.alert('Temporada', 'Todos os episódios já estão baixados ou em andamento.'); return; }
+    Alert.alert(
+      `Baixar temporada ${season}?`,
+      `${pending.length} episódio${pending.length !== 1 ? 's' : ''} serão baixados em fila. Isso pode usar bastante espaço e dados.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Baixar', onPress: async () => {
+          seasonQueueAbort.current = false;
+          setSeasonQueueRunning(true);
+          for (const ep of pending) {
+            if (seasonQueueAbort.current) break;
+            const version = ep.file_dubbing ? 'dubbing' : ep.file_subtitled ? 'subtitled' : ep.file_cinema ? 'cinema' : ep.file_color ? 'color' : 'bw';
+            const url = ep.file_dubbing || ep.file_subtitled || ep.file_cinema || ep.file_color || ep.file_bw;
+            const label = `T${ep.season_number}E${String(ep.episode_number).padStart(2, '0')}`;
+            await startDownload(ep.id, version, url, {
+              title: serie.title,
+              type: 'episode',
+              episodeLabel: label + (ep.title ? ` · ${ep.title}` : ''),
+              thumbnailUrl: ep.thumbnail_url,
+              posterUrl: serie.poster_url || serie.backdrop_url,
+              seriesId: id,
+            });
+          }
+          setSeasonQueueRunning(false);
+        } },
+      ],
+    );
+  };
 
   const handleEpDownload = (ep) => {
     const version = ep.file_dubbing ? 'dubbing' : ep.file_subtitled ? 'subtitled' : ep.file_cinema ? 'cinema' : ep.file_color ? 'color' : 'bw';
@@ -246,10 +294,26 @@ export default function SerieDetail() {
         </View>
 
         <View style={styles.actionRow}>
-          {episodes.length > 0 && (
-            <TouchableOpacity style={styles.btnPlay} onPress={() => playEp(episodes[0], undefined, epSeconds[String(episodes[0].id)] || 0)}>
-              <Ionicons name="play" size={18} color="#000" />
-              <Text style={styles.btnPlayText}>Assistir</Text>
+          {episodes.length > 0 && (() => {
+            const firstEp = [...episodes].sort((a, b) =>
+              a.season_number !== b.season_number ? a.season_number - b.season_number : a.episode_number - b.episode_number
+            )[0];
+            const resumeEp = resumeEpId ? episodes.find(e => String(e.id) === resumeEpId) : null;
+            const target = resumeEp || firstEp;
+            return (
+              <TouchableOpacity style={styles.btnPlay} onPress={() => playEp(target, undefined, epSeconds[String(target.id)] || 0)}>
+                <Ionicons name="play" size={18} color="#000" />
+                <Text style={styles.btnPlayText}>
+                  {resumeEp
+                    ? `Continuar T${resumeEp.season_number} E${String(resumeEp.episode_number).padStart(2, '0')}`
+                    : 'Assistir'}
+                </Text>
+              </TouchableOpacity>
+            );
+          })()}
+          {!!serie.trailer_url && (
+            <TouchableOpacity style={styles.btnList} onPress={() => Linking.openURL(serie.trailer_url).catch(() => Alert.alert('Trailer', 'Não foi possível abrir o trailer.'))}>
+              <Ionicons name="logo-youtube" size={22} color="#fff" />
             </TouchableOpacity>
           )}
           <TouchableOpacity style={styles.btnList} onPress={toggleList} disabled={listLoading}>
@@ -321,9 +385,23 @@ export default function SerieDetail() {
           </TouchableOpacity>
         </Modal>
 
-        <Text style={styles.sectionTitle}>
-          {currentEps.length} episódio{currentEps.length !== 1 ? 's' : ''}
-        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Text style={styles.sectionTitle}>
+            {currentEps.length} episódio{currentEps.length !== 1 ? 's' : ''}
+          </Text>
+          {currentEps.length > 0 && (
+            <TouchableOpacity
+              onPress={handleSeasonDownload}
+              activeOpacity={0.7}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 16, borderWidth: 1, borderColor: '#333' }}
+            >
+              <Ionicons name={seasonQueueRunning ? 'close-circle-outline' : 'download-outline'} size={15} color={seasonQueueRunning ? '#E50914' : '#ccc'} />
+              <Text style={{ color: seasonQueueRunning ? '#E50914' : '#ccc', fontSize: 12, fontWeight: '600' }}>
+                {seasonQueueRunning ? 'Parar fila' : 'Baixar temporada'}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
 
         {currentEps.map(ep => {
           const hasFile = ep.file_dubbing || ep.file_subtitled || ep.file_cinema || ep.file_color || ep.file_bw;

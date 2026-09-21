@@ -139,6 +139,7 @@ export default function HomeScreen() {
   const [popular, setPopular] = useState([]);
   const [collections, setCollections] = useState([]);
   const [recentEpisodes, setRecentEpisodes] = useState([]);
+  const [recommended, setRecommended] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const fetchHistory = useCallback(async () => {
@@ -175,6 +176,18 @@ export default function HomeScreen() {
       setRecentEpisodes(Array.isArray(recentEpRes.data) ? recentEpRes.data : []);
     }).finally(() => setLoading(false));
   }, []);
+
+  // Recomendados: afinidade por gênero calculada no backend a partir do
+  // histórico do perfil (vazio se o perfil ainda não assistiu nada).
+  const fetchRecommended = useCallback(async () => {
+    if (!activeProfile?.id) { setRecommended([]); return; }
+    try {
+      const r = await api.get(`/recommendations?profile_id=${activeProfile.id}&limit=20`);
+      setRecommended(Array.isArray(r.data) ? r.data : []);
+    } catch { setRecommended([]); }
+  }, [activeProfile?.id]);
+
+  useEffect(() => { fetchRecommended(); }, [fetchRecommended]);
 
   // Re-busca histórico quando perfil muda (mesmo que a aba já esteja focada)
   useEffect(() => {
@@ -247,6 +260,10 @@ export default function HomeScreen() {
               ))}
             </ScrollView>
           </View>
+        )}
+
+        {recommended.length > 0 && (
+          <ContentRow title="Recomendados pra você" items={recommended} type="mixed" />
         )}
 
         {popular.length > 0 && (

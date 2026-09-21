@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { supabase } = require('../services/supabase');
 const { optionalAuth } = require('../middleware/auth');
+const { searchIds, orderByIds } = require('../services/titleSearch');
 
 const PUBLIC_FIELDS = 'id, tmdb_id, title, original_title, synopsis, year_start, year_end, total_seasons, rating, genres, poster_url, backdrop_url, trailer_url, age_rating, status, is_featured, views';
 
@@ -48,14 +49,15 @@ router.get('/search', async (req, res) => {
   const { q = '' } = req.query;
   if (!q.trim()) return res.json([]);
   try {
+    const ids = await searchIds('series', q, 20);
+    if (!ids.length) return res.json([]);
     const { data, error } = await supabase
       .from('series')
       .select(PUBLIC_FIELDS)
       .eq('is_active', true)
-      .ilike('title', `%${q}%`)
-      .limit(20);
+      .in('id', ids);
     if (error) throw error;
-    res.json(await attachHasBw(data || []));
+    res.json(await attachHasBw(orderByIds(data || [], ids)));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
