@@ -1067,6 +1067,102 @@ router.post('/fix-series-faststart', async (req, res) => {
   })();
 });
 
+// Corrige AUDIO incompatível (AC3/DTS/5.1/HE-AAC -> AAC estéreo) so das
+// séries informadas - mesmo problema silencioso do /fix-audio individual,
+// so que em lote. Episódios enviados via upload-desenhos NUNCA passavam
+// por essa checagem (só faststart), diferente do upload de filme - por
+// isso varias TVs Android sem decoder de hardware pra AC3/DTS (a maioria
+// dos sticks baratos) tocavam o video sem NENHUM som. O emulador funciona
+// porque decodifica esses codecs por software.
+router.post('/fix-series-audio', async (req, res) => {
+  const { supabase } = require('../services/supabase');
+  const { uploadFileFromPath } = require('../services/backblaze');
+  const { seriesIds: seriesIdsInput } = req.body;
+  if (!Array.isArray(seriesIdsInput) || seriesIdsInput.length === 0) {
+    return res.status(400).json({ error: 'seriesIds deve ser um array não-vazio' });
+  }
+
+  const EPISODE_FIELDS = ['file_dubbing', 'file_subtitled', 'file_cinema'];
+  let allItems = [];
+  try {
+    const { data: eps, error: epsErr } = await supabase
+      .from('episodes')
+      .select(['id', 'series_id', ...EPISODE_FIELDS].join(', '))
+      .in('series_id', seriesIdsInput);
+    if (epsErr) throw new Error(`Supabase episodes: ${epsErr.message}`);
+    for (const row of eps || []) {
+      for (const f of EPISODE_FIELDS) {
+        if (row[f]) allItems.push({ table: 'episodes', id: row.id, field: f, cdnUrl: row[f] });
+      }
+    }
+  } catch (e) {
+    return res.status(500).json({ error: 'Erro ao coletar episódios: ' + e.message });
+  }
+
+  if (allItems.length === 0) {
+    return res.json({ ok: true, jobId: null, total: 0, message: 'Nenhum episódio encontrado para essas séries.' });
+  }
+
+  const jobId = `fsa_${Date.now()}`;
+  batchJobs.set(jobId, { total: allItems.length, done: 0, errors: 0, running: true, lastFile: '', lastError: '', skipped: 0 });
+  res.json({ ok: true, jobId, total: allItems.length, message: `Verificando áudio de ${allItems.length} episódio(s).` });
+
+  (async () => {
+    const job = batchJobs.get(jobId);
+    for (const item of allItems) {
+      let tmpIn = null, tmpOut = null;
+      try {
+        const origName = decodeURIComponent(new URL(item.cdnUrl).pathname.replace(/^\//, ''));
+        job.lastFile = origName.slice(-60);
+        const ext = path.extname(origName) || '.mp4';
+        const badContainer = BAD_CONTAINER_RE.test(origName);
+
+        const { url: b2AuthUrl } = await getDirectDownloadInfo(origName);
+        const ts = Date.now();
+        tmpIn = path.join(os.tmpdir(), `fh_fsa_in_${ts}${ext}`);
+
+        console.log(`[fix-series-audio] baixando ${origName}...`);
+        await downloadB2File(b2AuthUrl, null, tmpIn, 5);
+
+        const audioInfo = await probeLocalFile(tmpIn);
+        if (!needsRemux(audioInfo) && !badContainer) {
+          job.done++;
+          console.log(`[fix-series-audio] ${job.done}/${job.total} já compatível: ${origName}`);
+          continue;
+        }
+
+        const outExt = badContainer ? '.mp4' : ext;
+        tmpOut = path.join(os.tmpdir(), `fh_fsa_${ts}${outExt}`);
+        await execFileAsync(ffmpegPath, [
+          '-hide_banner', '-i', tmpIn,
+          '-c:v', 'copy',
+          '-c:a', 'aac', '-profile:a', 'aac_low', '-ac', '2', '-b:a', '192k',
+          ...(badContainer ? ['-avoid_negative_ts', 'make_zero', '-movflags', '+faststart'] : []),
+          '-y', tmpOut,
+        ], { maxBuffer: 10 * 1024 * 1024, timeout: 7_200_000 });
+
+        const finalName = badContainer ? origName.replace(/\.[^.]+$/, '.mp4') : origName;
+        const result = await uploadFileFromPath(tmpOut, finalName, badContainer ? 'video/mp4' : contentTypeFor(ext));
+
+        if (result.cdnUrl !== item.cdnUrl) {
+          await supabase.from('episodes').update({ [item.field]: result.cdnUrl }).eq('id', item.id);
+        }
+        job.done++;
+        console.log(`[fix-series-audio] ${job.done}/${job.total} corrigido: ${origName}`);
+      } catch (e) {
+        job.errors++;
+        job.lastError = ffmpegErrTail(e);
+        console.error(`[fix-series-audio] ERRO (episodes#${item.id} ${item.field}):`, e.stderr || e.message);
+      } finally {
+        try { if (tmpIn)  fs.unlinkSync(tmpIn);  } catch {}
+        try { if (tmpOut) fs.unlinkSync(tmpOut); } catch {}
+      }
+    }
+    job.running = false;
+    console.log(`[fix-series-audio] Concluído: ${job.done} ok, ${job.errors} erros`);
+  })();
+});
+
 // Polling de progresso do batch
 router.get('/batch-status', (req, res) => {
   const { jobId } = req.query;

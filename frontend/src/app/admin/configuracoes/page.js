@@ -42,6 +42,14 @@ export default function Configuracoes() {
   const [seriesFixProgress, setSeriesFixProgress] = useState(null);
   const seriesFixPollRef = useRef(null);
 
+  // Mesmo picker de séries acima, so que pra corrigir ÁUDIO incompatível
+  // (AC3/DTS/5.1/HE-AAC) em vez de faststart - episódios enviados pelo
+  // uploader em lote nunca passavam por essa checagem, so filmes.
+  const [seriesAudioFixMsg, setSeriesAudioFixMsg] = useState('');
+  const [seriesAudioFixRunning, setSeriesAudioFixRunning] = useState(false);
+  const [seriesAudioFixProgress, setSeriesAudioFixProgress] = useState(null);
+  const seriesAudioFixPollRef = useRef(null);
+
   useEffect(() => {
     clearTimeout(seriesSearchDebounce.current);
     if (!seriesQuery.trim()) { setSeriesResults([]); return; }
@@ -610,6 +618,106 @@ export default function Configuracoes() {
                   )}
                 </div>
               )}
+
+              <div style={{ borderTop: '1px solid #2a2a2a', marginTop: 20, paddingTop: 16 }}>
+                <p style={{ color: '#fff', fontWeight: 600, margin: '0 0 4px', fontSize: 14 }}>Corrigir áudio destas séries</p>
+                <p style={{ color: '#888', fontSize: 12, margin: '0 0 12px' }}>
+                  Reencoda pra AAC estéreo qualquer episódio com áudio AC3/DTS/5.1/HE-AAC — muitas TVs Android
+                  (sticks etc.) tocam o vídeo sem som nenhum e sem erro quando o áudio não é AAC, por não terem
+                  decoder de hardware pra esses formatos. Usa as séries selecionadas acima.
+                </p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+                  <button
+                    disabled={seriesAudioFixRunning || selectedSeries.length === 0}
+                    onClick={async () => {
+                      const seriesIds = selectedSeries.map(s => s.id);
+                      if (seriesIds.length === 0) return;
+                      setSeriesAudioFixRunning(true);
+                      setSeriesAudioFixMsg('');
+                      setSeriesAudioFixProgress(null);
+                      clearInterval(seriesAudioFixPollRef.current);
+                      try {
+                        const r = await api.post('/upload/fix-series-audio', { seriesIds }, { timeout: 30000 });
+                        if (!r.data.jobId) {
+                          setSeriesAudioFixMsg(r.data.message || '✓ Nada para corrigir.');
+                          setSeriesAudioFixRunning(false);
+                          return;
+                        }
+                        const { jobId } = r.data;
+                        setSeriesAudioFixProgress({ total: r.data.total, done: 0, errors: 0, running: true, lastFile: '' });
+                        setSeriesAudioFixMsg(r.data.message || '');
+                        seriesAudioFixPollRef.current = setInterval(async () => {
+                          try {
+                            const s = await api.get(`/upload/batch-status?jobId=${jobId}`);
+                            setSeriesAudioFixProgress(s.data);
+                            if (!s.data.running) {
+                              clearInterval(seriesAudioFixPollRef.current);
+                              setSeriesAudioFixRunning(false);
+                              setSeriesAudioFixMsg(
+                                s.data.errors === 0
+                                  ? `✓ ${s.data.done} episódio(s) verificado(s)/corrigido(s).`
+                                  : `${s.data.done} ok, ${s.data.errors} erro(s)${s.data.lastError ? ': ' + s.data.lastError : ' — veja os logs.'}`
+                              );
+                            }
+                          } catch {
+                            clearInterval(seriesAudioFixPollRef.current);
+                            setSeriesAudioFixRunning(false);
+                            setSeriesAudioFixMsg('Erro ao verificar progresso. Veja os logs do servidor.');
+                          }
+                        }, 3000);
+                      } catch (e) {
+                        setSeriesAudioFixMsg('Erro: ' + (e.response?.data?.error || e.message));
+                        setSeriesAudioFixRunning(false);
+                      }
+                    }}
+                    style={{
+                      padding: '10px 24px', borderRadius: 8,
+                      background: seriesAudioFixRunning ? '#333' : '#c0392b',
+                      color: '#fff', border: 'none', fontWeight: 700, fontSize: 14,
+                      cursor: seriesAudioFixRunning ? 'not-allowed' : 'pointer',
+                    }}>
+                    {seriesAudioFixRunning ? 'Processando...' : 'Corrigir áudio dessas séries'}
+                  </button>
+                  {seriesAudioFixMsg && (
+                    <span style={{ color: seriesAudioFixMsg.startsWith('Erro') ? '#ff6b6b' : '#4caf50', fontSize: 13 }}>
+                      {seriesAudioFixMsg}
+                    </span>
+                  )}
+                </div>
+
+                {seriesAudioFixProgress && seriesAudioFixProgress.running && (
+                  <div style={{ background: '#111', borderRadius: 8, padding: '12px 16px', marginTop: 12 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                      <span style={{ color: '#fff', fontSize: 13, fontWeight: 600 }}>
+                        {seriesAudioFixProgress.done} / {seriesAudioFixProgress.total} episódios
+                        {seriesAudioFixProgress.errors > 0 && (
+                          <span style={{ color: '#ff6b6b', marginLeft: 8 }}>({seriesAudioFixProgress.errors} erros)</span>
+                        )}
+                      </span>
+                      <span style={{ color: '#888', fontSize: 12 }}>
+                        {Math.round((seriesAudioFixProgress.done / seriesAudioFixProgress.total) * 100)}%
+                      </span>
+                    </div>
+                    <div style={{ background: '#222', borderRadius: 4, height: 6, overflow: 'hidden' }}>
+                      <div style={{
+                        height: '100%', borderRadius: 4, background: '#c0392b',
+                        width: `${Math.round((seriesAudioFixProgress.done / seriesAudioFixProgress.total) * 100)}%`,
+                        transition: 'width 0.5s ease',
+                      }} />
+                    </div>
+                    {seriesAudioFixProgress.lastFile && (
+                      <p style={{ color: '#555', fontSize: 11, margin: '6px 0 0', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {seriesAudioFixProgress.lastFile}
+                      </p>
+                    )}
+                    {seriesAudioFixProgress.lastError && (
+                      <p style={{ color: '#ff6b6b', fontSize: 11, margin: '4px 0 0', fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                        Último erro: {seriesAudioFixProgress.lastError}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>

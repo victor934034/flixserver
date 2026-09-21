@@ -292,9 +292,44 @@ export default function UploadDesenhosPage() {
     }
   }
 
+  // O upload de filme (admin/upload) ja verifica o codec de audio e remuxa
+  // pra AAC quando necessario (AC3/DTS/5.1/HE-AAC) - esse uploader de
+  // episodios nunca fazia essa checagem, so a de faststart. TVs Android
+  // sem decoder de hardware pra AC3/DTS (a maioria dos sticks baratos)
+  // tocavam o video sem NENHUM som e sem erro nenhum - o emulador funciona
+  // porque decodifica por software. Roda antes do faststart porque o
+  // remux de audio ja reescreve o arquivo inteiro (se ele mudar o cdnUrl,
+  // o faststart tem que ser aplicado no arquivo novo, nao no antigo).
+  async function runAudioFix(epNum, cdnUrl, movieId) {
+    updateEp(epNum, { optimizing: true, audioFixError: false });
+    try {
+      const { data } = await api.post('/upload/fix-audio', {
+        cdnUrl,
+        movieId,
+        movieType: 'series',
+        field: `file_${version}`,
+      }, { timeout: 900_000 });
+      return data?.cdnUrl || cdnUrl;
+    } catch (e) {
+      const realReason = e.response?.data?.error || e.message;
+      console.warn(`[fix-audio] ep ${epNum}:`, realReason);
+      updateEp(epNum, { audioFixError: true, audioFixErrorMsg: realReason });
+      return cdnUrl;
+    }
+  }
+
+  async function runOptimizations(epNum, cdnUrl, movieId) {
+    const fixedUrl = await runAudioFix(epNum, cdnUrl, movieId);
+    if (/\.(mp4|mkv)$/i.test(fixedUrl)) {
+      await runFaststart(epNum, fixedUrl, movieId);
+    } else {
+      updateEp(epNum, { optimizing: false });
+    }
+  }
+
   function retryFaststart(ep) {
     if (!ep.cdnUrl || !ep.dbId) return;
-    runFaststart(ep.episode_number, ep.cdnUrl, ep.dbId);
+    runOptimizations(ep.episode_number, ep.cdnUrl, ep.dbId);
   }
 
   // ── Upload all assigned episodes ──
@@ -333,16 +368,14 @@ export default function UploadDesenhosPage() {
         const { data: saveResult } = await api.post('/admin/episodes', epData);
         updateEp(ep.episode_number, { status: 'done', progress: 100, cdnUrl, error: null, dbId: saveResult?.id });
 
-        // MP4 sem faststart → moov atom no final → abertura lenta (6-10s).
-        // Espera terminar (nao dispara em segundo plano) - como cada episodio
-        // ja processa em sequencia aqui, isso garante que so 1 ffmpeg de
-        // remux roda por vez no servidor. Disparar sem esperar (como era
-        // antes) deixava um remux por episodio rodando AO MESMO TEMPO num
-        // upload em lote, sobrecarregando o servidor e derrubando varios
-        // silenciosamente - exatamente o "todo episodio demora pra abrir"
-        // reportado, ja que a otimizacao simplesmente nao completava.
-        if (/\.(mp4|mkv)$/i.test(ep.file.name) && saveResult?.id) {
-          await runFaststart(ep.episode_number, cdnUrl, saveResult.id);
+        // Verifica/corrige audio (AC3/DTS/5.1/HE-AAC -> AAC estereo) e so
+        // depois faststart/cues. Espera terminar (nao dispara em segundo
+        // plano) - como cada episodio ja processa em sequencia aqui, isso
+        // garante que so 1 ffmpeg de remux roda por vez no servidor.
+        // Disparar sem esperar deixava varios remuxes rodando ao mesmo
+        // tempo num upload em lote, sobrecarregando o servidor.
+        if (saveResult?.id) {
+          await runOptimizations(ep.episode_number, cdnUrl, saveResult.id);
         }
         delete abortRefs.current[ep.episode_number];
       } catch (err) {
@@ -542,11 +575,14 @@ export default function UploadDesenhosPage() {
 
                     <div className={styles.epActions}>
                       {ep.status === 'done' && ep.optimizing && <span className={styles.badgeUploading}>Otimizando…</span>}
-                      {ep.status === 'done' && !ep.optimizing && ep.faststartError && (
+                      {ep.status === 'done' && !ep.optimizing && (ep.faststartError || ep.audioFixError) && (
                         <>
                           <span
                             className={styles.badgeError}
-                            title={`Vídeo enviado, mas a otimização de abertura rápida falhou — pode demorar mais pra abrir.${ep.faststartErrorMsg ? ' Motivo: ' + ep.faststartErrorMsg : ''}`}
+                            title={[
+                              ep.audioFixError && `Correção de áudio falhou — pode ficar sem som em TVs sem decoder AC3/DTS.${ep.audioFixErrorMsg ? ' Motivo: ' + ep.audioFixErrorMsg : ''}`,
+                              ep.faststartError && `Otimização de abertura rápida falhou — pode demorar mais pra abrir.${ep.faststartErrorMsg ? ' Motivo: ' + ep.faststartErrorMsg : ''}`,
+                            ].filter(Boolean).join(' ')}
                           >
                             ✓ Enviado (sem otimizar)
                           </span>
@@ -559,7 +595,7 @@ export default function UploadDesenhosPage() {
                           </button>
                         </>
                       )}
-                      {ep.status === 'done' && !ep.optimizing && !ep.faststartError && <span className={styles.badgeDone}>✓ Enviado</span>}
+                      {ep.status === 'done' && !ep.optimizing && !ep.faststartError && !ep.audioFixError && <span className={styles.badgeDone}>✓ Enviado</span>}
                       {ep.status === 'uploading' && <span className={styles.badgeUploading}>{ep.progress}%</span>}
                       {ep.status === 'pending' && (
                         <>
