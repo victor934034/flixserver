@@ -996,7 +996,6 @@ router.get('/duplicates/scan', async (req, res) => {
   try {
     const { listFiles } = require('../services/backblaze');
     const CDN = process.env.CDN_BASE_URL;
-    const MIN_SIZE_FOR_SIZE_GROUP = 50 * 1024 * 1024; // 50 MB (só agrupa por tamanho acima disto)
 
     const b2Files = await listFiles('', 100000);
 
@@ -1012,14 +1011,19 @@ router.get('/duplicates/scan', async (req, res) => {
       [e.file_dubbing, e.file_subtitled, e.file_cinema].filter(Boolean).forEach(u => dbUrls.add(u));
     }
 
+    // ATENÇÃO: só agrupa por SHA1 REAL — nunca por tamanho em bytes. Arquivo
+    // grande enviado em partes (todo vídeo desta plataforma) não tem SHA1
+    // calculado pela B2 (vem "none"), e dois filmes/episódios DIFERENTES podem
+    // coincidir no tamanho exato (rips costumam mirar um tamanho "redondo").
+    // Um fallback por tamanho já apagou arquivo real por engano (ex: legendado
+    // de vários filmes diferentes, tratado como "duplicata" do dublado só por
+    // ter o mesmo nº de bytes) —Byte-identidade só é garantida via hash.
     const byKey = new Map();
     for (const f of b2Files) {
       const sha1 = f.contentSha1;
       const isRealSha1 = sha1 && sha1.length === 40 && sha1 !== 'none';
-      // SHA1 real: inclui qualquer tamanho (identidade garantida)
-      // Sem SHA1: só agrupa arquivos ≥ 50 MB (evita falsos positivos)
-      if (!isRealSha1 && f.contentLength < MIN_SIZE_FOR_SIZE_GROUP) continue;
-      const key = isRealSha1 ? `sha1:${sha1}` : `size:${f.contentLength}`;
+      if (!isRealSha1) continue;
+      const key = `sha1:${sha1}`;
       if (!byKey.has(key)) byKey.set(key, []);
       byKey.get(key).push(f);
     }

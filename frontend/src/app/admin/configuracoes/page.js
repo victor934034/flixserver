@@ -1439,8 +1439,11 @@ export default function Configuracoes() {
         <h3 style={{ color: '#fff', marginBottom: 16 }}>Arquivos Duplicados no Backblaze</h3>
         <div style={{ background: '#1a1a1a', borderRadius: 12, padding: 24, border: '1px solid #2a2a2a' }}>
           <p style={{ color: '#888', fontSize: 13, margin: '0 0 16px' }}>
-            Detecta arquivos com o mesmo conteúdo (mesmo SHA1 ou mesmo tamanho ≥ 50 MB) armazenados mais de uma vez.
+            Detecta arquivos com o mesmo conteúdo (mesmo SHA1 real) armazenados mais de uma vez.
             Mantém o arquivo que está cadastrado no banco ou o mais recente, e deleta os demais.
+            Só considera arquivos com hash — vídeos grandes enviados em partes geralmente não têm SHA1
+            calculado pela B2, então não entram nessa checagem (não dá pra confirmar que são o mesmo
+            arquivo sem hash; comparar só pelo tamanho já apagou filme errado por engano antes).
           </p>
 
           {/* Botão de scan */}
