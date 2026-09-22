@@ -12,10 +12,6 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import * as KeepAwake from 'expo-keep-awake';
 import * as NavigationBar from 'expo-navigation-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import {
-  CastButton, CastState, MediaPlayerState, MediaPlayerIdleReason, SessionManager,
-  useCastDevice, useCastState, useMediaStatus, useRemoteMediaClient, useStreamPosition,
-} from 'react-native-google-cast';
 import CachedImage from '../components/CachedImage';
 import api from '../lib/api';
 import { useProfile } from '../contexts/ProfileContext';
@@ -26,6 +22,38 @@ import { normalizeVersions, altMediaUrl, normalizeMediaUrl } from '../lib/mediaU
 
 let Brightness = null;
 try { Brightness = require('expo-brightness'); } catch {}
+
+// Módulo nativo do Chromecast — não existe no Expo Go (só em builds com
+// dev-client/AAB/APK). O require() em si não falha (a view nativa só quebra
+// quando é de fato renderizada/chamada), então detectamos o Expo Go via
+// expo-constants e nem tentamos carregar/renderizar o módulo real nesse caso —
+// assim o cast fica simplesmente indisponível, sem derrubar a tela do player.
+const isExpoGo = require('expo-constants').default?.executionEnvironment === 'storeClient';
+let CastButton = () => null;
+let CastState = {};
+let MediaPlayerState = {};
+let MediaPlayerIdleReason = {};
+let SessionManager = { endCurrentSession: async () => {} };
+let useCastDevice = () => null;
+let useCastState = () => null;
+let useMediaStatus = () => null;
+let useRemoteMediaClient = () => null;
+let useStreamPosition = () => 0;
+if (!isExpoGo) {
+  try {
+    const cast = require('react-native-google-cast');
+    CastButton = cast.CastButton;
+    CastState = cast.CastState;
+    MediaPlayerState = cast.MediaPlayerState;
+    MediaPlayerIdleReason = cast.MediaPlayerIdleReason;
+    SessionManager = cast.SessionManager;
+    useCastDevice = cast.useCastDevice;
+    useCastState = cast.useCastState;
+    useMediaStatus = cast.useMediaStatus;
+    useRemoteMediaClient = cast.useRemoteMediaClient;
+    useStreamPosition = cast.useStreamPosition;
+  } catch {}
+}
 
 const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2];
 const TIMER_OPTS = [

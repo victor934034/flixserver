@@ -886,9 +886,13 @@ function buildCandidates(b2Files, CDN) {
       fileId: f.fileId,
       oldFileName: f.fileName,
       newFileName: newPath,
-      oldCdnEncoded: `${CDN}/${encodeURIComponent(f.fileName)}`,
+      // Codifica cada segmento do path separadamente, preservando as barras reais —
+      // encodeURIComponent no path INTEIRO transforma "/" em "%2F", e o Worker do
+      // CDN não decodifica isso, causando 404 permanente pra qualquer cliente
+      // (mesmo bug já corrigido em services/backblaze.js).
+      oldCdnEncoded: `${CDN}/${f.fileName.split('/').map(encodeURIComponent).join('/')}`,
       oldCdnRaw: `${CDN}/${f.fileName}`,
-      newCdnUrl: `${CDN}/${encodeURIComponent(newPath)}`,
+      newCdnUrl: `${CDN}/${newPath.split('/').map(encodeURIComponent).join('/')}`,
       size: f.contentLength,
     });
   }
@@ -1765,6 +1769,216 @@ router.post('/seed-plans', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// ── Relatórios de catálogo (versão Cinema, sequências/temporadas faltando) ──
+const reportJobs = new Map();
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// Filmes que já têm a versão "Cinema" enviada — consulta direta, sem TMDB.
+router.get('/reports/cinema-versions', async (req, res) => {
+  const { supabase } = require('../services/supabase');
+  try {
+    const { data, error } = await supabase
+      .from('movies')
+      .select('id, title, year, poster_url')
+      .not('file_cinema', 'is', null)
+      .order('title');
+    if (error) throw error;
+    res.json({ count: data.length, items: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/reports/job-status', (req, res) => {
+  const { jobId } = req.query;
+  const job = reportJobs.get(jobId);
+  if (!job) return res.status(404).json({ error: 'Job não encontrado' });
+  res.json(job);
+});
+
+// Filmes cuja franquia (belongs_to_collection no TMDB) já tem uma continuação
+// lançada que ainda não está no catálogo. Roda em background (1 request ao
+// TMDB por filme + 1 por coleção, com espaçamento pra não estourar rate limit).
+router.post('/reports/missing-sequels', async (req, res) => {
+  const { supabase } = require('../services/supabase');
+  const axios = require('axios');
+  const TMDB_API_KEY = process.env.TMDB_API_KEY;
+  const TMDB_BASE = 'https://api.themoviedb.org/3';
+
+  const { data: movies, error } = await supabase
+    .from('movies').select('id, title, tmdb_id, year').not('tmdb_id', 'is', null).eq('is_active', true);
+  if (error) return res.status(500).json({ error: error.message });
+
+  const jobId = `msq_${Date.now()}`;
+  reportJobs.set(jobId, { total: movies.length, done: 0, running: true, items: [] });
+  res.json({ ok: true, jobId, total: movies.length });
+
+  (async () => {
+    const job = reportJobs.get(jobId);
+    const ourTmdbIds = new Set(movies.map(m => String(m.tmdb_id)));
+    const collectionCache = new Map(); // collection_id -> parts[]
+    const today = new Date().toISOString().slice(0, 10);
+
+    for (const movie of movies) {
+      try {
+        const { data: details } = await axios.get(`${TMDB_BASE}/movie/${movie.tmdb_id}`, {
+          params: { api_key: TMDB_API_KEY, language: 'pt-BR' }, timeout: 10000,
+        });
+        const coll = details.belongs_to_collection;
+        if (coll) {
+          let parts = collectionCache.get(coll.id);
+          if (!parts) {
+            await sleep(260);
+            const { data: collData } = await axios.get(`${TMDB_BASE}/collection/${coll.id}`, {
+              params: { api_key: TMDB_API_KEY, language: 'pt-BR' }, timeout: 10000,
+            });
+            parts = collData.parts || [];
+            collectionCache.set(coll.id, parts);
+          }
+          const missing = parts.filter(p =>
+            !ourTmdbIds.has(String(p.id)) &&
+            p.release_date && p.release_date <= today
+          );
+          for (const m of missing) {
+            if (!job.items.some(i => i.tmdb_id === m.id)) {
+              job.items.push({
+                tmdb_id: m.id, title: m.title, release_date: m.release_date,
+                poster_path: m.poster_path ? `https://image.tmdb.org/t/p/w200${m.poster_path}` : null,
+                collection: coll.name, foundVia: movie.title,
+              });
+            }
+          }
+        }
+      } catch (e) {
+        console.error(`[missing-sequels] erro em "${movie.title}" (tmdb ${movie.tmdb_id}):`, e.message);
+      }
+      job.done++;
+      await sleep(260);
+    }
+    job.running = false;
+    console.log(`[missing-sequels] Concluído: ${job.items.length} filme(s) faltando`);
+  })();
+});
+
+// Séries com temporada (anterior ou seguinte) já lançada no TMDB mas que
+// ainda não tem nenhum episódio no catálogo.
+router.post('/reports/missing-seasons', async (req, res) => {
+  const { supabase } = require('../services/supabase');
+  const axios = require('axios');
+  const TMDB_API_KEY = process.env.TMDB_API_KEY;
+  const TMDB_BASE = 'https://api.themoviedb.org/3';
+
+  const { data: seriesList, error } = await supabase
+    .from('series').select('id, title, tmdb_id').not('tmdb_id', 'is', null).eq('is_active', true);
+  if (error) return res.status(500).json({ error: error.message });
+
+  const { data: epRows, error: epErr } = await supabase.from('episodes').select('series_id, season_number');
+  if (epErr) return res.status(500).json({ error: epErr.message });
+  const seasonsBySeries = new Map();
+  for (const e of epRows || []) {
+    if (!seasonsBySeries.has(e.series_id)) seasonsBySeries.set(e.series_id, new Set());
+    seasonsBySeries.get(e.series_id).add(e.season_number);
+  }
+
+  const jobId = `mss_${Date.now()}`;
+  reportJobs.set(jobId, { total: seriesList.length, done: 0, running: true, items: [] });
+  res.json({ ok: true, jobId, total: seriesList.length });
+
+  (async () => {
+    const job = reportJobs.get(jobId);
+    const today = new Date().toISOString().slice(0, 10);
+
+    for (const serie of seriesList) {
+      try {
+        const { data: details } = await axios.get(`${TMDB_BASE}/tv/${serie.tmdb_id}`, {
+          params: { api_key: TMDB_API_KEY, language: 'pt-BR' }, timeout: 10000,
+        });
+        const haveSeasons = seasonsBySeries.get(serie.id) || new Set();
+        const airedSeasons = (details.seasons || [])
+          .filter(s => s.season_number > 0 && s.air_date && s.air_date <= today)
+          .map(s => s.season_number);
+        const missingSeasons = airedSeasons.filter(n => !haveSeasons.has(n)).sort((a, b) => a - b);
+        if (missingSeasons.length > 0) {
+          const haveList = [...haveSeasons].sort((a, b) => a - b);
+          job.items.push({
+            id: serie.id, title: serie.title,
+            have: haveList, missing: missingSeasons,
+            kind: haveList.length === 0
+              ? 'sem_nenhuma'
+              : missingSeasons.some(n => n < Math.min(...haveList))
+                ? (missingSeasons.some(n => n > Math.max(...haveList)) ? 'ambas' : 'anterior')
+                : 'seguinte',
+          });
+        }
+      } catch (e) {
+        console.error(`[missing-seasons] erro em "${serie.title}" (tmdb ${serie.tmdb_id}):`, e.message);
+      }
+      job.done++;
+      await sleep(260);
+    }
+    job.running = false;
+    console.log(`[missing-seasons] Concluído: ${job.items.length} série(s) com temporada faltando`);
+  })();
+});
+
+// Cruza o banco (URLs de vídeo salvas) com a listagem REAL de arquivos na B2,
+// pra achar de uma vez arquivos que sumiram do armazenamento (like Loki S01E06
+// e o dublado do Bad Boys — some cliente pega 404 igual pra todo mundo, não é
+// bug de cache/dispositivo, o arquivo mesmo não existe mais na B2).
+router.post('/reports/missing-files', async (req, res) => {
+  const { supabase } = require('../services/supabase');
+  const { listFiles } = require('../services/backblaze');
+  const CDN = (process.env.CDN_BASE_URL || '').replace(/\/$/, '');
+
+  const jobId = `mf_${Date.now()}`;
+  reportJobs.set(jobId, { total: 0, done: 0, running: true, items: [] });
+  res.json({ ok: true, jobId });
+
+  (async () => {
+    const job = reportJobs.get(jobId);
+    try {
+      const b2Files = await listFiles('', 200000);
+      const b2Set = new Set(b2Files.map(f => f.fileName));
+
+      const VIDEO_FIELDS = ['file_dubbing', 'file_subtitled', 'file_cinema', 'file_4k', 'file_color', 'file_bw'];
+      const toCheck = []; // {table, id, title, field, key}
+
+      for (const table of ['movies', 'episodes']) {
+        const fields = table === 'movies' ? VIDEO_FIELDS : VIDEO_FIELDS.filter(f => f !== 'file_4k');
+        for (let from = 0; ; from += 1000) {
+          const { data, error } = await supabase.from(table)
+            .select(['id', 'title', ...fields].join(', ')).range(from, from + 999);
+          if (error) throw new Error(`${table}: ${error.message}`);
+          for (const row of data || []) {
+            for (const field of fields) {
+              const url = row[field];
+              if (!url || !url.startsWith(CDN)) continue;
+              let key;
+              try { key = decodeURIComponent(url.slice(CDN.length + 1)); } catch { key = url.slice(CDN.length + 1); }
+              toCheck.push({ table, id: row.id, title: row.title, field, key });
+            }
+          }
+          if (!data || data.length < 1000) break;
+        }
+      }
+
+      job.total = toCheck.length;
+      for (const c of toCheck) {
+        if (!b2Set.has(c.key)) {
+          job.items.push({ table: c.table, id: c.id, title: c.title, field: c.field, key: c.key });
+        }
+        job.done++;
+      }
+      job.running = false;
+      console.log(`[missing-files] Concluído: ${job.items.length} arquivo(s) ausente(s) de ${job.total} verificados`);
+    } catch (e) {
+      job.running = false;
+      job.error = e.message;
+      console.error('[missing-files] erro:', e.message);
+    }
+  })();
 });
 
 module.exports = router;

@@ -1,20 +1,3 @@
-/**
- * Cloudflare Worker CDN para Flixhome
- *
- * Como usar:
- * 1. Acesse https://dash.cloudflare.com → Workers & Pages → seu worker
- * 2. Clique em "Edit Code" e substitua todo o código por este arquivo
- * 3. Adicione a variável de ambiente B2_DOWNLOAD_URL nas Settings do Worker
- *    Exemplo: https://f005.backblazeb2.com/file/Flixhome
- * 4. Salve e faça Deploy
- *
- * Este worker garante:
- * - Content-Type correto para cada tipo de arquivo (ESSENCIAL para áudio AAC no browser)
- * - Suporte a Range requests (ESSENCIAL para seeking no vídeo)
- * - Headers CORS corretos para crossOrigin="anonymous" no player
- * - Repassa Content-Range e Content-Length do B2
- */
-
 const MIME = {
   '.mp4':  'video/mp4',
   '.m4v':  'video/mp4',
@@ -30,71 +13,60 @@ const MIME = {
   '.webp': 'image/webp',
 };
 
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin':   '*',
-  'Access-Control-Allow-Methods':  'GET, HEAD, OPTIONS',
-  'Access-Control-Allow-Headers':  'Range, Content-Type',
-  'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges, Content-Type',
-  'Access-Control-Max-Age':        '86400',
-};
-
 export default {
-  async fetch(request, env) {
-    // Preflight CORS
+  async fetch(request) {
     if (request.method === 'OPTIONS') {
-      return new Response(null, { status: 204, headers: CORS_HEADERS });
+      return new Response(null, {
+        status: 204,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+          'Access-Control-Allow-Headers': 'Range, Content-Type',
+          'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length, Content-Type',
+          'Access-Control-Max-Age': '86400',
+        }
+      });
     }
 
     const url = new URL(request.url);
-    const pathname = url.pathname;
+    const backblazeUrl = `https://f005.backblazeb2.com/file/Flixhome${url.pathname}`;
 
-    // URL do arquivo no B2
-    const b2Base = (env.B2_DOWNLOAD_URL || '').replace(/\/$/, '');
-    const b2Url  = `${b2Base}${pathname}`;
+    const fetchHeaders = {};
+    const range = request.headers.get('Range');
+    if (range) fetchHeaders['Range'] = range;
 
-    // Repassa Range header do browser para o B2
-    const reqHeaders = new Headers();
-    if (request.headers.has('Range')) {
-      reqHeaders.set('Range', request.headers.get('Range'));
-    }
-
-    // Cache agressivo no edge da Cloudflare para vídeos e subtítulos
-    const isVideoPath = /\.(mp4|m4v|mkv|webm|mov|avi)$/i.test(pathname);
-    const edgeCacheTtl = isVideoPath ? 86400 : 3600;
-
-    let b2Res;
-    try {
-      b2Res = await fetch(b2Url, {
-        headers: reqHeaders,
-        method: request.method,
-        cf: { cacheEverything: true, cacheTtl: edgeCacheTtl },
-      });
-    } catch (e) {
-      return new Response('Origin fetch failed: ' + e.message, { status: 502, headers: CORS_HEADERS });
-    }
-
-    // Detecta o MIME pelo path (não confia no Content-Type do B2 que pode vir errado)
-    const ext = pathname.toLowerCase().match(/\.[a-z0-9]+$/)?.[0] ?? '';
-    const contentType = MIME[ext] ?? b2Res.headers.get('Content-Type') ?? 'application/octet-stream';
-
-    // Monta headers da resposta
-    const resHeaders = new Headers(CORS_HEADERS);
-    resHeaders.set('Content-Type', contentType);
-    resHeaders.set('Accept-Ranges', 'bytes');
-
-    // Repassa headers importantes vindos do B2
-    for (const h of ['Content-Length', 'Content-Range', 'Last-Modified', 'ETag']) {
-      const v = b2Res.headers.get(h);
-      if (v) resHeaders.set(h, v);
-    }
-
-    // Cache no cliente: vídeos 24h, outros 5min
-    const isVideo = contentType.startsWith('video/');
-    resHeaders.set('Cache-Control', isVideo ? 'public, max-age=86400' : 'public, max-age=300');
-
-    return new Response(b2Res.body, {
-      status: b2Res.status,    // 200 ou 206 (partial content para range requests)
-      headers: resHeaders,
+    const response = await fetch(backblazeUrl, {
+      headers: fetchHeaders,
+      cf: {
+        // Só cacheia resposta de SUCESSO (200/206). Sem isso, um 404 passageiro
+        // da B2 (upload ainda propagando, timeout etc.) pode ficar guardado em
+        // cache por horas em cada ponto de presença da Cloudflare separadamente
+        // — explica "funciona no meu celular mas não no do meu amigo": PoPs
+        // diferentes, um guardou o 404 ruim, o outro nunca viu erro e serve normal.
+        cacheEverything: true,
+        cacheTtlByStatus: {
+          '200-299': 86400,
+          '300-399': 0,
+          '400-599': 0,
+        },
+      },
     });
-  },
-};
+
+    const newHeaders = new Headers(response.headers);
+    newHeaders.set('Access-Control-Allow-Origin', '*');
+    newHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    newHeaders.set('Access-Control-Allow-Headers', 'Range, Content-Type');
+    newHeaders.set('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length, Content-Type');
+    newHeaders.set('Accept-Ranges', 'bytes');
+
+    // ← ESSENCIAL: força o Content-Type correto pelo nome do arquivo
+    // O B2 retorna application/octet-stream para vídeos, o que quebra o áudio AAC no browser
+    const ext = url.pathname.toLowerCase().match(/\.[a-z0-9]+$/)?.[0] ?? '';
+    if (MIME[ext]) newHeaders.set('Content-Type', MIME[ext]);
+
+    return new Response(response.body, {
+      status: response.status,
+      headers: newHeaders,
+    });
+  }
+}

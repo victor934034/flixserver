@@ -1,14 +1,29 @@
 import { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, FlatList, StyleSheet,
-  ActivityIndicator, TouchableOpacity, ScrollView, useWindowDimensions, Image,
+  ActivityIndicator, TouchableOpacity, ScrollView, useWindowDimensions, Image, Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 import MovieCard from '../../components/MovieCard';
 import api from '../../lib/api';
+
+// Módulo nativo — não existe no Expo Go (só em builds com dev-client/AAB/APK).
+// O require() em si não falha (só quebra quando o hook/método é realmente
+// usado), então detectamos o Expo Go via expo-constants e nem tentamos
+// carregar o módulo real nesse caso; o botão de busca por voz continua na
+// tela mas avisa que precisa do app instalado.
+const isExpoGo = require('expo-constants').default?.executionEnvironment === 'storeClient';
+let ExpoSpeechRecognitionModule = null;
+let useSpeechRecognitionEvent = () => {};
+if (!isExpoGo) {
+  try {
+    const speechMod = require('expo-speech-recognition');
+    ExpoSpeechRecognitionModule = speechMod.ExpoSpeechRecognitionModule;
+    useSpeechRecognitionEvent = speechMod.useSpeechRecognitionEvent;
+  } catch {}
+}
 
 function EpisodeCard({ item, cardW }) {
   const router = useRouter();
@@ -111,6 +126,10 @@ export default function BuscaScreen() {
   });
 
   const toggleVoice = async () => {
+    if (!ExpoSpeechRecognitionModule) {
+      Alert.alert('Indisponível', 'A busca por voz só funciona no app instalado (não funciona no Expo Go).');
+      return;
+    }
     if (listening) { ExpoSpeechRecognitionModule.stop(); return; }
     const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
     if (!perm.granted) return;
