@@ -1163,6 +1163,53 @@ router.post('/fix-series-audio', async (req, res) => {
   })();
 });
 
+// Corrige URLs de CDN antigas com "/" das pastas codificado como %2F
+// (ex: .../series%2FNome%2FEp.mp4). O worker Cloudflare que serve o CDN lê
+// `new URL(request.url).pathname` e repassa pro B2 - o %2F NÃO é decodificado
+// nesse acesso (fica literal), então o worker pede ao B2 um arquivo com
+// "%2F" de verdade no nome, que não existe -> 404 pra QUALQUER cliente
+// (browser, app, TV), sempre, de forma consistente - não é bug de aparelho.
+// Correção é só trocar %2F por "/" nos campos já salvos, sem reprocessar
+// vídeo nenhum (não precisa baixar/reenviar arquivo, só um UPDATE no banco).
+router.post('/fix-media-urls', async (req, res) => {
+  const { supabase } = require('../services/supabase');
+  const fix = (v) => (typeof v === 'string' && /%2f/i.test(v)) ? v.replace(/%2F/gi, '/') : null;
+
+  const TABLES = {
+    movies:   ['file_dubbing', 'file_subtitled', 'file_cinema', 'file_4k', 'file_color', 'file_bw', 'subtitle_pt', 'subtitle_en', 'subtitle_es', 'poster_url', 'backdrop_url'],
+    series:   ['poster_url', 'backdrop_url'],
+    episodes: ['thumbnail_url', 'file_dubbing', 'file_subtitled', 'file_cinema', 'file_color', 'file_bw', 'subtitle_pt', 'subtitle_en', 'subtitle_es'],
+  };
+
+  const report = {};
+  try {
+    for (const [table, fields] of Object.entries(TABLES)) {
+      let fixedCount = 0;
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await supabase.from(table).select(['id', ...fields].join(', ')).range(from, from + 999);
+        if (error) throw new Error(`${table}: ${error.message}`);
+        for (const row of data || []) {
+          const patch = {};
+          for (const f of fields) {
+            const fixed = fix(row[f]);
+            if (fixed) patch[f] = fixed;
+          }
+          if (Object.keys(patch).length > 0) {
+            const { error: upErr } = await supabase.from(table).update(patch).eq('id', row.id);
+            if (upErr) throw new Error(`${table}#${row.id}: ${upErr.message}`);
+            fixedCount++;
+          }
+        }
+        if (!data || data.length < 1000) break;
+      }
+      report[table] = fixedCount;
+    }
+    res.json({ ok: true, report });
+  } catch (e) {
+    res.status(500).json({ error: e.message, partial: report });
+  }
+});
+
 // Polling de progresso do batch
 router.get('/batch-status', (req, res) => {
   const { jobId } = req.query;

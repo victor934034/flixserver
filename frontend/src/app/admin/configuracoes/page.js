@@ -50,6 +50,9 @@ export default function Configuracoes() {
   const [seriesAudioFixProgress, setSeriesAudioFixProgress] = useState(null);
   const seriesAudioFixPollRef = useRef(null);
 
+  const [urlFixRunning, setUrlFixRunning] = useState(false);
+  const [urlFixMsg, setUrlFixMsg] = useState('');
+
   useEffect(() => {
     clearTimeout(seriesSearchDebounce.current);
     if (!seriesQuery.trim()) { setSeriesResults([]); return; }
@@ -719,6 +722,51 @@ export default function Configuracoes() {
                 )}
               </div>
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── URLs quebradas (404) ── */}
+      <section style={{ marginBottom: 40 }}>
+        <h3 style={{ color: '#fff', marginBottom: 16 }}>Corrigir vídeos com erro 404</h3>
+        <div style={{ background: '#1a1a1a', borderRadius: 12, padding: 24, border: '1px solid #2a2a2a' }}>
+          <p style={{ color: '#fff', fontWeight: 600, margin: '0 0 4px' }}>Corrigir URLs antigas de filmes/séries/episódios</p>
+          <p style={{ color: '#888', fontSize: 13, margin: '0 0 16px' }}>
+            Conteúdo enviado antes de uma correção anterior tem a barra das pastas salva como <code style={{ background: '#111', padding: '1px 5px', borderRadius: 4 }}>%2F</code> em
+            vez de <code style={{ background: '#111', padding: '1px 5px', borderRadius: 4 }}>/</code>. O CDN não decodifica isso e responde <strong style={{ color: '#fff' }}>404 pra todo mundo</strong> (não
+            é um bug de aparelho específico) — só um vídeo, série ou episódio de cada vez. Isso corrige o banco inteiro em segundos, sem reprocessar nenhum arquivo.
+          </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+            <button
+              disabled={urlFixRunning}
+              onClick={async () => {
+                setUrlFixRunning(true);
+                setUrlFixMsg('');
+                try {
+                  const r = await api.post('/upload/fix-media-urls', {}, { timeout: 60000 });
+                  const rep = r.data.report || {};
+                  const total = Object.values(rep).reduce((a, b) => a + b, 0);
+                  setUrlFixMsg(total > 0
+                    ? `✓ Corrigido: ${rep.movies || 0} filme(s), ${rep.series || 0} série(s), ${rep.episodes || 0} episódio(s).`
+                    : '✓ Nenhuma URL antiga encontrada — tudo já está certo.');
+                } catch (e) {
+                  setUrlFixMsg('Erro: ' + (e.response?.data?.error || e.message));
+                }
+                setUrlFixRunning(false);
+              }}
+              style={{
+                padding: '10px 24px', borderRadius: 8,
+                background: urlFixRunning ? '#333' : '#1565c0',
+                color: '#fff', border: 'none', fontWeight: 700, fontSize: 14,
+                cursor: urlFixRunning ? 'not-allowed' : 'pointer',
+              }}>
+              {urlFixRunning ? 'Corrigindo...' : 'Corrigir URLs agora'}
+            </button>
+            {urlFixMsg && (
+              <span style={{ color: urlFixMsg.startsWith('Erro') ? '#ff6b6b' : '#4caf50', fontSize: 13 }}>
+                {urlFixMsg}
+              </span>
+            )}
           </div>
         </div>
       </section>
