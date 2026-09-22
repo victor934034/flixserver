@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import api from '../../lib/api';
 import styles from './page.module.css';
+import CatalogReports from '../../components/admin/CatalogReports';
 
 export default function AdminDashboard() {
   const [stats, setStats] = useState(null);
@@ -30,6 +31,10 @@ export default function AdminDashboard() {
         ))}
       </div>
       {!stats && <p className={styles.loading}>Carregando estatísticas...</p>}
+
+      <div style={{ marginTop: 32 }}>
+        <CatalogReports />
+      </div>
     </div>
   );
 }
