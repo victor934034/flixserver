@@ -60,15 +60,22 @@ router.get('/', async (req, res) => {
       genres.forEach(g => { affinity[g] = (affinity[g] || 0) + weight; });
     });
 
-    if (Object.keys(affinity).length === 0) return res.json([]);
+    const topGenres = Object.keys(affinity);
+    if (topGenres.length === 0) return res.json([]);
 
+    // Filtra no banco por overlap de gênero em vez de trazer o catálogo
+    // inteiro com um limit fixo — com 500+ filmes, um limit sem ORDER BY
+    // definido deixava uma parte do catálogo de fora da pontuação, de forma
+    // arbitrária (podia ser sempre os mais novos, por exemplo).
     const [allMoviesRes, allSeriesRes] = await Promise.all([
       supabase.from('movies')
         .select('id, title, synopsis, year, rating, genres, poster_url, backdrop_url, age_rating, file_dubbing, file_subtitled, file_cinema, file_4k')
-        .limit(500),
+        .overlaps('genres', topGenres)
+        .eq('is_active', true),
       supabase.from('series')
         .select('id, title, synopsis, year_start, rating, genres, poster_url, backdrop_url, age_rating, total_seasons')
-        .limit(500),
+        .overlaps('genres', topGenres)
+        .eq('is_active', true),
     ]);
 
     const watchedMovieSet = new Set(watchedMovieIds);

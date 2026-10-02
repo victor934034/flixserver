@@ -25,18 +25,17 @@ export default function SugestaoScreen() {
     if (selected) setSelected(null);
     clearTimeout(searchTimer.current);
     if (text.trim().length < 2) { setResults([]); return; }
-    searchTimer.current = setTimeout(() => doSearch(text.trim()), 500);
+    searchTimer.current = setTimeout(() => doSearch(text.trim()), 350);
   }
 
   async function doSearch(q) {
     setSearching(true);
     try {
-      const { data } = await api.get('/search', { params: { q, limit: 8 } });
-      const items = [
-        ...(data.movies || []).map(m => ({ ...m, type: 'movie', displayYear: m.year })),
-        ...(data.series || []).map(s => ({ ...s, type: 'series', displayYear: s.year_start })),
-      ];
-      setResults(items);
+      // Busca no TMDB (não no catálogo próprio) — sugestão é justamente pra
+      // algo que ainda não está aqui, então buscar no /search local quase
+      // nunca encontrava nada e a pessoa não conseguia selecionar o título.
+      const { data } = await api.get('/suggestions/search-tmdb', { params: { q } });
+      setResults(data || []);
     } catch {
       setResults([]);
     } finally {

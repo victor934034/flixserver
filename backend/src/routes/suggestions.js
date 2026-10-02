@@ -4,6 +4,51 @@ const { authMiddleware } = require('../middleware/auth');
 const { adminMiddleware } = require('../middleware/admin');
 const { sendPush } = require('../services/notifications');
 
+// GET /api/suggestions/search-tmdb — busca no TMDB (filme+série juntos) pro
+// usuário escolher o que sugerir. A tela de sugestão buscava no catálogo
+// PRÓPRIO (/search), o que não fazia sentido: sugestão é justamente pra algo
+// que ainda NÃO está no catálogo, então quase nunca aparecia resultado.
+router.get('/search-tmdb', authMiddleware, async (req, res) => {
+  const { q } = req.query;
+  if (!q || q.trim().length < 2) return res.json([]);
+
+  const axios = require('axios');
+  const TMDB_BASE = 'https://api.themoviedb.org/3';
+  const TMDB_IMG = 'https://image.tmdb.org/t/p/w300';
+  const apiKey = process.env.TMDB_API_KEY;
+
+  try {
+    const [movieRes, tvRes] = await Promise.all([
+      axios.get(`${TMDB_BASE}/search/movie`, { params: { api_key: apiKey, query: q, language: 'pt-BR' } }),
+      axios.get(`${TMDB_BASE}/search/tv`, { params: { api_key: apiKey, query: q, language: 'pt-BR' } }),
+    ]);
+
+    const movies = (movieRes.data.results || []).map(r => ({
+      id: r.id, type: 'movie',
+      title: r.title, original_title: r.original_title,
+      displayYear: (r.release_date || '').split('-')[0] || null,
+      poster_url: r.poster_path ? `${TMDB_IMG}${r.poster_path}` : null,
+    }));
+    const series = (tvRes.data.results || []).map(r => ({
+      id: r.id, type: 'series',
+      title: r.name, original_title: r.original_name,
+      displayYear: (r.first_air_date || '').split('-')[0] || null,
+      poster_url: r.poster_path ? `${TMDB_IMG}${r.poster_path}` : null,
+    }));
+
+    // Intercala por popularidade (ordem que o TMDB já devolve) e limita
+    const merged = [];
+    const max = Math.max(movies.length, series.length);
+    for (let i = 0; i < max; i++) {
+      if (movies[i]) merged.push(movies[i]);
+      if (series[i]) merged.push(series[i]);
+    }
+    res.json(merged.slice(0, 12));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /api/suggestions — envia sugestão (usuário autenticado)
 router.post('/', authMiddleware, async (req, res) => {
   const { title, original_title, year, type, poster_url, tmdb_id, message } = req.body;
