@@ -1,9 +1,4 @@
-.wrap {
-  margin-bottom: 2.5rem;
-}
-
 .banner {
-  margin: 0 clamp(1.5rem, 4vw, 4rem) 1.5rem;
   padding: 1.5rem clamp(1.25rem, 3vw, 2.5rem);
   border-radius: 16px;
   display: flex;
@@ -34,13 +29,6 @@
   font-weight: 800;
   color: var(--text-primary);
   margin: 0 0 4px;
-}
-
-.desc {
-  font-size: 0.85rem;
-  color: var(--text-secondary);
-  margin: 0;
-  max-width: 48ch;
 }
 
 .timer {

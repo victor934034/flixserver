@@ -4,6 +4,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import Navbar from '../../../components/Navbar';
+import CountdownBanner from '../../../components/CountdownBanner';
 import api from '../../../lib/api';
 import styles from './page.module.css';
 
@@ -42,6 +43,12 @@ export default function CronologiaDetailPage() {
                 )}
               </div>
             </div>
+
+            {collection.event_date && (
+              <div style={{ maxWidth: 900, margin: '2rem auto 0', padding: '0 2rem' }}>
+                <CountdownBanner collection={collection} />
+              </div>
+            )}
 
             {collection.items?.length === 0 ? (
               <p className={styles.empty}>Nenhum item nesta cronologia ainda.</p>

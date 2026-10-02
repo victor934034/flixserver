@@ -3,7 +3,6 @@ import { useEffect, useState } from 'react';
 import Navbar from '../components/Navbar';
 import HeroBanner from '../components/HeroBanner';
 import ContentRow from '../components/ContentRow';
-import EventCountdown from '../components/EventCountdown';
 import api from '../lib/api';
 import { getToken } from '../lib/auth';
 import { useProfile } from '../contexts/ProfileContext';
@@ -62,8 +61,6 @@ export default function Home() {
         ) : (
           <div style={!data.featured.length ? { paddingTop: '5rem' } : undefined}>
             <HeroBanner items={data.featured} />
-
-            <EventCountdown />
 
             {data.history?.length > 0 && (
               <ContentRow
