@@ -1301,4 +1301,19 @@ router.post('/avatar', upload.single('file'), async (req, res) => {
   }
 });
 
+// Erros do multer (fileFilter rejeitando extensão, tamanho acima do limite etc.)
+// disparam ANTES do try/catch de cada rota, então caiam direto no handler
+// global de erro do index.js, que devolve só "Erro interno do servidor" sem
+// dizer o motivo real — por isso toda tentativa de upload de tipo errado
+// aparecia como erro genérico em vez de avisar qual era o problema.
+router.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    return res.status(400).json({ error: `Erro no upload: ${err.message}` });
+  }
+  if (err?.message === 'Tipo de arquivo não permitido para esta rota') {
+    return res.status(400).json({ error: err.message });
+  }
+  next(err);
+});
+
 module.exports = router;
