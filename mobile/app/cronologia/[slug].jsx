@@ -5,6 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import api from '../../lib/api';
+import CountdownBanner from '../../components/CountdownBanner';
 
 export default function CronologiaDetailScreen() {
   const { slug } = useLocalSearchParams();
@@ -65,6 +66,7 @@ export default function CronologiaDetailScreen() {
                 <Text style={styles.count}>{collection.items.length} título{collection.items.length !== 1 ? 's' : ''} em ordem</Text>
               )}
             </View>
+            <CountdownBanner collection={collection} />
           </View>
         }
         contentContainerStyle={styles.list}
