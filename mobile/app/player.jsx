@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, PanResponder,
   ActivityIndicator, StatusBar, useWindowDimensions,
-  Animated, FlatList, Image, Share, Platform, Linking, AppState, ScrollView,
+  Animated, FlatList, Image, Platform, Linking, AppState, ScrollView,
 } from 'react-native';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { useEvent } from 'expo';
@@ -1392,29 +1392,6 @@ export default function PlayerScreen() {
                   </TouchableOpacity>
                 )}
 
-                {/* Web Video Cast */}
-                {!isLocal && Platform.OS === 'android' && (
-                  <TouchableOpacity
-                    style={styles.castOption}
-                    activeOpacity={0.8}
-                    onPress={() => {
-                      const v = versions[activeVer];
-                      if (!v) return;
-                      Share.share({ message: v, title: title });
-                    }}
-                  >
-                    <View style={[styles.castIconBox, { backgroundColor: '#1a73e8' }]}>
-                      <Ionicons name="cast-outline" size={24} color="#fff" />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.castOptionTitle}>Web Video Cast</Text>
-                      <Text style={styles.castOptionDesc}>
-                        Toque para compartilhar a URL — selecione "Web Video Cast" na lista para transmitir via Chromecast, DLNA, Fire TV e outros.
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                )}
-
                 {Platform.OS === 'ios' && (
                   <View style={styles.castOption}>
                     <View style={styles.castIconBox}>
@@ -1444,45 +1421,6 @@ export default function PlayerScreen() {
                     </Text>
                   </View>
                 </View>
-
-                {!isLocal && (
-                  <TouchableOpacity
-                    style={styles.castOption}
-                    activeOpacity={0.8}
-                    onPress={async () => {
-                      const videoUrl = versions[activeVer];
-                      if (!videoUrl) return;
-                      const vlcUrl = `vlc://${videoUrl}`;
-                      try {
-                        await Linking.openURL(vlcUrl);
-                      } catch {
-                        Share.share({ message: videoUrl, title });
-                      }
-                    }}
-                  >
-                    <View style={styles.castIconBox}>
-                      <Ionicons name="play-circle-outline" size={24} color="#fff" />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.castOptionTitle}>Abrir no VLC</Text>
-                      <Text style={styles.castOptionDesc}>
-                        Abre o vídeo direto no VLC. Se não estiver instalado, compartilha o link para abrir em outro player.
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                )}
-
-                {!isLocal && (
-                  <TouchableOpacity
-                    style={styles.shareUrlBtn}
-                    onPress={() => Share.share({ message: videoUrl, title: title })}
-                  >
-                    <Ionicons name="share-outline" size={18} color="#fff" />
-                    <Text style={styles.shareUrlText} numberOfLines={1}>
-                      Compartilhar link do vídeo
-                    </Text>
-                  </TouchableOpacity>
-                )}
 
               </>;
             })()}
@@ -1701,8 +1639,6 @@ const styles = StyleSheet.create({
   castIconBox: { width: 40, height: 40, borderRadius: 10, backgroundColor: '#1f1f1f', justifyContent: 'center', alignItems: 'center', marginTop: 2, flexShrink: 0 },
   castOptionTitle: { color: '#fff', fontSize: 15, fontWeight: '600', marginBottom: 4 },
   castOptionDesc: { color: '#777', fontSize: 12, lineHeight: 18 },
-  shareUrlBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 20, marginTop: 16, backgroundColor: '#1f1f1f', borderRadius: 10, paddingVertical: 13, paddingHorizontal: 16 },
-  shareUrlText: { color: '#ccc', fontSize: 14, flex: 1 },
   castNote: { flexDirection: 'row', gap: 8, marginHorizontal: 20, marginTop: 16, alignItems: 'flex-start' },
   castNoteText: { color: '#555', fontSize: 11, lineHeight: 16, flex: 1 },
 
