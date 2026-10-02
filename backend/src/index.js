@@ -1,3 +1,4 @@
+require('../instrument'); // Sentry — tem que ser o 1º require de todos
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -281,6 +282,10 @@ app.get('/api/categories', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// Captura o erro no Sentry ANTES do handler final — precisa vir depois de
+// todas as rotas e antes do error handler de verdade.
+require('@sentry/node').setupExpressErrorHandler(app);
 
 app.use((err, req, res, next) => {
   console.error(err.stack);
