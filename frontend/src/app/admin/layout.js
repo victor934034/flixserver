@@ -20,6 +20,7 @@ const NAV = [
   { href: '/admin/atividade', label: 'Atividade' },
   { href: '/admin/avatares', label: 'Avatares' },
   { href: '/admin/iptv', label: 'IPTV' },
+  { href: '/admin/ajuda', label: 'Ajuda/FAQ' },
   { href: '/admin/configuracoes', label: 'Configurações' },
 ];
 

@@ -203,7 +203,7 @@ export default function PerfilScreen() {
           <MenuItem
             icon="help-circle-outline"
             label="Ajuda"
-            onPress={() => Linking.openURL('mailto:victorlima0978@gmail.com?subject=Suporte%20FlixHome')}
+            onPress={() => router.push('/ajuda')}
           />
           <View style={styles.divider} />
           <MenuItem

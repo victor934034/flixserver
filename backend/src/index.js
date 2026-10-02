@@ -26,6 +26,7 @@ const iptvRouter = require('./routes/iptv');
 const remuxRouter = require('./routes/remux');
 const subtitleRouter = require('./routes/subtitle');
 const collectionsRouter = require('./routes/collections');
+const helpRouter = require('./routes/help');
 
 const REQUIRED_ENV = ['JWT_SECRET', 'SUPABASE_URL', 'SUPABASE_SERVICE_KEY'];
 const missingEnv = REQUIRED_ENV.filter((key) => !process.env[key]);
@@ -103,6 +104,7 @@ app.use('/api/iptv', iptvRouter);
 app.use('/api/remux', remuxRouter);
 app.use('/api/subtitle', subtitleRouter);
 app.use('/api/collections', collectionsRouter);
+app.use('/api/help', helpRouter);
 
 app.get('/api/preset-avatars', async (req, res) => {
   const { supabase } = require('./services/supabase');

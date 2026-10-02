@@ -1782,6 +1782,68 @@ router.post('/seed-plans', async (req, res) => {
   }
 });
 
+// ── Ajuda / FAQ (gerido no admin, exibido no app/site) ──
+router.get('/help', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('help_articles').select('*').order('order_index');
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/help', async (req, res) => {
+  try {
+    const { question, answer, order_index, is_active } = req.body;
+    if (!question?.trim() || !answer?.trim()) {
+      return res.status(400).json({ error: 'Pergunta e resposta são obrigatórias' });
+    }
+    const { data, error } = await supabase
+      .from('help_articles')
+      .insert({
+        question: question.trim(),
+        answer: answer.trim(),
+        order_index: order_index || 0,
+        is_active: is_active !== false,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    res.status(201).json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/help/:id', async (req, res) => {
+  try {
+    const { question, answer, order_index, is_active } = req.body;
+    const updates = {};
+    if (question !== undefined) updates.question = question.trim();
+    if (answer !== undefined) updates.answer = answer.trim();
+    if (order_index !== undefined) updates.order_index = order_index;
+    if (is_active !== undefined) updates.is_active = is_active;
+
+    const { data, error } = await supabase
+      .from('help_articles').update(updates).eq('id', req.params.id).select().single();
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/help/:id', async (req, res) => {
+  try {
+    const { error } = await supabase.from('help_articles').delete().eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Relatórios de catálogo (versão Cinema, sequências/temporadas faltando) ──
 const reportJobs = new Map();
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
