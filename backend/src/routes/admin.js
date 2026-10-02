@@ -451,7 +451,7 @@ router.get('/collections', async (req, res) => {
 
 router.post('/collections', async (req, res) => {
   try {
-    const { name, slug, description, cover_url, order_index, is_active } = req.body;
+    const { name, slug, description, cover_url, order_index, is_active, event_date, event_label, accent_color } = req.body;
     if (!name?.trim() || !slug?.trim()) {
       return res.status(400).json({ error: 'Nome e slug são obrigatórios' });
     }
@@ -464,6 +464,9 @@ router.post('/collections', async (req, res) => {
         cover_url: cover_url || null,
         order_index: order_index || 0,
         is_active: is_active !== false,
+        event_date: event_date || null,
+        event_label: event_label || null,
+        accent_color: accent_color || null,
       })
       .select()
       .single();
@@ -476,7 +479,7 @@ router.post('/collections', async (req, res) => {
 
 router.put('/collections/:id', async (req, res) => {
   try {
-    const { name, slug, description, cover_url, order_index, is_active } = req.body;
+    const { name, slug, description, cover_url, order_index, is_active, event_date, event_label, accent_color } = req.body;
     const updates = {};
     if (name !== undefined) updates.name = name.trim();
     if (slug !== undefined) updates.slug = slug.trim();
@@ -484,6 +487,10 @@ router.put('/collections/:id', async (req, res) => {
     if (cover_url !== undefined) updates.cover_url = cover_url;
     if (order_index !== undefined) updates.order_index = order_index;
     if (is_active !== undefined) updates.is_active = is_active;
+    // String vazia -> null (campo de data/texto opcional limpo no form)
+    if (event_date !== undefined) updates.event_date = event_date || null;
+    if (event_label !== undefined) updates.event_label = event_label || null;
+    if (accent_color !== undefined) updates.accent_color = accent_color || null;
 
     const { data, error } = await supabase
       .from('collections')

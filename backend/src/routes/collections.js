@@ -16,6 +16,60 @@ router.get('/', async (req, res) => {
   }
 });
 
+// GET /api/collections/upcoming — a coleção-evento mais próxima com contagem
+// regressiva ainda não vencida (ex: "Preparação para Vingadores: Doomsday").
+// Some sozinho depois que event_date passar — não precisa desativar na mão.
+router.get('/upcoming', async (req, res) => {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const { data: collection, error } = await supabase
+      .from('collections')
+      .select('*')
+      .eq('is_active', true)
+      .not('event_date', 'is', null)
+      .gte('event_date', today)
+      .order('event_date', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    if (!collection) return res.json(null);
+
+    const { data: items, error: itemsError } = await supabase
+      .from('collection_items')
+      .select('*')
+      .eq('collection_id', collection.id)
+      .order('position');
+    if (itemsError) throw itemsError;
+
+    const movieIds = (items || []).filter(i => i.content_type === 'movie').map(i => i.content_id);
+    const seriesIds = (items || []).filter(i => i.content_type === 'series').map(i => i.content_id);
+
+    const [moviesRes, seriesRes] = await Promise.all([
+      movieIds.length
+        ? supabase.from('movies').select('id, title, poster_url, backdrop_url, year, rating, genres').in('id', movieIds).eq('is_active', true)
+        : { data: [] },
+      seriesIds.length
+        ? supabase.from('series').select('id, title, poster_url, backdrop_url, year_start, rating, genres').in('id', seriesIds).eq('is_active', true)
+        : { data: [] },
+    ]);
+
+    const moviesMap = Object.fromEntries((moviesRes.data || []).map(m => [m.id, m]));
+    const seriesMap = Object.fromEntries((seriesRes.data || []).map(s => [s.id, s]));
+
+    const enrichedItems = (items || [])
+      .map(item => {
+        const meta = item.content_type === 'movie' ? moviesMap[item.content_id] : seriesMap[item.content_id];
+        if (!meta) return null;
+        return { ...meta, type: item.content_type, position: item.position };
+      })
+      .filter(Boolean);
+
+    res.json({ ...collection, items: enrichedItems });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/collections/:slug — detalhe da coleção com itens em ordem
 router.get('/:slug', async (req, res) => {
   try {

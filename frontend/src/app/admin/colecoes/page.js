@@ -3,7 +3,10 @@ import { useEffect, useRef, useState } from 'react';
 import api from '../../../lib/api';
 import styles from './page.module.css';
 
-const BLANK = { name: '', slug: '', description: '', cover_url: '', is_active: true, order_index: 0 };
+const BLANK = {
+  name: '', slug: '', description: '', cover_url: '', is_active: true, order_index: 0,
+  event_date: '', event_label: '', accent_color: '',
+};
 
 function describeError(err) {
   const d = err.response?.data;
@@ -32,7 +35,10 @@ export default function AdminColecoes() {
   useEffect(() => { load(); }, []);
 
   function openNew() { setForm({ ...BLANK }); setError(''); }
-  function openEdit(c) { setForm({ ...c }); setError(''); }
+  function openEdit(c) {
+    setForm({ ...c, event_date: c.event_date || '', event_label: c.event_label || '', accent_color: c.accent_color || '' });
+    setError('');
+  }
   function closeForm() { setForm(null); setError(''); }
 
   function handleInput(e) {
@@ -160,6 +166,34 @@ export default function AdminColecoes() {
               <input name="is_active" type="checkbox" checked={form.is_active} onChange={handleInput} />
               <span>Ativa</span>
             </label>
+
+            <div style={{ width: '100%', borderTop: '1px solid #2a2a2a', margin: '8px 0', paddingTop: 12 }}>
+              <p style={{ color: '#888', fontSize: 13, margin: '0 0 10px' }}>
+                Opcional: transforma esta coleção num "evento com contagem regressiva" — aparece com um
+                cronômetro embaixo do hero na Home enquanto a data não chega, e some sozinho depois
+                (não precisa desativar na mão).
+              </p>
+              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                <label className={styles.field}>
+                  <span>Data do evento</span>
+                  <input name="event_date" type="date" value={form.event_date || ''} onChange={handleInput} className={styles.input} />
+                </label>
+                <label className={styles.field} style={{ flex: 1, minWidth: 220 }}>
+                  <span>Texto do cronômetro</span>
+                  <input
+                    name="event_label"
+                    value={form.event_label || ''}
+                    onChange={handleInput}
+                    className={styles.input}
+                    placeholder='Ex: "Estreia de Vingadores: Doomsday"'
+                  />
+                </label>
+                <label className={styles.field}>
+                  <span>Cor de destaque</span>
+                  <input name="accent_color" type="color" value={form.accent_color || '#46d369'} onChange={handleInput} className={styles.input} style={{ width: 60, padding: 2 }} />
+                </label>
+              </div>
+            </div>
           </div>
           <div className={styles.formActions}>
             <button className={styles.btnSave} onClick={save} disabled={saving}>{saving ? 'Salvando...' : 'Salvar'}</button>
@@ -179,6 +213,7 @@ export default function AdminColecoes() {
               <th>Ordem</th>
               <th>Nome</th>
               <th>Slug</th>
+              <th>Evento</th>
               <th>Ativa</th>
               <th>Ações</th>
             </tr>
@@ -189,6 +224,11 @@ export default function AdminColecoes() {
                 <td>{c.order_index}</td>
                 <td className={styles.catName}>{c.name}</td>
                 <td className={styles.slug}>{c.slug}</td>
+                <td style={{ fontSize: 12, color: '#888' }}>
+                  {c.event_date
+                    ? `${new Date(c.event_date + 'T00:00:00').toLocaleDateString('pt-BR')}${new Date(c.event_date) < new Date() ? ' (passou)' : ''}`
+                    : '—'}
+                </td>
                 <td><span className={c.is_active ? styles.yes : styles.no}>{c.is_active ? 'Sim' : 'Não'}</span></td>
                 <td>
                   <div className={styles.actions}>
