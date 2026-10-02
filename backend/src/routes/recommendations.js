@@ -8,6 +8,31 @@ router.use(authMiddleware);
 // exponencial simples, sem precisar de coluna nova nem tabela nova.
 const DECAY = 0.85;
 
+// Quantos títulos recentes usamos como "semente" pra buscar parecidos no TMDB
+// (sinopse+elenco+palavras-chave — não só gênero). Mais que isso não compensa
+// o custo de rede por pouco ganho de sinal.
+const TMDB_SEED_COUNT = 6;
+// Multiplica o peso do sinal de "parecido no TMDB" em relação à afinidade
+// de gênero pura — é um sinal mais específico (sinopse real, não só rótulo).
+const TMDB_BOOST = 4;
+
+// Busca títulos "parecidos" no TMDB pra um filme/série já assistido.
+// TMDB já combina sinopse, elenco, palavras-chave e gênero no cálculo —
+// muito mais rico do que comparar só a lista de gêneros.
+async function fetchTmdbSimilar(tmdbId, type) {
+  const axios = require('axios');
+  const endpoint = type === 'movie' ? 'movie' : 'tv';
+  try {
+    const { data } = await axios.get(
+      `https://api.themoviedb.org/3/${endpoint}/${tmdbId}/recommendations`,
+      { params: { api_key: process.env.TMDB_API_KEY, language: 'pt-BR' }, timeout: 5000 }
+    );
+    return (data.results || []).map(r => r.id);
+  } catch {
+    return [];
+  }
+}
+
 // GET /api/recommendations?profile_id=X&limit=20
 // Recomendação baseada em conteúdo: perfil de afinidade por gênero calculado
 // a partir do watch_history (mesma tabela do "Continuar Assistindo"), sem
@@ -40,65 +65,112 @@ router.get('/', async (req, res) => {
 
     const [watchedMoviesRes, watchedSeriesRes] = await Promise.all([
       watchedMovieIds.length > 0
-        ? supabase.from('movies').select('id, genres').in('id', watchedMovieIds)
+        ? supabase.from('movies').select('id, genres, tmdb_id').in('id', watchedMovieIds)
         : { data: [] },
       watchedSeriesIds.length > 0
-        ? supabase.from('series').select('id, genres').in('id', watchedSeriesIds)
+        ? supabase.from('series').select('id, genres, tmdb_id').in('id', watchedSeriesIds)
         : { data: [] },
     ]);
     const movieGenresMap = Object.fromEntries((watchedMoviesRes.data || []).map(m => [m.id, m.genres || []]));
     const seriesGenresMap = Object.fromEntries((watchedSeriesRes.data || []).map(s => [s.id, s.genres || []]));
+    const movieTmdbMap = Object.fromEntries((watchedMoviesRes.data || []).map(m => [m.id, m.tmdb_id]));
+    const seriesTmdbMap = Object.fromEntries((watchedSeriesRes.data || []).map(s => [s.id, s.tmdb_id]));
 
     // Score de afinidade por gênero: soma dos pesos (por recência) de cada
     // vez que o gênero apareceu no histórico.
     const affinity = {};
+    // Peso de cada título assistido (maior ocorrência = mais recente = usa
+    // o peso da primeira aparição no histórico, que é o maior).
+    const seedWeight = new Map(); // key: `${type}:${tmdbId}` -> weight
     history.forEach((h, idx) => {
       const weight = Math.pow(DECAY, idx);
       const genres = h.content_type === 'movie'
         ? (movieGenresMap[h.content_id] || [])
         : (seriesGenresMap[h.series_id] || []);
       genres.forEach(g => { affinity[g] = (affinity[g] || 0) + weight; });
+
+      const type = h.content_type === 'movie' ? 'movie' : 'series';
+      const tmdbId = h.content_type === 'movie' ? movieTmdbMap[h.content_id] : seriesTmdbMap[h.series_id];
+      if (tmdbId) {
+        const key = `${type}:${tmdbId}`;
+        if (!seedWeight.has(key)) seedWeight.set(key, weight); // só a 1ª (mais recente)
+      }
     });
 
     const topGenres = Object.keys(affinity);
     if (topGenres.length === 0) return res.json([]);
 
-    // Filtra no banco por overlap de gênero em vez de trazer o catálogo
-    // inteiro com um limit fixo — com 500+ filmes, um limit sem ORDER BY
-    // definido deixava uma parte do catálogo de fora da pontuação, de forma
-    // arbitrária (podia ser sempre os mais novos, por exemplo).
+    // Busca "parecidos" no TMDB pros títulos assistidos mais recentes — sinal
+    // mais específico (sinopse/elenco/palavras-chave), não só o rótulo de gênero.
+    const seeds = [...seedWeight.entries()].slice(0, TMDB_SEED_COUNT);
+    const tmdbBoost = { movie: {}, series: {} }; // tmdb_id -> score
+    await Promise.all(seeds.map(async ([key, weight]) => {
+      const [type, tmdbId] = key.split(':');
+      const similarIds = await fetchTmdbSimilar(tmdbId, type);
+      similarIds.forEach((id, pos) => {
+        const contribution = weight * (1 / (pos + 1));
+        tmdbBoost[type][id] = (tmdbBoost[type][id] || 0) + contribution;
+      });
+    }));
+
+    // Catálogo inteiro (sem limit, sem filtro de gênero) — só colunas leves
+    // pra pontuar. Com 500+ filmes um limit sem ORDER BY deixava parte do
+    // catálogo fora da pontuação de forma arbitrária; e filtrar só por
+    // overlap de gênero deixava de fora um "parecido" do TMDB com gênero
+    // ligeiramente diferente.
     const [allMoviesRes, allSeriesRes] = await Promise.all([
-      supabase.from('movies')
-        .select('id, title, synopsis, year, rating, genres, poster_url, backdrop_url, age_rating, file_dubbing, file_subtitled, file_cinema, file_4k')
-        .overlaps('genres', topGenres)
-        .eq('is_active', true),
-      supabase.from('series')
-        .select('id, title, synopsis, year_start, rating, genres, poster_url, backdrop_url, age_rating, total_seasons')
-        .overlaps('genres', topGenres)
-        .eq('is_active', true),
+      supabase.from('movies').select('id, genres, tmdb_id').eq('is_active', true),
+      supabase.from('series').select('id, genres, tmdb_id').eq('is_active', true),
     ]);
 
     const watchedMovieSet = new Set(watchedMovieIds);
     const watchedSeriesSet = new Set(watchedSeriesIds);
 
-    function scoreOf(genres) {
-      return (genres || []).reduce((sum, g) => sum + (affinity[g] || 0), 0);
+    function scoreOf(genres, type, tmdbId) {
+      const genreScore = (genres || []).reduce((sum, g) => sum + (affinity[g] || 0), 0);
+      const boost = tmdbId ? (tmdbBoost[type][tmdbId] || 0) : 0;
+      return genreScore + boost * TMDB_BOOST;
     }
 
     const scoredMovies = (allMoviesRes.data || [])
       .filter(m => !watchedMovieSet.has(m.id))
-      .map(m => ({ ...m, content_type: 'movie', _score: scoreOf(m.genres) }))
+      .map(m => ({ id: m.id, content_type: 'movie', _score: scoreOf(m.genres, 'movie', m.tmdb_id) }))
       .filter(m => m._score > 0);
 
     const scoredSeries = (allSeriesRes.data || [])
       .filter(s => !watchedSeriesSet.has(s.id))
-      .map(s => ({ ...s, content_type: 'series', _score: scoreOf(s.genres) }))
+      .map(s => ({ id: s.id, content_type: 'series', _score: scoreOf(s.genres, 'series', s.tmdb_id) }))
       .filter(s => s._score > 0);
 
-    const results = [...scoredMovies, ...scoredSeries]
+    const topIds = [...scoredMovies, ...scoredSeries]
       .sort((a, b) => b._score - a._score)
-      .slice(0, limit)
-      .map(({ _score, ...item }) => item);
+      .slice(0, limit);
+
+    const topMovieIds = topIds.filter(t => t.content_type === 'movie').map(t => t.id);
+    const topSeriesIds = topIds.filter(t => t.content_type === 'series').map(t => t.id);
+
+    // Só agora busca os dados completos (sinopse, poster etc.) — só dos
+    // selecionados, não do catálogo inteiro.
+    const [moviesDetailRes, seriesDetailRes] = await Promise.all([
+      topMovieIds.length
+        ? supabase.from('movies')
+            .select('id, title, synopsis, year, rating, genres, poster_url, backdrop_url, age_rating, file_dubbing, file_subtitled, file_cinema, file_4k')
+            .in('id', topMovieIds)
+        : { data: [] },
+      topSeriesIds.length
+        ? supabase.from('series')
+            .select('id, title, synopsis, year_start, rating, genres, poster_url, backdrop_url, age_rating, total_seasons')
+            .in('id', topSeriesIds)
+        : { data: [] },
+    ]);
+    const detailMap = new Map([
+      ...(moviesDetailRes.data || []).map(m => [`movie:${m.id}`, { ...m, content_type: 'movie' }]),
+      ...(seriesDetailRes.data || []).map(s => [`series:${s.id}`, { ...s, content_type: 'series' }]),
+    ]);
+
+    const results = topIds
+      .map(t => detailMap.get(`${t.content_type}:${t.id}`))
+      .filter(Boolean);
 
     res.json(results);
   } catch (err) {
