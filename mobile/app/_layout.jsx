@@ -16,6 +16,22 @@ import api from '../lib/api';
 
 const isExpoGo = Constants.executionEnvironment === 'storeClient';
 
+// Monitoramento de erros em produção — captura crash/erro sozinho, sem
+// precisar que o usuário mande print. Não disponível no Expo Go (módulo
+// nativo precisa de build), igual Cast/voz/PiP.
+let Sentry = null;
+if (!isExpoGo) {
+  try {
+    Sentry = require('@sentry/react-native');
+    Sentry.init({
+      dsn: 'https://cab52c0c805514c2a314cdb21eb84970@o4512189153345536.ingest.us.sentry.io/4512189235462144',
+      tracesSampleRate: 1.0,
+      enableNative: true,
+      debug: false,
+    });
+  } catch {}
+}
+
 Notifications.setNotificationHandler({
   handleNotification: async () => ({ shouldShowAlert: true, shouldPlaySound: true, shouldSetBadge: false }),
 });
@@ -206,7 +222,7 @@ function AppGate() {
   return token && activeProfile ? <WhatsNewModal /> : null;
 }
 
-export default function RootLayout() {
+function RootLayout() {
   useEffect(() => {
     setupAndroidChannel();
   }, []);
@@ -244,3 +260,5 @@ export default function RootLayout() {
     </GestureHandlerRootView>
   );
 }
+
+export default Sentry ? Sentry.wrap(RootLayout) : RootLayout;

@@ -51,6 +51,14 @@
         {
           "receiverAppId": "0D3A3133"
         }
+      ],
+      [
+        "@sentry/react-native/expo",
+        {
+          "organization": "play-studios",
+          "project": "react-native",
+          "url": "https://sentry.io/"
+        }
       ]
     ],
     "experiments": {
