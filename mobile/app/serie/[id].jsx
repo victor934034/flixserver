@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, Image, TouchableOpacity,
-  ActivityIndicator, useWindowDimensions, Alert, Modal, Linking,
+  ActivityIndicator, useWindowDimensions, Alert, Modal, Linking, Share,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -72,6 +72,15 @@ export default function SerieDetail() {
       }
     } catch {}
     setListLoading(false);
+  };
+
+  const shareSeries = async () => {
+    const siteUrl = process.env.EXPO_PUBLIC_SITE_URL || 'https://flixhome.com.br';
+    try {
+      await Share.share({
+        message: `Dá uma olhada em "${serie.title}" no FlixHome! ${siteUrl}/serie/${id}`,
+      });
+    } catch {}
   };
 
   // Fetch saved positions for all episodes (used when not coming from Continue Watching)
@@ -320,6 +329,9 @@ export default function SerieDetail() {
             {listLoading
               ? <ActivityIndicator size="small" color="#E50914" />
               : <Ionicons name={listItem ? 'heart' : 'heart-outline'} size={22} color={listItem ? '#E50914' : '#fff'} />}
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.btnList} onPress={shareSeries}>
+            <Ionicons name="share-social-outline" size={22} color="#fff" />
           </TouchableOpacity>
         </View>
 

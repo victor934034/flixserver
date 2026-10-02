@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, Image, TouchableOpacity,
-  ActivityIndicator, useWindowDimensions, Alert, Linking,
+  ActivityIndicator, useWindowDimensions, Alert, Linking, Share,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -81,6 +81,15 @@ export default function FilmeDetail() {
       }
     } catch {}
     setListLoading(false);
+  };
+
+  const shareMovie = async () => {
+    const siteUrl = process.env.EXPO_PUBLIC_SITE_URL || 'https://flixhome.com.br';
+    try {
+      await Share.share({
+        message: `Dá uma olhada em "${movie.title}" no FlixHome! ${siteUrl}/filme/${id}`,
+      });
+    } catch {}
   };
 
   const play = async (version) => {
@@ -234,6 +243,9 @@ export default function FilmeDetail() {
             {listLoading
               ? <ActivityIndicator size="small" color="#E50914" />
               : <Ionicons name={listItem ? 'heart' : 'heart-outline'} size={22} color={listItem ? '#E50914' : '#fff'} />}
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.btnList} onPress={shareMovie}>
+            <Ionicons name="share-social-outline" size={22} color="#fff" />
           </TouchableOpacity>
         </View>
 

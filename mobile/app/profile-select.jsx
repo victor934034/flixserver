@@ -58,9 +58,16 @@ export default function ProfileSelectScreen() {
   const [name, setName] = useState('');
   const [selectedAvatar, setSelectedAvatar] = useState('avatar_1');
   const [isKids, setIsKids] = useState(false);
+  const [pin, setPin] = useState('');
   const [saving, setSaving] = useState(false);
   const [presetAvatars, setPresetAvatars] = useState([]);
   const [avatarTab, setAvatarTab] = useState('fotos'); // 'fotos' | 'emoji'
+
+  // PIN pra abrir um perfil protegido
+  const [pinPrompt, setPinPrompt] = useState(null); // perfil pendente de confirmação
+  const [pinPromptValue, setPinPromptValue] = useState('');
+  const [pinPromptError, setPinPromptError] = useState(false);
+  const [pinChecking, setPinChecking] = useState(false);
 
   const fetchProfiles = useCallback(async () => {
     try {
@@ -86,6 +93,7 @@ export default function ProfileSelectScreen() {
     setName('');
     setSelectedAvatar('avatar_1');
     setIsKids(false);
+    setPin('');
     setAvatarTab('fotos');
     setModalVisible(true);
     fetchPresets(false);
@@ -96,6 +104,7 @@ export default function ProfileSelectScreen() {
     setName(profile.name);
     setSelectedAvatar(profile.avatar);
     setIsKids(profile.is_kids);
+    setPin(profile.has_pin ? '••••' : '');
     setAvatarTab(isUrl(profile.avatar) ? 'fotos' : 'emoji');
     setModalVisible(true);
     fetchPresets(profile.is_kids);
@@ -120,12 +129,19 @@ export default function ProfileSelectScreen() {
 
   async function handleSave() {
     if (!name.trim()) return Alert.alert('Nome obrigatório', 'Preencha o nome do perfil.');
+    if (pin && pin !== '••••' && !/^\d{4,6}$/.test(pin.trim())) {
+      return Alert.alert('PIN inválido', 'O PIN deve ter de 4 a 6 números.');
+    }
     setSaving(true);
     try {
+      const payload = { name: name.trim(), avatar: selectedAvatar, is_kids: isKids };
+      // "••••" é o placeholder de "já tem PIN, não mexi nele" — só manda o
+      // campo quando o usuário de fato digitou algo novo ou apagou tudo.
+      if (pin !== '••••') payload.pin = pin.trim() || null;
       if (editing) {
-        await api.put(`/profiles/${editing.id}`, { name: name.trim(), avatar: selectedAvatar, is_kids: isKids });
+        await api.put(`/profiles/${editing.id}`, payload);
       } else {
-        await api.post('/profiles', { name: name.trim(), avatar: selectedAvatar, is_kids: isKids });
+        await api.post('/profiles', payload);
       }
       setModalVisible(false);
       fetchProfiles();
@@ -153,8 +169,35 @@ export default function ProfileSelectScreen() {
   }
 
   async function handleSelect(profile) {
+    if (profile.has_pin) {
+      setPinPrompt(profile);
+      setPinPromptValue('');
+      setPinPromptError(false);
+      return;
+    }
     await selectProfile(profile);
     router.replace('/(tabs)');
+  }
+
+  async function confirmPinPrompt() {
+    if (!pinPrompt) return;
+    setPinChecking(true);
+    try {
+      const { data } = await api.post(`/profiles/${pinPrompt.id}/verify-pin`, { pin: pinPromptValue.trim() });
+      if (data.ok) {
+        const profile = pinPrompt;
+        setPinPrompt(null);
+        await selectProfile(profile);
+        router.replace('/(tabs)');
+      } else {
+        setPinPromptError(true);
+        setPinPromptValue('');
+      }
+    } catch {
+      setPinPromptError(true);
+    } finally {
+      setPinChecking(false);
+    }
   }
 
   if (loading) {
@@ -231,6 +274,24 @@ export default function ProfileSelectScreen() {
                 Perfil infantil {isKids ? '👶' : ''}
               </Text>
             </TouchableOpacity>
+
+            {/* PIN opcional (só faz sentido em perfil não-infantil) */}
+            {!isKids && (
+              <View style={{ alignSelf: 'stretch', marginBottom: 20 }}>
+                <Text style={styles.pinLabel}>PIN de acesso (opcional)</Text>
+                <TextInput
+                  style={styles.pinInput}
+                  placeholder="Deixe em branco pra não usar PIN"
+                  placeholderTextColor="#444"
+                  value={pin}
+                  onChangeText={setPin}
+                  onFocus={() => { if (pin === '••••') setPin(''); }}
+                  keyboardType="number-pad"
+                  secureTextEntry
+                  maxLength={6}
+                />
+              </View>
+            )}
 
             {/* Tabs fotos / emoji */}
             <View style={styles.tabs}>
@@ -319,6 +380,39 @@ export default function ProfileSelectScreen() {
                 {saving
                   ? <ActivityIndicator color="#fff" size="small" />
                   : <Text style={styles.btnSaveText}>Salvar</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Modal de PIN pra abrir perfil protegido ── */}
+      <Modal visible={!!pinPrompt} transparent animationType="fade" onRequestClose={() => setPinPrompt(null)}>
+        <View style={styles.pinOverlay}>
+          <View style={styles.pinBox}>
+            <Text style={styles.pinTitle}>Perfil protegido</Text>
+            <Text style={styles.pinSub}>Digite o PIN de "{pinPrompt?.name}" para continuar</Text>
+            <TextInput
+              style={[styles.pinPromptInput, pinPromptError && styles.pinPromptInputError]}
+              value={pinPromptValue}
+              onChangeText={v => { setPinPromptValue(v); setPinPromptError(false); }}
+              keyboardType="number-pad"
+              secureTextEntry
+              maxLength={6}
+              placeholder="••••"
+              placeholderTextColor="#444"
+              autoFocus
+              onSubmitEditing={confirmPinPrompt}
+            />
+            {pinPromptError && <Text style={styles.pinPromptError}>PIN incorreto. Tente novamente.</Text>}
+            <View style={styles.actions}>
+              <TouchableOpacity style={styles.btnCancel} onPress={() => setPinPrompt(null)}>
+                <Text style={styles.btnCancelText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.btnSave} onPress={confirmPinPrompt} disabled={pinChecking}>
+                {pinChecking
+                  ? <ActivityIndicator color="#fff" size="small" />
+                  : <Text style={styles.btnSaveText}>Confirmar</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -426,4 +520,22 @@ const styles = StyleSheet.create({
     backgroundColor: '#E50914', alignItems: 'center',
   },
   btnSaveText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+
+  pinLabel: { color: '#666', fontSize: 12, fontWeight: '600', marginBottom: 8 },
+  pinInput: {
+    backgroundColor: '#1e1e1e', color: '#fff', padding: 14, borderRadius: 12,
+    fontSize: 16, borderWidth: 1, borderColor: '#2a2a2a', textAlign: 'center', letterSpacing: 4,
+  },
+
+  pinOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.88)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+  pinBox: { backgroundColor: '#141414', borderRadius: 20, padding: 28, width: '100%', maxWidth: 340, alignItems: 'center' },
+  pinTitle: { color: '#fff', fontSize: 18, fontWeight: '800', marginBottom: 8 },
+  pinSub: { color: '#aaa', fontSize: 13, textAlign: 'center', marginBottom: 20 },
+  pinPromptInput: {
+    width: '100%', backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: '#2a2a2a',
+    borderRadius: 10, padding: 14, color: '#fff', fontSize: 20, textAlign: 'center',
+    letterSpacing: 8, marginBottom: 6,
+  },
+  pinPromptInputError: { borderColor: '#E50914' },
+  pinPromptError: { color: '#E50914', fontSize: 12, marginBottom: 10 },
 });
