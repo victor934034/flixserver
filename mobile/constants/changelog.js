@@ -4,6 +4,20 @@
 // mais novas que a última vista (guardado no AsyncStorage).
 export const CHANGELOG = [
   {
+    version: '1.0.8',
+    items: [
+      'Corrigido de vez o erro 404 ao reproduzir alguns vídeos (causa raiz era um bug na ferramenta de limpeza do catálogo).',
+      'PIN opcional pra proteger um perfil (ex: o adulto) — configurável na edição do perfil.',
+      'Botão de compartilhar filme/série.',
+      'Nova tela de Ajuda/FAQ (Perfil → Ajuda).',
+      'Sugerir conteúdo agora busca certo (antes quase nunca achava o título pra selecionar).',
+      'Recomendados pra você ficou mais preciso, cruzando com títulos parecidos de verdade (não só mesmo gênero).',
+      'Categoria da busca agora é um dropdown em vez de fileira de botões.',
+      'Cronologias podem ter contagem regressiva pra um evento (ex: estreia de um filme).',
+      'Removido o link direto do vídeo de dentro do player — mais segurança, sem vazar URL do armazenamento.',
+    ],
+  },
+  {
     version: '1.0.7',
     items: [
       'Busca muito melhor: "homem aranha" acha "Homem-Aranha", "hercules" acha "Hércules" — ignora acento e hífen (em todos os apps). Agora também dá pra buscar por voz.',
@@ -14,7 +28,6 @@ export const CHANGELOG = [
       'Chromecast redesenhado: barra de progresso e tempo da TV, volume, mudo, legendas, trocar áudio/episódio e parar transmissão, tudo pelo celular.',
       'Picture-in-Picture: continue assistindo com o app minimizado. Trailer na tela de detalhes.',
       'Downloads: baixar temporada inteira em fila, baixar o próximo episódio sozinho (Wi-Fi) e apagar depois de assistir (opcional, em Perfil).',
-      'Corrigido erro 404 ao reproduzir em alguns celulares.',
     ],
   },
   {
