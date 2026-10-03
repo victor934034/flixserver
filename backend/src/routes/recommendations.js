@@ -8,6 +8,32 @@ router.use(authMiddleware);
 // exponencial simples, sem precisar de coluna nova nem tabela nova.
 const DECAY = 0.85;
 
+// Cache em memória por usuário+perfil — evita bater no TMDB de novo toda
+// vez que a Home abre (isso deixou o app "travando" às vezes: o TMDB é uma
+// API externa e pode demorar ou falhar, e isso rodava a cada load da Home).
+const CACHE_TTL_MS = 10 * 60 * 1000; // 10 min
+const cache = new Map(); // key -> { data, expires }
+
+function getCached(key) {
+  const hit = cache.get(key);
+  if (hit && hit.expires > Date.now()) return hit.data;
+  cache.delete(key);
+  return null;
+}
+function setCached(key, data) {
+  cache.set(key, { data, expires: Date.now() + CACHE_TTL_MS });
+}
+
+// Nunca deixa uma chamada externa lenta seguro o request inteiro — corta
+// depois de TMDB_OVERALL_TIMEOUT_MS e segue só com o que já respondeu.
+const TMDB_OVERALL_TIMEOUT_MS = 2500;
+function withTimeout(promise, ms, fallback) {
+  return Promise.race([
+    promise,
+    new Promise(resolve => setTimeout(() => resolve(fallback), ms)),
+  ]);
+}
+
 // Quantos títulos recentes usamos como "semente" pra buscar parecidos no TMDB
 // (sinopse+elenco+palavras-chave — não só gênero). Mais que isso não compensa
 // o custo de rede por pouco ganho de sinal.
@@ -41,6 +67,10 @@ router.get('/', async (req, res) => {
   try {
     const profileId = req.query.profile_id || req.headers['x-profile-id'] || null;
     const limit = Math.min(Number(req.query.limit) || 20, 50);
+
+    const cacheKey = `${req.user.id}:${profileId || 'default'}:${limit}`;
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
 
     let histQ = supabase
       .from('watch_history')
@@ -104,9 +134,12 @@ router.get('/', async (req, res) => {
     // mais específico (sinopse/elenco/palavras-chave), não só o rótulo de gênero.
     const seeds = [...seedWeight.entries()].slice(0, TMDB_SEED_COUNT);
     const tmdbBoost = { movie: {}, series: {} }; // tmdb_id -> score
+    // withTimeout em cada chamada: se o TMDB não responder a tempo, essa
+    // semente simplesmente não contribui (cai pra afinidade de gênero puro),
+    // em vez de segurar a resposta inteira esperando a API externa.
     await Promise.all(seeds.map(async ([key, weight]) => {
       const [type, tmdbId] = key.split(':');
-      const similarIds = await fetchTmdbSimilar(tmdbId, type);
+      const similarIds = await withTimeout(fetchTmdbSimilar(tmdbId, type), TMDB_OVERALL_TIMEOUT_MS, []);
       similarIds.forEach((id, pos) => {
         const contribution = weight * (1 / (pos + 1));
         tmdbBoost[type][id] = (tmdbBoost[type][id] || 0) + contribution;
@@ -172,6 +205,7 @@ router.get('/', async (req, res) => {
       .map(t => detailMap.get(`${t.content_type}:${t.id}`))
       .filter(Boolean);
 
+    setCached(cacheKey, results);
     res.json(results);
   } catch (err) {
     console.error('[recommendations] error:', err.message);
