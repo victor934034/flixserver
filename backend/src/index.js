@@ -285,7 +285,7 @@ app.get('/api/categories', async (req, res) => {
 
 // TEMPORÁRIO: só pra confirmar que o Sentry está capturando de ponta a
 // ponta. Remover depois de ver o erro aparecer no painel.
-app.get('/debug-sentry', () => {
+app.get('/api/debug-sentry', () => {
   throw new Error('Teste de verificação do Sentry — pode remover esta rota');
 });
 
