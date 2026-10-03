@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, FlatList, StyleSheet,
-  ActivityIndicator, TouchableOpacity, ScrollView, useWindowDimensions, Image, Alert,
+  ActivityIndicator, TouchableOpacity, ScrollView, useWindowDimensions, Image, Alert, Modal,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -61,6 +61,7 @@ export default function BuscaScreen() {
   const [trending, setTrending] = useState([]);
   const [genres, setGenres] = useState([]);
   const [selectedGenre, setSelectedGenre] = useState(null);
+  const [genreDropdownOpen, setGenreDropdownOpen] = useState(false);
   const [genreContent, setGenreContent] = useState([]);
   const [genreLoading, setGenreLoading] = useState(false);
   const timer = useRef(null);
@@ -179,25 +180,45 @@ export default function BuscaScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Chips de gênero */}
+      {/* Dropdown de categoria */}
       {genres.length > 0 && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.genreRow}
-          style={styles.genreScroll}
-        >
-          {genres.map(g => (
-            <TouchableOpacity
-              key={g}
-              style={[styles.genreChip, selectedGenre === g && styles.genreChipActive]}
-              onPress={() => toggleGenre(g)}
-            >
-              <Text style={[styles.genreChipText, selectedGenre === g && styles.genreChipTextActive]}>{g}</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+        <View style={styles.genreDropdownWrap}>
+          <TouchableOpacity style={styles.genreDropdownBtn} onPress={() => setGenreDropdownOpen(true)}>
+            <Ionicons name="options-outline" size={16} color={selectedGenre ? '#E50914' : '#888'} />
+            <Text style={[styles.genreDropdownText, selectedGenre && styles.genreDropdownTextActive]} numberOfLines={1}>
+              {selectedGenre || 'Todas as categorias'}
+            </Text>
+            <Ionicons name="chevron-down" size={16} color="#888" />
+          </TouchableOpacity>
+        </View>
       )}
+
+      <Modal visible={genreDropdownOpen} transparent animationType="fade" onRequestClose={() => setGenreDropdownOpen(false)}>
+        <TouchableOpacity style={styles.genreModalOverlay} activeOpacity={1} onPress={() => setGenreDropdownOpen(false)}>
+          <View style={styles.genreModalBox}>
+            <Text style={styles.genreModalTitle}>Categoria</Text>
+            <ScrollView style={{ maxHeight: 380 }}>
+              <TouchableOpacity
+                style={styles.genreModalRow}
+                onPress={() => { toggleGenre(null); setGenreDropdownOpen(false); }}
+              >
+                <Text style={[styles.genreModalRowText, !selectedGenre && styles.genreModalRowTextActive]}>Todas as categorias</Text>
+                {!selectedGenre && <Ionicons name="checkmark" size={18} color="#E50914" />}
+              </TouchableOpacity>
+              {genres.map(g => (
+                <TouchableOpacity
+                  key={g}
+                  style={styles.genreModalRow}
+                  onPress={() => { toggleGenre(g); setGenreDropdownOpen(false); }}
+                >
+                  <Text style={[styles.genreModalRowText, selectedGenre === g && styles.genreModalRowTextActive]}>{g}</Text>
+                  {selectedGenre === g && <Ionicons name="checkmark" size={18} color="#E50914" />}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {loading || genreLoading ? (
         <View style={styles.loader}><ActivityIndicator size="large" color="#E50914" /></View>
@@ -305,15 +326,28 @@ const styles = StyleSheet.create({
     borderRadius: 12, borderWidth: 1, borderColor: '#252525',
   },
   input: { flex: 1, color: '#fff', fontSize: 16 },
-  genreScroll: { flexGrow: 0, marginVertical: 10 },
-  genreRow: { paddingHorizontal: 16, gap: 8 },
-  genreChip: {
-    paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20,
+  genreDropdownWrap: { paddingHorizontal: 16, marginVertical: 10 },
+  genreDropdownBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    alignSelf: 'flex-start', maxWidth: '100%',
+    paddingHorizontal: 14, paddingVertical: 9, borderRadius: 10,
     backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: '#2a2a2a',
   },
-  genreChipActive: { backgroundColor: '#E50914', borderColor: '#E50914' },
-  genreChipText: { color: '#888', fontSize: 13, fontWeight: '500' },
-  genreChipTextActive: { color: '#fff', fontWeight: '700' },
+  genreDropdownText: { color: '#888', fontSize: 13.5, fontWeight: '500', flexShrink: 1 },
+  genreDropdownTextActive: { color: '#fff', fontWeight: '700' },
+
+  genreModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 24 },
+  genreModalBox: {
+    backgroundColor: '#161616', borderRadius: 16, borderWidth: 1, borderColor: '#2a2a2a',
+    paddingTop: 16, paddingBottom: 8, maxHeight: '70%',
+  },
+  genreModalTitle: { color: '#fff', fontSize: 15, fontWeight: '700', paddingHorizontal: 20, marginBottom: 8 },
+  genreModalRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingVertical: 13,
+  },
+  genreModalRowText: { color: '#bbb', fontSize: 15 },
+  genreModalRowTextActive: { color: '#fff', fontWeight: '700' },
   loader: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   emptyContent: { paddingHorizontal: 16, paddingBottom: 32, paddingTop: 4 },
   sectionTitle: { color: '#fff', fontSize: 18, fontWeight: '700', marginBottom: 14 },
