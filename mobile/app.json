@@ -33,9 +33,21 @@
     "plugins": [
       "expo-router",
       "expo-screen-orientation",
-      ["expo-video", { "supportsBackgroundPlayback": true, "supportsPictureInPicture": true }],
+      [
+        "expo-video",
+        {
+          "supportsBackgroundPlayback": true,
+          "supportsPictureInPicture": true
+        }
+      ],
       "expo-font",
-      ["expo-speech-recognition", { "microphonePermission": "O Flixhome usa o microfone para a busca por voz.", "speechRecognitionPermission": "O Flixhome usa o reconhecimento de fala para a busca por voz." }],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "O Flixhome usa o microfone para a busca por voz.",
+          "speechRecognitionPermission": "O Flixhome usa o reconhecimento de fala para a busca por voz."
+        }
+      ],
       "expo-image-picker",
       "./plugins/withAndroidQueries",
       [
