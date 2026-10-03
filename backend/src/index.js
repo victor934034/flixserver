@@ -283,12 +283,6 @@ app.get('/api/categories', async (req, res) => {
   }
 });
 
-// TEMPORÁRIO: só pra confirmar que o Sentry está capturando de ponta a
-// ponta. Remover depois de ver o erro aparecer no painel.
-app.get('/api/debug-sentry', () => {
-  throw new Error('Teste de verificação do Sentry — pode remover esta rota');
-});
-
 // Captura o erro no Sentry ANTES do handler final — precisa vir depois de
 // todas as rotas e antes do error handler de verdade.
 require('@sentry/node').setupExpressErrorHandler(app);
