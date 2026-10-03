@@ -60,7 +60,7 @@ const limiter = rateLimit({
   // 500 era baixo para uma casa com vários dispositivos (TV + celular + web)
   // atrás do mesmo IP, todos com heartbeat/history rodando ao mesmo tempo —
   // um deles travando e reconectando em loop já estourava e derrubava os outros.
-  max: 2000,
+  max: 1000000, // TEMPORÁRIO pro teste de carga — voltar pra 2000 depois
   message: { error: 'Muitas requisições, tente novamente em alguns minutos.' },
   // Exclui auth (tem limiter próprio) e upload (admin autenticado, muitas requisições de partes)
   skip: (req) => req.path.startsWith('/auth/') || req.path.startsWith('/upload/'),
