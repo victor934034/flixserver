@@ -55,14 +55,16 @@ export default function NovoFilme() {
     }
   }
 
+  // Botão "Buscar" / Enter só mostra os candidatos (igual a digitar) — nunca
+  // aplica um resultado sozinho. A escolha é sempre manual (pickTmdbSuggestion).
   async function searchTMDB() {
     if (!tmdbSearch.trim()) return;
-    setTmdbSuggestions([]);
+    clearTimeout(debounceRef.current);
     setTmdbLoading(true);
     try {
-      const { data } = await api.get(`/tmdb/search?q=${encodeURIComponent(tmdbSearch)}&type=movie`);
-      if (!data) { setError('Não encontrado no TMDB'); return; }
-      applyTmdbData(data);
+      const { data } = await api.get(`/tmdb/search-multiple?q=${encodeURIComponent(tmdbSearch)}&type=movie`);
+      setTmdbSuggestions(data || []);
+      if (!data || data.length === 0) setError('Não encontrado no TMDB');
     } catch (err) {
       setError(err.response?.data?.error || 'Erro ao buscar no TMDB');
     } finally {

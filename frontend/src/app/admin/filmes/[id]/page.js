@@ -11,6 +11,7 @@ export default function EditarFilme() {
   const [form, setForm] = useState(null);
   const [tmdbSearch, setTmdbSearch] = useState('');
   const [tmdbLoading, setTmdbLoading] = useState(false);
+  const [tmdbResults, setTmdbResults] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [fetchingSubs, setFetchingSubs] = useState(false);
@@ -35,11 +36,31 @@ export default function EditarFilme() {
     setForm(prev => ({ ...prev, [key]: value }));
   }
 
+  // Busca vários candidatos e deixa o admin escolher — nunca aplica sozinho
+  // o "melhor" resultado do TMDB (isso já trouxe filme errado antes, ex:
+  // buscar "Dark" e vir "Dark Shadows").
   async function searchTMDB() {
     if (!tmdbSearch.trim()) return;
     setTmdbLoading(true);
+    setTmdbResults([]);
     try {
-      const { data } = await api.get(`/tmdb/search?q=${encodeURIComponent(tmdbSearch)}&type=movie`);
+      const { data } = await api.get(`/tmdb/search-multiple?q=${encodeURIComponent(tmdbSearch)}&type=movie`);
+      if (!data || data.length === 0) { setError('Não encontrado no TMDB'); return; }
+      setTmdbResults(data);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Erro ao buscar no TMDB');
+    } finally {
+      setTmdbLoading(false);
+    }
+  }
+
+  // Só aplica no formulário depois do admin clicar explicitamente num
+  // resultado — busca os detalhes completos pelo ID já conhecido (sem
+  // buscar por nome de novo, que podia trazer outro título).
+  async function applyTmdbResult(item) {
+    setTmdbLoading(true);
+    try {
+      const { data } = await api.get(`/tmdb/details/${item.id}?type=movie`);
       if (!data) { setError('Não encontrado no TMDB'); return; }
       setForm(prev => ({
         ...prev,
@@ -57,6 +78,8 @@ export default function EditarFilme() {
           ? `https://www.youtube.com/watch?v=${data.videos.results.find(v => v.type === 'Trailer').key}`
           : prev.trailer_url,
       }));
+      setTmdbResults([]);
+      setTmdbSearch(data.title || '');
     } catch (err) {
       setError(err.response?.data?.error || 'Erro ao buscar no TMDB');
     } finally {
@@ -171,6 +194,37 @@ export default function EditarFilme() {
             {tmdbLoading ? 'Buscando...' : 'Buscar TMDB'}
           </button>
         </div>
+        {tmdbResults.length > 0 && (
+          <div style={{
+            marginTop: 10, maxHeight: 320, overflowY: 'auto',
+            border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg-secondary)',
+          }}>
+            {tmdbResults.map(r => (
+              <div
+                key={r.id}
+                onClick={() => applyTmdbResult(r)}
+                style={{
+                  display: 'flex', gap: 10, padding: 10, cursor: 'pointer',
+                  borderBottom: '1px solid var(--border)', alignItems: 'center',
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+              >
+                {r.poster_url ? (
+                  <img src={r.poster_url} alt="" style={{ width: 36, height: 54, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }} />
+                ) : (
+                  <div style={{ width: 36, height: 54, borderRadius: 4, background: '#222', flexShrink: 0 }} />
+                )}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ color: '#fff', fontSize: 14, fontWeight: 600 }}>{r.title}</div>
+                  <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+                    {r.year || '—'}{r.original_title && r.original_title !== r.title ? ` · ${r.original_title}` : ''}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <form onSubmit={handleSave} className={styles.form}>
