@@ -79,7 +79,10 @@ function BuscaTab() {
     setQuery(item.title);
     setSavedMsg(null);
     try {
-      const { data } = await api.get(`/tmdb/search?q=${encodeURIComponent(item.title)}&type=${mediaType}&year=${item.year || ''}`);
+      // Busca os detalhes pelo ID do TMDB que o item já tem (não por nome de
+      // novo) — buscar por nome podia trazer um título diferente do que foi
+      // clicado (ex: clicar em "Dark" e vir "Dark Shadows").
+      const { data } = await api.get(`/tmdb/details/${item.id}?type=${mediaType}`);
       setSelected(data ? { ...data, _type: mediaType } : null);
     } catch {
       setSelected(item);
