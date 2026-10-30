@@ -144,6 +144,9 @@ export default function EditarSerie() {
   const [tmdbSearch, setTmdbSearch] = useState('');
   const [tmdbLoading, setTmdbLoading] = useState(false);
   const [tmdbResults, setTmdbResults] = useState([]);
+  const [refreshingEps, setRefreshingEps] = useState(false);
+  const [refreshEpsProgress, setRefreshEpsProgress] = useState(null);
+  const [refreshEpsMsg, setRefreshEpsMsg] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -221,6 +224,48 @@ export default function EditarSerie() {
       setError(err.response?.data?.error || 'Erro ao buscar no TMDB');
     } finally {
       setTmdbLoading(false);
+    }
+  }
+
+  // Atualiza nome/sinopse/imagem/duração dos episódios já cadastrados a
+  // partir do TMDB — útil depois de trocar a série pro TMDB ID certo (os
+  // episódios continuavam com os dados do título antigo até isso rodar).
+  async function refreshEpisodesFromTmdb() {
+    if (!form?.tmdb_id) { setRefreshEpsMsg('Erro: série sem TMDB ID — busque e salve primeiro'); return; }
+    setRefreshingEps(true);
+    setRefreshEpsMsg('');
+    setRefreshEpsProgress(null);
+    try {
+      const { data } = await api.post(`/admin/series/${id}/refresh-episodes`);
+      if (!data.jobId) {
+        setRefreshEpsMsg(data.message || 'Nada para atualizar.');
+        setRefreshingEps(false);
+        return;
+      }
+      setRefreshEpsProgress({ total: data.total, done: 0 });
+      const poll = setInterval(async () => {
+        try {
+          const s = await api.get(`/admin/episode-refresh-status?jobId=${data.jobId}`);
+          setRefreshEpsProgress({ total: s.data.total, done: s.data.done });
+          if (!s.data.running) {
+            clearInterval(poll);
+            setRefreshingEps(false);
+            setRefreshEpsMsg(
+              s.data.errors === 0
+                ? `✓ ${s.data.done} episódio(s) atualizado(s).`
+                : `${s.data.done - s.data.errors} ok, ${s.data.errors} erro(s)${s.data.lastError ? ': ' + s.data.lastError : ''}`
+            );
+            loadEpisodes();
+          }
+        } catch {
+          clearInterval(poll);
+          setRefreshingEps(false);
+          setRefreshEpsMsg('Erro ao verificar progresso.');
+        }
+      }, 2000);
+    } catch (err) {
+      setRefreshingEps(false);
+      setRefreshEpsMsg(err.response?.data?.error || 'Erro ao atualizar episódios');
     }
   }
 
@@ -498,8 +543,25 @@ export default function EditarSerie() {
       <div className={s.epSection}>
         <div className={s.epHeader}>
           <h2 className={s.epTitle}>Episódios ({episodes.length})</h2>
-          <button className={s.btnAddEp} onClick={startAdd}>+ Adicionar Episódio</button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button
+              className={f.btnCancel}
+              onClick={refreshEpisodesFromTmdb}
+              disabled={refreshingEps}
+              title="Atualiza nome, sinopse, imagem e duração dos episódios a partir do TMDB (não mexe nos vídeos)"
+            >
+              {refreshingEps
+                ? `Atualizando... ${refreshEpsProgress ? `${refreshEpsProgress.done}/${refreshEpsProgress.total}` : ''}`
+                : '↻ Atualizar episódios do TMDB'}
+            </button>
+            <button className={s.btnAddEp} onClick={startAdd}>+ Adicionar Episódio</button>
+          </div>
         </div>
+        {refreshEpsMsg && !refreshingEps && (
+          <p style={{ color: refreshEpsMsg.startsWith('✓') ? '#4caf50' : '#ff6b6b', fontSize: 13, margin: '0 0 12px' }}>
+            {refreshEpsMsg}
+          </p>
+        )}
 
         {/* New episode form */}
         {addingEp && (

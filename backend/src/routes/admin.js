@@ -2054,4 +2054,69 @@ router.post('/reports/missing-files', async (req, res) => {
   })();
 });
 
+// Atualiza nome/sinopse/imagem/duração dos episódios já cadastrados a
+// partir do TMDB — pra quando a série é "corrigida" pra outro título
+// (ex: trocou de "Dark Shadows" pra "Dark") os episódios acompanham, em
+// vez de ficarem com os dados antigos. Nunca mexe nos arquivos de vídeo.
+const episodeRefreshJobs = new Map();
+
+router.post('/series/:id/refresh-episodes', async (req, res) => {
+  try {
+    const { data: serie, error: serieErr } = await supabase
+      .from('series').select('id, title, tmdb_id').eq('id', req.params.id).single();
+    if (serieErr || !serie) return res.status(404).json({ error: 'Série não encontrada' });
+    if (!serie.tmdb_id) return res.status(400).json({ error: 'Série sem tmdb_id — busque no TMDB e salve primeiro' });
+
+    const { data: episodes, error: epErr } = await supabase
+      .from('episodes').select('id, season_number, episode_number')
+      .eq('series_id', serie.id).order('season_number').order('episode_number');
+    if (epErr) throw epErr;
+    if (!episodes || episodes.length === 0) {
+      return res.json({ ok: true, jobId: null, total: 0, message: 'Nenhum episódio cadastrado.' });
+    }
+
+    const jobId = `eprefresh_${Date.now()}`;
+    episodeRefreshJobs.set(jobId, { total: episodes.length, done: 0, errors: 0, running: true, lastError: '' });
+    res.json({ ok: true, jobId, total: episodes.length });
+
+    (async () => {
+      const { getEpisodeDetails } = require('../services/tmdb');
+      const TMDB_IMG = 'https://image.tmdb.org/t/p/w500';
+      const job = episodeRefreshJobs.get(jobId);
+      for (const ep of episodes) {
+        try {
+          const details = await getEpisodeDetails(serie.tmdb_id, ep.season_number, ep.episode_number);
+          if (details && !details.status_code) {
+            await supabase.from('episodes').update({
+              title: details.name || null,
+              synopsis: details.overview || null,
+              thumbnail_url: details.still_path ? `${TMDB_IMG}${details.still_path}` : null,
+              duration: details.runtime || null,
+              air_date: details.air_date || null,
+            }).eq('id', ep.id);
+          }
+          job.done++;
+        } catch (e) {
+          job.errors++;
+          job.lastError = `T${ep.season_number}E${ep.episode_number}: ${e.message?.slice(0, 100)}`;
+        }
+        await new Promise(r => setTimeout(r, 260)); // não estourar rate limit do TMDB
+      }
+      job.running = false;
+      console.log(`[refresh-episodes] "${serie.title}": ${job.done - job.errors} ok, ${job.errors} erros`);
+    })();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Fora de /series/:id pra não colidir com a rota GET /series/:id (que
+// casaria "refresh-episodes-status" como se fosse um ID de série).
+router.get('/episode-refresh-status', (req, res) => {
+  const { jobId } = req.query;
+  const job = episodeRefreshJobs.get(jobId);
+  if (!job) return res.status(404).json({ error: 'Job não encontrado' });
+  res.json(job);
+});
+
 module.exports = router;
