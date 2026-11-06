@@ -278,6 +278,13 @@ function needsRemux(info) {
 // (Chrome/Firefox não têm demuxer pra MPEG-TS/AVI/WMV/FLV) — precisam virar .mp4.
 const BAD_CONTAINER_RE = /\.(ts|avi|wmv|flv|mpg|mpeg)$/i;
 
+// RealMedia (.rm/.rmvb) — formato antigo que NENHUM player moderno decodifica
+// (nem o <video> do browser, nem ExoPlayer/AVPlayer). Diferente dos containers
+// "ruins" acima (que só precisam trocar de container, o codec de vídeo já é
+// compatível), aqui o CODEC em si (RealVideo/RealAudio) não existe fora do
+// RealPlayer — precisa reencodificar o vídeo de verdade (-c:v copy não funciona).
+const REALMEDIA_RE = /\.(rm|rmvb)$/i;
+
 async function applyFaststart(inputPath, outputPath) {
   try {
     await execFileAsync(ffmpegPath, [
@@ -293,6 +300,28 @@ async function applyFaststart(inputPath, outputPath) {
   } catch (e) {
     console.error('[faststart] ffmpeg falhou:', e.message?.slice(0, 200));
     return false;
+  }
+}
+
+// RealMedia precisa de reencode de verdade (vídeo e áudio), não um remux —
+// o codec RealVideo não é um codec válido dentro de um container .mp4.
+async function transcodeRealMediaToMp4(input, outputPath) {
+  const out = outputPath || input.replace(/(\.[^.]+)$/, '_fixed.mp4');
+  const isUrl = /^https?:\/\//i.test(input);
+  const hdrs = `User-Agent: ${UA}\r\nAccept: */*\r\nAccept-Language: pt-BR,pt;q=0.9,en;q=0.8\r\n`;
+  const args = [
+    ...(isUrl ? ['-headers', hdrs] : []),
+    '-i', input,
+    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
+    '-c:a', 'aac', '-profile:a', 'aac_low', '-ac', '2', '-b:a', '192k',
+    '-y', out,
+  ];
+  try {
+    await execFileAsync(ffmpegPath, args, { maxBuffer: 10 * 1024 * 1024, timeout: 7_200_000 });
+    return out;
+  } catch (e) {
+    console.error('[ffmpeg] transcode RealMedia falhou:', e.message?.slice(0, 300));
+    return null;
   }
 }
 
@@ -318,7 +347,7 @@ async function remuxToWebAac(input, outputPath) {
 }
 
 const ALLOWED_EXT_BY_ROUTE = {
-  '/video': /\.(mp4|mkv|avi|mov|m4v|webm|ts|flv|wmv|mpg|mpeg)$/i,
+  '/video': /\.(mp4|mkv|avi|mov|m4v|webm|ts|flv|wmv|mpg|mpeg|rm|rmvb)$/i,
   '/subtitle': /\.(srt|vtt|ass|ssa|sub)$/i,
   '/avatar': /\.(jpe?g|png|webp|gif)$/i,
 };
@@ -355,19 +384,24 @@ router.post('/video', upload.single('file'), async (req, res) => {
 
     // .ts/.avi/.wmv/.flv/.mpg não tocam no <video> HTML5 (sem demuxer no browser) —
     // precisam virar .mp4, independente do codec de áudio.
-    const badContainer = BAD_CONTAINER_RE.test(filename);
+    const isRealMedia = REALMEDIA_RE.test(filename);
+    const badContainer = BAD_CONTAINER_RE.test(filename) || isRealMedia;
 
-    const audioInfo = await probeAudio(tmpInput);
+    // RealVideo não é decodificável por ffprobe/aac da mesma forma — pula a
+    // checagem de áudio e já força o reencode completo (vídeo + áudio).
+    const audioInfo = isRealMedia ? null : await probeAudio(tmpInput);
     if (audioInfo) {
       console.log(`[upload/video] audio: codec=${audioInfo.codec} profile="${audioInfo.profile}" ch=${audioInfo.channels}`);
     }
 
     if (needsRemux(audioInfo) || badContainer) {
-      console.log(`[upload/video] ${badContainer ? 'container incompatível (' + ext + ') + ' : ''}remuxando → AAC-LC estéreo${badContainer ? ' + mp4' : ''}…`);
+      console.log(`[upload/video] ${isRealMedia ? 'RealMedia (' + ext + ') — reencode completo' : badContainer ? 'container incompatível (' + ext + ') + ' : ''}${isRealMedia ? '' : 'remuxando → AAC-LC estéreo' + (badContainer ? ' + mp4' : '')}…`);
       const fixedPath = badContainer
         ? tmpInput.replace(/\.[^.]+$/, '_fixed.mp4')
         : tmpInput.replace(/(\.[^.]+)$/, '_fixed$1');
-      tmpOutput = await remuxToWebAac(tmpInput, fixedPath);
+      tmpOutput = isRealMedia
+        ? await transcodeRealMediaToMp4(tmpInput, fixedPath)
+        : await remuxToWebAac(tmpInput, fixedPath);
       if (tmpOutput) {
         buffer = fs.readFileSync(tmpOutput);
         if (badContainer) {
@@ -565,7 +599,8 @@ router.post('/fix-audio', async (req, res) => {
     const ext = path.extname(origName) || '.mkv';
     // .ts/.avi/.wmv/.flv/.mpg não tocam no <video> HTML5 (sem demuxer no browser) —
     // precisam virar .mp4, independente do codec de áudio.
-    const badContainer = BAD_CONTAINER_RE.test(origName);
+    const isRealMedia = REALMEDIA_RE.test(origName);
+    const badContainer = BAD_CONTAINER_RE.test(origName) || isRealMedia;
 
     // Obtém URL direta do B2 (contorna Cloudflare Workers CDN)
     console.log('[fix-audio] obtendo URL direta do B2 para:', origName);
@@ -606,10 +641,12 @@ router.post('/fix-audio', async (req, res) => {
     tmpOutput = path.join(os.tmpdir(), `fh_fix_${Date.now()}${outExt}`);
     console.log(`[fix-audio] remuxando ${origName} → ${tmpOutput}`);
 
+    // RealVideo não é um codec válido dentro de .mp4 — precisa reencodificar
+    // o vídeo de verdade em vez de só copiar (-c:v copy falharia).
     const ffArgs = [
       '-headers', b2AuthHdr,
       '-i', b2Url,
-      '-c:v', 'copy',
+      ...(isRealMedia ? ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20'] : ['-c:v', 'copy']),
       '-c:a', 'aac', '-profile:a', 'aac_low', '-ac', '2', '-b:a', '192k',
       ...(badContainer ? ['-avoid_negative_ts', 'make_zero', '-movflags', '+faststart'] : []),
       '-y', tmpOutput,
