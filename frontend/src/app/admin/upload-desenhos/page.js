@@ -240,7 +240,7 @@ export default function UploadDesenhosPage() {
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    accept: { '*/*': ['.mp4', '.mkv', '.avi', '.mov', '.m4v', '.webm', '.ts', '.flv', '.wmv', '.mpg', '.mpeg', '.rm', '.rmvb'] },
+    accept: { '*/*': [] },
     multiple: true,
     noClick: false,
   });
@@ -602,7 +602,7 @@ export default function UploadDesenhosPage() {
                           {/* Hidden file input per episode */}
                           <input
                             type="file"
-                            accept="*/*,.mp4,.mkv,.avi,.mov,.m4v,.rm,.rmvb"
+                            accept="*/*"
                             style={{ display: 'none' }}
                             ref={el => { fileInputRefs.current[ep.episode_number] = el; }}
                             onChange={e => {
