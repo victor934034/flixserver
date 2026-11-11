@@ -17,7 +17,7 @@ import { useRouter } from 'expo-router';
 import api from '../lib/api';
 
 const RESUME_KEY = 'admin_upload_pending';
-const VIDEO_EXT = ['mp4', 'mkv', 'avi', 'mov', 'm4v', 'webm', 'ts', 'wmv', 'flv', 'mpg', 'mpeg'];
+const VIDEO_EXT = ['mp4', 'mkv', 'avi', 'mov', 'm4v', 'webm', 'ts', 'wmv', 'flv', 'mpg', 'mpeg', 'rm', 'rmvb'];
 
 // O upload direto (presign único) usa a API simples do B2, que tem limite
 // rígido de 5GB por arquivo — filme grande falhava sem aviso claro. Acima
