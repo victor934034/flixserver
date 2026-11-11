@@ -628,7 +628,7 @@ router.post('/fix-audio', async (req, res) => {
 
     console.log('[fix-audio] audio info:', audioInfo);
 
-    if (!audioInfo) {
+    if (!audioInfo && !isRealMedia) {
       return res.status(422).json({ error: 'Não foi possível ler as faixas de áudio mesmo com acesso direto ao B2. Verifique os logs do servidor.' });
     }
 
@@ -707,7 +707,7 @@ router.post('/check-audio', async (req, res) => {
     if (!stream) return res.status(422).json({ error: 'Nenhuma faixa de áudio encontrada no arquivo.' });
 
     const audioInfo = { codec: stream.codec_name, profile: stream.profile || '', channels: stream.channels || 0 };
-    const badContainer = BAD_CONTAINER_RE.test(filename);
+    const badContainer = BAD_CONTAINER_RE.test(filename) || REALMEDIA_RE.test(filename);
     res.json({ audioInfo, needsRemux: needsRemux(audioInfo) || badContainer, badContainer });
   } catch (err) {
     console.error('[check-audio] erro:', err.message?.slice(0, 300));
@@ -1152,7 +1152,8 @@ router.post('/fix-series-audio', async (req, res) => {
         const origName = decodeURIComponent(new URL(item.cdnUrl).pathname.replace(/^\//, ''));
         job.lastFile = origName.slice(-60);
         const ext = path.extname(origName) || '.mp4';
-        const badContainer = BAD_CONTAINER_RE.test(origName);
+        const isRealMedia = REALMEDIA_RE.test(origName);
+        const badContainer = BAD_CONTAINER_RE.test(origName) || isRealMedia;
 
         const { url: b2AuthUrl } = await getDirectDownloadInfo(origName);
         const ts = Date.now();
@@ -1172,7 +1173,7 @@ router.post('/fix-series-audio', async (req, res) => {
         tmpOut = path.join(os.tmpdir(), `fh_fsa_${ts}${outExt}`);
         await execFileAsync(ffmpegPath, [
           '-hide_banner', '-i', tmpIn,
-          '-c:v', 'copy',
+          ...(isRealMedia ? ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20'] : ['-c:v', 'copy']),
           '-c:a', 'aac', '-profile:a', 'aac_low', '-ac', '2', '-b:a', '192k',
           ...(badContainer ? ['-avoid_negative_ts', 'make_zero', '-movflags', '+faststart'] : []),
           '-y', tmpOut,
