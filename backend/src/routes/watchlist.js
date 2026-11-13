@@ -38,7 +38,10 @@ router.get('/', async (req, res) => {
 
     const enriched = items.map(item => {
       const meta = item.content_type === 'movie' ? moviesMap[item.content_id] : seriesMap[item.content_id];
-      return { ...item, ...(meta || {}) };
+      // `id` continua sendo o ID do conteúdo (as TVs navegam com ele), e o ID
+      // da linha da lista vai em `watchlist_id` — antes o spread do meta
+      // sobrescrevia o id da linha com o do filme, e o DELETE não apagava nada.
+      return { ...item, ...(meta || {}), id: item.content_id, watchlist_id: item.id };
     });
 
     res.json(enriched);
@@ -80,13 +83,28 @@ router.post('/', async (req, res) => {
 
 router.delete('/:id', async (req, res) => {
   try {
-    const { error } = await supabase
+    // 1) Tenta pelo ID da linha da lista
+    const { data: byRow, error } = await supabase
       .from('watchlist')
       .delete()
       .eq('id', req.params.id)
-      .eq('user_id', req.user.id);
-
+      .eq('user_id', req.user.id)
+      .select('id');
     if (error) throw error;
+
+    // 2) Compatibilidade com apps antigos que mandam o ID do conteúdo
+    if (!byRow || byRow.length === 0) {
+      const profileId = req.query.profile_id || req.headers['x-profile-id'] || null;
+      let q = supabase
+        .from('watchlist')
+        .delete()
+        .eq('content_id', req.params.id)
+        .eq('user_id', req.user.id);
+      if (profileId) q = q.eq('profile_id', profileId);
+      const { error: err2 } = await q;
+      if (err2) throw err2;
+    }
+
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

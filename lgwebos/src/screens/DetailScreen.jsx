@@ -383,7 +383,7 @@ export default function DetailScreen() {
       const profileId = activeProfile && activeProfile.id;
       try {
         if (wlItem) {
-          await watchlistAPI.remove(wlItem.id);
+          await watchlistAPI.remove(wlItem.watchlist_id || wlItem.id);
           setWlItem(null);
         } else {
           const r = await watchlistAPI.add(isSeries ? 'series' : 'movie', id, profileId);

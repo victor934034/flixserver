@@ -1,9 +1,9 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, Image, TouchableOpacity,
   ActivityIndicator, useWindowDimensions, Alert, Modal, Linking, Share,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -49,6 +49,19 @@ export default function SerieDetail() {
     }).catch(() => {}).finally(() => setLoading(false));
   }, [id]);
 
+  // Ao voltar pra tela, confere de novo se a série ainda está na lista.
+  useFocusEffect(useCallback(() => {
+    let alive = true;
+    api.get('/watchlist')
+      .then(r => {
+        if (!alive) return;
+        const wl = Array.isArray(r.data) ? r.data : [];
+        setListItem(wl.find(i => i.content_id === id) || null);
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [id]));
+
   const handleVote = async (vote) => {
     if (likeLoading) return;
     setLikeLoading(true);
@@ -64,7 +77,7 @@ export default function SerieDetail() {
     setListLoading(true);
     try {
       if (listItem) {
-        await api.delete(`/watchlist/${listItem.id}`);
+        await api.delete(`/watchlist/${listItem.watchlist_id || listItem.id}`);
         setListItem(null);
       } else {
         const res = await api.post('/watchlist', { content_type: 'series', content_id: id });

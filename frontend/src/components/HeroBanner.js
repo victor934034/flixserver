@@ -23,7 +23,7 @@ export default function HeroBanner({ items = [] }) {
     api.get('/watchlist', { params })
       .then(r => {
         const map = {};
-        (r.data || []).forEach(w => { map[w.content_id] = w.id; });
+        (r.data || []).forEach(w => { map[w.content_id] = w.watchlist_id || w.id; });
         setWatchlistMap(map);
       })
       .catch(() => {});

@@ -37,7 +37,7 @@ export default function SeriePage() {
       api.get('/watchlist', { params })
         .then(r => {
           const entry = (r.data || []).find(w => w.content_id === id);
-          if (entry) setWatchlistId(entry.id);
+          if (entry) setWatchlistId(entry.watchlist_id || entry.id);
         })
         .catch(() => {});
       api.get('/history', { params })

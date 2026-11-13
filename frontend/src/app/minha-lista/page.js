@@ -20,9 +20,11 @@ export default function MinhaListaPage() {
       .finally(() => setLoading(false));
   }, [activeProfile]);
 
-  function remove(id) {
-    api.delete(`/watchlist/${id}`)
-      .then(() => setItems(prev => prev.filter(i => i.id !== id)))
+  function remove(item) {
+    const wid = item.watchlist_id || item.id;
+    const params = activeProfile ? { profile_id: activeProfile.id } : undefined;
+    api.delete(`/watchlist/${wid}`, { params })
+      .then(() => setItems(prev => prev.filter(i => (i.watchlist_id || i.id) !== wid)))
       .catch(() => {});
   }
 
@@ -45,7 +47,7 @@ export default function MinhaListaPage() {
           {items.map(item => {
             const href = item.content_type === 'series' ? `/serie/${item.content_id}` : `/filme/${item.content_id}`;
             return (
-              <div key={item.id} className={styles.card}>
+              <div key={item.watchlist_id || item.id} className={styles.card}>
                 <Link href={href} className={styles.cardLink}>
                   <div className={styles.poster}>
                     {item.poster_url ? (
@@ -62,7 +64,7 @@ export default function MinhaListaPage() {
                     <span className={styles.cardType}>{item.content_type === 'series' ? 'Série' : 'Filme'}</span>
                   </div>
                 </Link>
-                <button className={styles.removeBtn} onClick={() => remove(item.id)} title="Remover da lista">✕</button>
+                <button className={styles.removeBtn} onClick={() => remove(item)} title="Remover da lista">✕</button>
               </div>
             );
           })}

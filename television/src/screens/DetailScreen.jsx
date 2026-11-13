@@ -219,7 +219,7 @@ export default function DetailScreen({ navigation, route }) {
     api.get('/watchlist', { params })
       .then(r => {
         const entry = (Array.isArray(r.data) ? r.data : []).find(w => w.content_id === item.id);
-        setWatchlistId(entry ? entry.id : null);
+        setWatchlistId(entry ? (entry.watchlist_id || entry.id) : null);
       })
       .catch(() => {});
   }, [item.id, activeProfile]);

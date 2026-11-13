@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, Image, TouchableOpacity,
   ActivityIndicator, useWindowDimensions, Alert, Linking, Share,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -46,6 +46,14 @@ export default function FilmeDetail() {
       .finally(() => setLoading(false));
   }, [id]);
 
+  // Ao voltar pra tela (ex.: depois de remover na Minha Lista), confere de novo
+  // se o filme ainda está na lista — senão o coração ficava vermelho.
+  useFocusEffect(useCallback(() => {
+    let alive = true;
+    checkInList(id).then(item => { if (alive) setListItem(item); });
+    return () => { alive = false; };
+  }, [id]));
+
   // Fetch saved position for this movie (used when not coming from Continue Watching)
   useEffect(() => {
     if (!id || !activeProfile?.id) return;
@@ -73,7 +81,7 @@ export default function FilmeDetail() {
     setListLoading(true);
     try {
       if (listItem) {
-        await api.delete(`/watchlist/${listItem.id}`);
+        await api.delete(`/watchlist/${listItem.watchlist_id || listItem.id}`);
         setListItem(null);
       } else {
         const res = await api.post('/watchlist', { content_type: 'movie', content_id: id });
