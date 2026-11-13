@@ -7,7 +7,7 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "build:apk": "eas build --platform android --profile preview",
-    "update": "eas update --branch production --message \"v1.0.2\""
+    "update": "eas update --branch production --message \"update\""
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",

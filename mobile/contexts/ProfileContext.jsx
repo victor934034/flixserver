@@ -49,13 +49,23 @@ export function ProfileProvider({ children }) {
     return null;
   }, []);
 
+  // Sem internet não dá pra validar o perfil no servidor — usa o último
+  // perfil salvo no aparelho só pra liberar os downloads offline.
+  const restoreSavedProfile = useCallback(async () => {
+    try {
+      const saved = await AsyncStorage.getItem('active_profile');
+      if (saved) { const p = JSON.parse(saved); setActiveProfile(p); return p; }
+    } catch {}
+    return null;
+  }, []);
+
   const clearProfile = useCallback(async () => {
     setActiveProfile(null);
     await AsyncStorage.removeItem('active_profile');
   }, []);
 
   return (
-    <ProfileContext.Provider value={{ activeProfile, selectProfile, loadSavedProfile, clearProfile }}>
+    <ProfileContext.Provider value={{ activeProfile, selectProfile, loadSavedProfile, restoreSavedProfile, clearProfile }}>
       {children}
     </ProfileContext.Provider>
   );

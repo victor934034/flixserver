@@ -117,7 +117,7 @@ function handleNotificationTap(data, router) {
 
 function AppGate() {
   const { token, user, loading } = useAuth();
-  const { activeProfile } = useProfile();
+  const { activeProfile, restoreSavedProfile } = useProfile();
   const segments = useSegments();
   const router = useRouter();
   const navState = useRootNavigationState();
@@ -137,17 +137,21 @@ function AppGate() {
   }, []);
 
   // Sem internet: manda direto pros downloads em vez de deixar o usuario
-  // preso em telas que dependem de rede (fotos/dados que nao carregam e
-  // ficam pretos). Nao mexe se ja estiver em downloads, no player (pode
-  // estar assistindo um download offline) ou nas telas de auth/perfil/assinatura.
+  // preso em telas que dependem de rede. Antes isso so funcionava com perfil
+  // ja carregado — mas o perfil vem do servidor, entao abrindo o app offline
+  // ficava travado na selecao de perfil e nao dava pra ver os downloads.
+  // Agora usa o ultimo perfil salvo no aparelho (ou segue sem perfil).
   useEffect(() => {
-    if (!navState?.key || loading || !token || !activeProfile || isOnline) return;
+    if (!navState?.key || loading || !token || isOnline) return;
     const seg0 = segments[0];
     const onDownloadsTab = seg0 === '(tabs)' && segments[1] === 'downloads';
-    const skip = seg0 === '(auth)' || seg0 === 'profile-select' || seg0 === 'subscription'
+    const skip = seg0 === '(auth)' || seg0 === 'subscription'
       || seg0 === 'player' || seg0 === 'iptv-player' || onDownloadsTab;
     if (skip) return;
-    router.replace('/(tabs)/downloads');
+    (async () => {
+      if (!activeProfile) await restoreSavedProfile();
+      router.replace('/(tabs)/downloads');
+    })();
   }, [isOnline, token, loading, activeProfile, segments, navState?.key]);
 
   // Handle notification tap navigation (once nav is ready and user is logged in)
@@ -212,10 +216,12 @@ function AppGate() {
     const inAuth = segments[0] === '(auth)';
     const onSub = segments[0] === 'subscription';
     const onPS = segments[0] === 'profile-select';
+    // Offline nao manda pra selecao de perfil (ela precisa do servidor)
+    if (!isOnline) return;
     if (!inAuth && !onSub && !onPS && !activeProfile) {
       router.replace('/profile-select');
     }
-  }, [token, loading, segments, navState?.key, activeProfile]);
+  }, [token, loading, segments, navState?.key, activeProfile, isOnline]);
 
   // So mostra "novidades" depois de logado e com perfil escolhido - senao
   // o modal aparece por cima da tela de login/selecao de perfil.

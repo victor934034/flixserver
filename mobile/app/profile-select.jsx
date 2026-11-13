@@ -48,7 +48,7 @@ function ProfileCard({ profile, onPress, onLongPress }) {
 
 export default function ProfileSelectScreen() {
   const { user } = useAuth();
-  const { selectProfile, loadSavedProfile } = useProfile();
+  const { selectProfile, loadSavedProfile, restoreSavedProfile } = useProfile();
   const router = useRouter();
 
   const [profiles, setProfiles] = useState([]);
@@ -74,19 +74,33 @@ export default function ProfileSelectScreen() {
       const { data } = await api.get('/profiles');
       setProfiles(data);
       return data;
-    } catch {
-      return [];
+    } catch (e) {
+      // Sem resposta do servidor = sem internet (ou wifi sem acesso)
+      return e?.response ? [] : null;
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => {
+  const [offline, setOffline] = useState(false);
+
+  const init = useCallback(() => {
+    setOffline(false);
+    setLoading(true);
     fetchProfiles().then(async (data) => {
+      if (data === null) {
+        // Offline: libera os downloads com o último perfil usado
+        const p = await restoreSavedProfile();
+        if (p) router.replace('/(tabs)/downloads');
+        else setOffline(true);
+        return;
+      }
       const saved = await loadSavedProfile(data);
       if (saved) router.replace('/(tabs)');
     });
-  }, []);
+  }, [fetchProfiles]);
+
+  useEffect(() => { init(); }, []);
 
   function openCreate() {
     setEditing(null);
@@ -204,6 +218,21 @@ export default function ProfileSelectScreen() {
     return (
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
         <ActivityIndicator color="#E50914" size="large" />
+      </View>
+    );
+  }
+
+  if (offline) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: 32 }]}>
+        <Ionicons name="cloud-offline-outline" size={48} color="#555" />
+        <Text style={[styles.title, { marginTop: 16, textAlign: 'center' }]}>Sem internet</Text>
+        <Text style={{ color: '#777', textAlign: 'center', marginBottom: 24 }}>
+          Conecte-se para escolher um perfil.
+        </Text>
+        <TouchableOpacity style={[styles.btnSave, { flex: 0, paddingHorizontal: 32 }]} onPress={init}>
+          <Text style={styles.btnSaveText}>Tentar de novo</Text>
+        </TouchableOpacity>
       </View>
     );
   }

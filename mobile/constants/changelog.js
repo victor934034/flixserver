@@ -4,6 +4,15 @@
 // mais novas que a última vista (guardado no AsyncStorage).
 export const CHANGELOG = [
   {
+    version: '1.0.9',
+    items: [
+      'Sem internet: agora dá pra abrir o app e assistir os downloads direto, sem travar na escolha de perfil.',
+      'Minha Lista: os títulos ficam lado a lado em grade, ocupando melhor a tela.',
+      'Corrigido: remover da Minha Lista não apagava de verdade (o título voltava e o coração continuava vermelho).',
+      'O app agora recebe correções automaticamente, sem precisar baixar uma versão nova na loja.',
+    ],
+  },
+  {
     version: '1.0.8',
     items: [
       'Corrigido de vez o erro 404 ao reproduzir alguns vídeos (causa raiz era um bug na ferramenta de limpeza do catálogo).',
