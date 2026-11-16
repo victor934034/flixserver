@@ -188,14 +188,19 @@ async function getEpisodeDetails(tmdbId, season, episode) {
 }
 
 /**
- * Converte (temporada, episódio) do arquivo pra numeração do TMDB.
- * Animes como One Piece costumam vir com numeração ABSOLUTA (ep 1 a 1100+,
- * tudo "temporada 1"), mas no TMDB a série é dividida em temporadas/arcos
- * (S1 = 61 eps, S2 = 16 eps...). Sem converter, o ep 62 virava "S1E62", que
- * não existe no TMDB — ficava sem nome, sem imagem e na temporada errada.
+ * Converte (temporada, episódio) do arquivo pra numeração REAL do TMDB.
  *
- * Trata como absoluto quando: não há temporada no nome, ou é temporada 1 com
- * número maior que a quantidade de episódios da temporada 1 no TMDB.
+ * Animes como One Piece vêm com numeração absoluta (ep 1 a 1100+) e o TMDB
+ * divide a série em temporadas/arcos. Além disso, em algumas séries o TMDB
+ * NÃO recomeça a contagem em cada temporada: no One Piece a temporada 2 vai
+ * do E62 ao E77, a 4 começa no E92... Por isso usamos a lista real de
+ * episódios de cada temporada (seasonMap), e não "1 até N".
+ *
+ * Regras (temporada S, episódio E vindos do nome do arquivo ou da pasta):
+ *  - E existe na temporada S do TMDB → mantém.
+ *  - E ≤ quantidade de episódios de S → é a posição dentro da temporada
+ *    ("S02E05" = 5º episódio da temporada 2 = E66 no One Piece).
+ *  - Sem temporada, ou E passa do tamanho de S → numeração absoluta.
  */
 // Temporada pela pasta do arquivo no armazenamento ("series/One.Piece/Temporada02/ep05.mp4").
 // Upload por temporada (Upload Desenhos) guarda assim — o nome do arquivo às
@@ -205,35 +210,70 @@ function seasonFromPath(url) {
   return m ? parseInt(m[1], 10) : null;
 }
 
-function resolveEpisodeNumber(details, season, episode) {
-  const seasons = (details?.seasons || [])
-    .filter(s => s.season_number > 0 && s.episode_count > 0)
+// Lista real dos números de episódio de cada temporada no TMDB (cache 6h).
+const seasonMapCache = new Map();
+async function getSeasonMap(tmdbId, details) {
+  const hit = seasonMapCache.get(tmdbId);
+  if (hit && Date.now() - hit.at < 6 * 3600 * 1000) return hit.map;
+  const seasons = (details?.seasons || []).filter(s => s.season_number > 0 && s.episode_count > 0)
     .sort((a, b) => a.season_number - b.season_number);
-  if (!episode || seasons.length === 0) return { season: season || 1, episode, absolute: false };
-
-  const current = seasons.find(s => s.season_number === (season || 1));
-  const overflow = current && episode > current.episode_count;
-  if (season && !overflow) return { season, episode, absolute: false };
-
-  const abs = absoluteToSeason(seasons, episode);
-  // Sem temporada, ou "temporada 1" com número além dela: numeração absoluta.
-  if (!season || season === 1) return { ...abs, absolute: true };
-  // Temporada informada (nome ou pasta) mas com número absoluto dentro dela —
-  // ex.: pasta Temporada02 com "One Piece EP 063" → T2E2. Só aceita se o
-  // número absoluto cair justamente nessa temporada.
-  if (abs.season === season) return { ...abs, absolute: true };
-  return { season, episode, absolute: false };
+  const map = [];
+  for (const s of seasons) {
+    let eps = null;
+    try {
+      const { data } = await axios.get(`${TMDB_BASE}/tv/${tmdbId}/season/${s.season_number}`, {
+        params: { api_key: TMDB_API_KEY, language: 'pt-BR' }, timeout: 15000,
+      });
+      eps = (data.episodes || []).map(e => e.episode_number).filter(n => n > 0).sort((a, b) => a - b);
+    } catch {
+      eps = null;
+    }
+    // Sem a lista: assume 1..N (comportamento padrão da maioria das séries)
+    if (!eps || !eps.length) eps = Array.from({ length: s.episode_count }, (_, i) => i + 1);
+    map.push({ season_number: s.season_number, eps });
+    await new Promise(r => setTimeout(r, 120));
+  }
+  seasonMapCache.set(tmdbId, { at: Date.now(), map });
+  return map;
 }
 
-function absoluteToSeason(seasons, episode) {
-  let remaining = episode;
-  for (const s of seasons) {
-    if (remaining <= s.episode_count) return { season: s.season_number, episode: remaining };
-    remaining -= s.episode_count;
+function defaultSeasonMap(details) {
+  return (details?.seasons || []).filter(s => s.season_number > 0 && s.episode_count > 0)
+    .sort((a, b) => a.season_number - b.season_number)
+    .map(s => ({ season_number: s.season_number, eps: Array.from({ length: s.episode_count }, (_, i) => i + 1) }));
+}
+
+// k-ésimo episódio da série (contando desde o 1º da temporada 1)
+function absoluteToSeason(map, k) {
+  let remaining = k;
+  for (const s of map) {
+    if (remaining <= s.eps.length) return { season: s.season_number, episode: s.eps[remaining - 1] };
+    remaining -= s.eps.length;
   }
-  // Episódio mais novo que a contagem do TMDB: entra no fim da última temporada
-  const last = seasons[seasons.length - 1];
-  return { season: last.season_number, episode: last.episode_count + remaining };
+  // Mais novo que a base do TMDB: continua depois do último episódio conhecido
+  const last = map[map.length - 1];
+  return { season: last.season_number, episode: last.eps[last.eps.length - 1] + remaining };
+}
+
+function resolveEpisodeNumber(details, season, episode, seasonMap) {
+  const map = seasonMap || defaultSeasonMap(details);
+  if (!episode || map.length === 0) return { season: season || 1, episode, absolute: false };
+
+  const idx = map.findIndex(s => s.season_number === season);
+  const cur = idx >= 0 ? map[idx] : null;
+  if (season && cur) {
+    if (cur.eps.includes(episode)) return { season, episode, absolute: false };
+    if (episode <= cur.eps.length) return { season, episode: cur.eps[episode - 1], absolute: false };
+  }
+  if (season && !cur) return { season, episode, absolute: false }; // temporada que o TMDB não tem
+
+  // Numeração absoluta
+  const abs = absoluteToSeason(map, episode);
+  if (!season || season === 1 || abs.season === season) return { ...abs, absolute: true };
+  // Temporada informada mas o número passou do tamanho dela: continua a partir
+  // dela (ex.: tudo enviado como "temporada 2" com E1..E30 → segue pra T3, T4...)
+  const offset = map.slice(0, idx).reduce((n, s) => n + s.eps.length, 0);
+  return { ...absoluteToSeason(map, offset + episode), absolute: true };
 }
 
 async function saveMovie(details, fileUrl, version, dual = false) {
@@ -374,7 +414,7 @@ async function processFiles(fileList) {
         let finalSeason = season;
         let finalEpisode = episode;
         if (episode) {
-          const r = resolveEpisodeNumber(details, season, episode);
+          const r = resolveEpisodeNumber(details, season, episode, await getSeasonMap(details.id, details));
           finalSeason = r.season;
           finalEpisode = r.episode;
           if (r.absolute) console.log(`  Numeração absoluta: ep ${episode} → T${finalSeason}E${finalEpisode}`);
@@ -400,7 +440,7 @@ async function processFiles(fileList) {
   return report;
 }
 
-module.exports = { processFiles, detectType, extractInfo, resolveEpisodeNumber, seasonFromPath, getDetails, getEpisodeDetails };
+module.exports = { processFiles, detectType, extractInfo, resolveEpisodeNumber, seasonFromPath, getSeasonMap, getDetails, getEpisodeDetails };
 
 // Uso via CLI: node tmdb-bot.js "URL1" "URL2"
 if (require.main === module) {

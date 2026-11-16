@@ -2178,7 +2178,7 @@ router.post('/series/:id/refresh-episodes', async (req, res) => {
 const EP_FILE_FIELDS = ['file_dubbing', 'file_subtitled', 'file_cinema', 'file_color', 'file_bw'];
 
 async function planRenumber(seriesId) {
-  const { extractInfo, resolveEpisodeNumber, seasonFromPath, getDetails } = require('../../tmdb-bot');
+  const { extractInfo, resolveEpisodeNumber, seasonFromPath, getSeasonMap, getDetails } = require('../../tmdb-bot');
   const { data: serie, error: sErr } = await supabase
     .from('series').select('id, title, tmdb_id').eq('id', seriesId).single();
   if (sErr || !serie) throw Object.assign(new Error('Série não encontrada'), { status: 404 });
@@ -2189,6 +2189,8 @@ async function planRenumber(seriesId) {
     .from('episodes').select(`id, season_number, episode_number, ${EP_FILE_FIELDS.join(', ')}`)
     .eq('series_id', seriesId).order('id'));
   if (error) throw error;
+  // Números reais dos episódios de cada temporada no TMDB (One Piece: T2 = E62..E77)
+  const seasonMap = (episodes || []).length ? await getSeasonMap(serie.tmdb_id, details) : [];
 
   const moves = [];       // { from:{season,episode,id}, to:{season,episode}, field, url, file }
   const unknown = [];     // arquivos sem número de episódio no nome
@@ -2202,12 +2204,11 @@ async function planRenumber(seriesId) {
       if (info.episode) {
         // Sem temporada no nome: usa a pasta "TemporadaNN" (upload por temporada)
         const season = info.season || seasonFromPath(url);
-        target = resolveEpisodeNumber(details, season, info.episode);
-      } else if (ep.season_number === 1) {
-        // Sem número no nome: se o próprio registro está "fora" da temporada 1
-        // do TMDB (ex.: T1E200), trata o número dele como absoluto.
-        const r = resolveEpisodeNumber(details, 1, ep.episode_number);
-        if (r.absolute) target = r;
+        target = resolveEpisodeNumber(details, season, info.episode, seasonMap);
+      } else {
+        // Sem número no nome: usa a temporada/episódio do próprio registro
+        // (ex.: T2E1 no One Piece vira T2E62, que é como o TMDB numera)
+        target = resolveEpisodeNumber(details, ep.season_number, ep.episode_number, seasonMap);
       }
       if (!target) { if (!info.episode) unknown.push({ season: ep.season_number, episode: ep.episode_number, file }); continue; }
       if (target.season !== ep.season_number || target.episode !== ep.episode_number) {

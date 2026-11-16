@@ -259,7 +259,7 @@ export default function EditarSerie() {
             setRefreshEpsMsg(
               s.data.errors === 0
                 ? `✓ ${s.data.done} episódio(s) atualizado(s).`
-                : `${s.data.done - s.data.errors} ok, ${s.data.errors} erro(s)${s.data.lastError ? ': ' + s.data.lastError : ''}`
+                : `${s.data.done} atualizado(s), ${s.data.errors} não encontrado(s) no TMDB${s.data.lastError ? ' (ex.: ' + s.data.lastError.replace(/:.*$/, '') + ')' : ''} — use "⇅ Reorganizar numeração" para colocar esses episódios na numeração do TMDB.`
             );
             loadEpisodes();
           }
