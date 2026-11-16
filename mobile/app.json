@@ -65,10 +65,9 @@
         "react-native-google-cast",
         {
           "receiverAppId": "0D3A3133",
-          "androidPlayServicesCastFrameworkVersion": "22.1.0"
+          "androidPlayServicesCastFrameworkVersion": "22.0.0"
         }
-      ],
-      "./plugins/withPinnedMediarouter"
+      ]
     ],
     "experiments": {
       "typedRoutes": true
