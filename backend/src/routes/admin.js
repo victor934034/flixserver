@@ -1,5 +1,5 @@
 const router = require('express').Router();
-const { supabase } = require('../services/supabase');
+const { supabase, fetchAll } = require('../services/supabase');
 const { adminMiddleware } = require('../middleware/admin');
 const { sendPushToAll } = require('../services/notifications');
 
@@ -19,8 +19,14 @@ router.get('/stats', async (req, res) => {
       .from('movies')
       .select('id', { count: 'exact', head: true })
       .eq('is_active', true)
+      // Só conta como "sem vídeo" se não tiver NENHUMA versão (antes um filme
+      // só com versão Cinema/4K/cor/P&B aparecia como sem vídeo)
       .is('file_dubbing', null)
-      .is('file_subtitled', null);
+      .is('file_subtitled', null)
+      .is('file_cinema', null)
+      .is('file_4k', null)
+      .is('file_color', null)
+      .is('file_bw', null);
 
     res.json({
       movies: movies.count,
@@ -45,8 +51,8 @@ router.get('/scan-bucket', async (req, res) => {
 
     // Coleta todas as URLs já cadastradas no banco
     const [moviesRes, episodesRes] = await Promise.all([
-      supabase.from('movies').select('file_dubbing, file_subtitled, file_cinema, file_4k').not('id', 'is', null),
-      supabase.from('episodes').select('file_dubbing, file_subtitled, file_cinema').not('id', 'is', null),
+      fetchAll(() => supabase.from('movies').select('file_dubbing, file_subtitled, file_cinema, file_4k, file_color, file_bw').order('id')),
+      fetchAll(() => supabase.from('episodes').select('file_dubbing, file_subtitled, file_cinema, file_color, file_bw').order('id')),
     ]);
 
     if (moviesRes.error) console.warn('[scan-bucket] movies query error:', moviesRes.error.message);
@@ -54,11 +60,11 @@ router.get('/scan-bucket', async (req, res) => {
 
     const registeredUrls = new Set();
     for (const m of moviesRes.data || []) {
-      [m.file_dubbing, m.file_subtitled, m.file_cinema, m.file_4k]
+      [m.file_dubbing, m.file_subtitled, m.file_cinema, m.file_4k, m.file_color, m.file_bw]
         .filter(Boolean).forEach(u => registeredUrls.add(u));
     }
     for (const e of episodesRes.data || []) {
-      [e.file_dubbing, e.file_subtitled, e.file_cinema]
+      [e.file_dubbing, e.file_subtitled, e.file_cinema, e.file_color, e.file_bw]
         .filter(Boolean).forEach(u => registeredUrls.add(u));
     }
 
@@ -261,12 +267,12 @@ router.delete('/series/:id', async (req, res) => {
 // ---- EPISODES CRUD ----
 router.get('/series/:id/episodes', async (req, res) => {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await fetchAll(() => supabase
       .from('episodes')
       .select('*')
       .eq('series_id', req.params.id)
       .order('season_number')
-      .order('episode_number');
+      .order('episode_number'));
     if (error) throw error;
     res.json(data);
   } catch (err) {
@@ -1007,8 +1013,8 @@ router.get('/duplicates/scan', async (req, res) => {
     const b2Files = await listFiles('', 100000);
 
     const [moviesRes, episodesRes] = await Promise.all([
-      supabase.from('movies').select('file_dubbing, file_subtitled, file_cinema, file_4k'),
-      supabase.from('episodes').select('file_dubbing, file_subtitled, file_cinema'),
+      fetchAll(() => supabase.from('movies').select('file_dubbing, file_subtitled, file_cinema, file_4k, file_color, file_bw').order('id')),
+      fetchAll(() => supabase.from('episodes').select('file_dubbing, file_subtitled, file_cinema, file_color, file_bw').order('id')),
     ]);
     const dbUrls = new Set();
     for (const m of moviesRes.data || []) {
@@ -1290,8 +1296,8 @@ router.post('/audio-fix/scan', async (req, res) => {
       const CDN = process.env.CDN_BASE_URL || '';
 
       const [moviesRes, episodesRes] = await Promise.all([
-        supabase.from('movies').select(`id, title, ${MOVIE_FIELDS.join(', ')}`).eq('is_active', true),
-        supabase.from('episodes').select(`id, title, season_number, episode_number, series_id, series:series_id(title), ${EP_FIELDS.join(', ')}`),
+        fetchAll(() => supabase.from('movies').select(`id, title, ${MOVIE_FIELDS.join(', ')}`).eq('is_active', true).order('id')),
+        fetchAll(() => supabase.from('episodes').select(`id, title, season_number, episode_number, series_id, series:series_id(title), ${EP_FIELDS.join(', ')}`).order('id')),
       ]);
 
       const items = [];
@@ -1850,15 +1856,16 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 // Filmes que já têm a versão "Cinema" enviada — consulta direta, sem TMDB.
 router.get('/reports/cinema-versions', async (req, res) => {
-  const { supabase } = require('../services/supabase');
   try {
-    const { data, error } = await supabase
+    const { data, error } = await fetchAll(() => supabase
       .from('movies')
-      .select('id, title, year, poster_url')
+      .select('id, title, year, poster_url, file_cinema, is_active')
       .not('file_cinema', 'is', null)
-      .order('title');
+      .neq('file_cinema', '') // campo "limpo" no admin fica '' e não null — não conta
+      .order('title'));
     if (error) throw error;
-    res.json({ count: data.length, items: data });
+    const items = data.map(({ file_cinema, ...m }) => m);
+    res.json({ count: items.length, items });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1867,96 +1874,127 @@ router.get('/reports/cinema-versions', async (req, res) => {
 router.get('/reports/job-status', (req, res) => {
   const { jobId } = req.query;
   const job = reportJobs.get(jobId);
-  if (!job) return res.status(404).json({ error: 'Job não encontrado' });
+  if (!job) return res.status(404).json({ error: 'Job não encontrado (o servidor pode ter reiniciado — rode de novo)' });
   res.json(job);
 });
 
-// Filmes cuja franquia (belongs_to_collection no TMDB) já tem uma continuação
-// lançada que ainda não está no catálogo. Roda em background (1 request ao
-// TMDB por filme + 1 por coleção, com espaçamento pra não estourar rate limit).
-router.post('/reports/missing-sequels', async (req, res) => {
-  const { supabase } = require('../services/supabase');
-  const axios = require('axios');
-  const TMDB_API_KEY = process.env.TMDB_API_KEY;
-  const TMDB_BASE = 'https://api.themoviedb.org/3';
+// Normaliza título pra comparar ("Homem-Aranha: Sem Volta" == "homem aranha sem volta")
+const normTitle = (t) => String(t || '')
+  .normalize('NFD').replace(/[̀-ͯ]/g, '')
+  .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
-  const { data: movies, error } = await supabase
-    .from('movies').select('id, title, tmdb_id, year').not('tmdb_id', 'is', null).eq('is_active', true);
+// GET no TMDB com nova tentativa quando bate rate limit (429) ou rede falha
+async function tmdbGet(path, params = {}) {
+  const axios = require('axios');
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const { data } = await axios.get(`https://api.themoviedb.org/3${path}`, {
+        params: { api_key: process.env.TMDB_API_KEY, language: 'pt-BR', ...params }, timeout: 15000,
+      });
+      return data;
+    } catch (e) {
+      const status = e.response?.status;
+      if (status === 404 || attempt >= 3) throw e;
+      await sleep(status === 429 ? 2000 * (attempt + 1) : 800 * (attempt + 1));
+    }
+  }
+}
+
+// Filmes cuja franquia (coleção no TMDB) tem filme já lançado que ainda não
+// está no catálogo. Separa em CONTINUAÇÃO (lançado depois do último filme da
+// franquia que você tem) e ANTERIOR (filme mais antigo da franquia que falta).
+router.post('/reports/missing-sequels', async (req, res) => {
+  // Todos os filmes (ativos ou não): se já está cadastrado, não é "faltando"
+  const { data: allMovies, error } = await fetchAll(() => supabase
+    .from('movies').select('id, title, original_title, tmdb_id, year, is_active').order('id'));
   if (error) return res.status(500).json({ error: error.message });
+  const movies = allMovies.filter(m => m.tmdb_id && m.is_active !== false);
 
   const jobId = `msq_${Date.now()}`;
-  reportJobs.set(jobId, { total: movies.length, done: 0, running: true, items: [] });
+  reportJobs.set(jobId, { total: movies.length, done: 0, running: true, items: [], errors: 0 });
   res.json({ ok: true, jobId, total: movies.length });
 
   (async () => {
     const job = reportJobs.get(jobId);
-    const ourTmdbIds = new Set(movies.map(m => String(m.tmdb_id)));
-    const collectionCache = new Map(); // collection_id -> parts[]
+    const ourTmdbIds = new Set(allMovies.filter(m => m.tmdb_id).map(m => String(m.tmdb_id)));
+    // Fallback por título+ano (filme cadastrado com tmdb_id errado/sem tmdb_id)
+    const ourTitles = new Set();
+    for (const m of allMovies) {
+      for (const t of [m.title, m.original_title]) {
+        if (t) { ourTitles.add(`${normTitle(t)}|${m.year || ''}`); ourTitles.add(normTitle(t)); }
+      }
+    }
+    const inCatalog = (p) => {
+      if (ourTmdbIds.has(String(p.id))) return true;
+      const y = (p.release_date || '').slice(0, 4);
+      return [p.title, p.original_title].some(t => t && (ourTitles.has(`${normTitle(t)}|${y}`)));
+    };
+    const collectionsSeen = new Set();
     const today = new Date().toISOString().slice(0, 10);
 
     for (const movie of movies) {
       try {
-        const { data: details } = await axios.get(`${TMDB_BASE}/movie/${movie.tmdb_id}`, {
-          params: { api_key: TMDB_API_KEY, language: 'pt-BR' }, timeout: 10000,
-        });
+        const details = await tmdbGet(`/movie/${movie.tmdb_id}`);
         const coll = details.belongs_to_collection;
-        if (coll) {
-          let parts = collectionCache.get(coll.id);
-          if (!parts) {
-            await sleep(260);
-            const { data: collData } = await axios.get(`${TMDB_BASE}/collection/${coll.id}`, {
-              params: { api_key: TMDB_API_KEY, language: 'pt-BR' }, timeout: 10000,
+        if (coll && !collectionsSeen.has(coll.id)) {
+          collectionsSeen.add(coll.id);
+          await sleep(260);
+          const collData = await tmdbGet(`/collection/${coll.id}`);
+          const parts = (collData.parts || [])
+            .filter(p => p.release_date && p.release_date <= today)
+            .sort((a, b) => a.release_date.localeCompare(b.release_date));
+          const owned = parts.filter(inCatalog);
+          const lastOwned = owned.length ? owned[owned.length - 1].release_date : null;
+          const firstOwned = owned.length ? owned[0].release_date : null;
+          for (const p of parts) {
+            if (inCatalog(p)) continue;
+            job.items.push({
+              tmdb_id: p.id,
+              title: p.title,
+              release_date: p.release_date,
+              poster_path: p.poster_path ? `https://image.tmdb.org/t/p/w200${p.poster_path}` : null,
+              collection: collData.name || coll.name,
+              foundVia: movie.title,
+              kind: lastOwned && p.release_date > lastOwned ? 'continuacao'
+                : firstOwned && p.release_date < firstOwned ? 'anterior' : 'meio',
             });
-            parts = collData.parts || [];
-            collectionCache.set(coll.id, parts);
-          }
-          const missing = parts.filter(p =>
-            !ourTmdbIds.has(String(p.id)) &&
-            p.release_date && p.release_date <= today
-          );
-          for (const m of missing) {
-            if (!job.items.some(i => i.tmdb_id === m.id)) {
-              job.items.push({
-                tmdb_id: m.id, title: m.title, release_date: m.release_date,
-                poster_path: m.poster_path ? `https://image.tmdb.org/t/p/w200${m.poster_path}` : null,
-                collection: coll.name, foundVia: movie.title,
-              });
-            }
           }
         }
       } catch (e) {
+        job.errors++;
         console.error(`[missing-sequels] erro em "${movie.title}" (tmdb ${movie.tmdb_id}):`, e.message);
       }
       job.done++;
       await sleep(260);
     }
+    const order = { continuacao: 0, meio: 1, anterior: 2 };
+    job.items.sort((a, b) => order[a.kind] - order[b.kind] || b.release_date.localeCompare(a.release_date));
     job.running = false;
     console.log(`[missing-sequels] Concluído: ${job.items.length} filme(s) faltando`);
   })();
 });
 
-// Séries com temporada (anterior ou seguinte) já lançada no TMDB mas que
-// ainda não tem nenhum episódio no catálogo.
+// Séries com temporada OU episódio já lançado no TMDB que ainda não está no
+// catálogo (temporada inteira faltando, ou episódios faltando dentro dela).
 router.post('/reports/missing-seasons', async (req, res) => {
-  const { supabase } = require('../services/supabase');
-  const axios = require('axios');
-  const TMDB_API_KEY = process.env.TMDB_API_KEY;
-  const TMDB_BASE = 'https://api.themoviedb.org/3';
-
-  const { data: seriesList, error } = await supabase
-    .from('series').select('id, title, tmdb_id').not('tmdb_id', 'is', null).eq('is_active', true);
+  const { data: seriesList, error } = await fetchAll(() => supabase
+    .from('series').select('id, title, tmdb_id').not('tmdb_id', 'is', null).eq('is_active', true).order('id'));
   if (error) return res.status(500).json({ error: error.message });
 
-  const { data: epRows, error: epErr } = await supabase.from('episodes').select('series_id, season_number');
+  // Todos os episódios (antes vinha só 1000 de 3500+ e acusava temporada faltando sem faltar)
+  const { data: epRows, error: epErr } = await fetchAll(() => supabase
+    .from('episodes').select('series_id, season_number, episode_number').order('id'));
   if (epErr) return res.status(500).json({ error: epErr.message });
-  const seasonsBySeries = new Map();
-  for (const e of epRows || []) {
-    if (!seasonsBySeries.has(e.series_id)) seasonsBySeries.set(e.series_id, new Set());
-    seasonsBySeries.get(e.series_id).add(e.season_number);
+  const epsBySeries = new Map(); // series_id -> Map(season -> Set(ep))
+  for (const e of epRows) {
+    if (!epsBySeries.has(e.series_id)) epsBySeries.set(e.series_id, new Map());
+    const m = epsBySeries.get(e.series_id);
+    if (!m.has(e.season_number)) m.set(e.season_number, new Set());
+    m.get(e.season_number).add(e.episode_number);
   }
 
   const jobId = `mss_${Date.now()}`;
-  reportJobs.set(jobId, { total: seriesList.length, done: 0, running: true, items: [] });
+  reportJobs.set(jobId, { total: seriesList.length, done: 0, running: true, items: [], errors: 0 });
   res.json({ ok: true, jobId, total: seriesList.length });
 
   (async () => {
@@ -1965,34 +2003,56 @@ router.post('/reports/missing-seasons', async (req, res) => {
 
     for (const serie of seriesList) {
       try {
-        const { data: details } = await axios.get(`${TMDB_BASE}/tv/${serie.tmdb_id}`, {
-          params: { api_key: TMDB_API_KEY, language: 'pt-BR' }, timeout: 10000,
-        });
-        const haveSeasons = seasonsBySeries.get(serie.id) || new Set();
-        const airedSeasons = (details.seasons || [])
-          .filter(s => s.season_number > 0 && s.air_date && s.air_date <= today)
-          .map(s => s.season_number);
-        const missingSeasons = airedSeasons.filter(n => !haveSeasons.has(n)).sort((a, b) => a - b);
-        if (missingSeasons.length > 0) {
-          const haveList = [...haveSeasons].sort((a, b) => a - b);
+        const details = await tmdbGet(`/tv/${serie.tmdb_id}`);
+        const have = epsBySeries.get(serie.id) || new Map();
+        const haveSeasons = [...have.keys()].filter(n => n > 0).sort((a, b) => a - b);
+        const aired = (details.seasons || [])
+          .filter(s => s.season_number > 0 && s.air_date && s.air_date <= today && s.episode_count > 0)
+          .sort((a, b) => a.season_number - b.season_number);
+
+        const missingSeasons = [];
+        const partialSeasons = []; // { season, have, aired, missing: [eps] }
+        for (const s of aired) {
+          const got = have.get(s.season_number);
+          if (!got || got.size === 0) { missingSeasons.push(s.season_number); continue; }
+          if (got.size >= s.episode_count) continue;
+          // Tem menos episódios que o TMDB: confere quais já foram ao ar
+          await sleep(260);
+          const sd = await tmdbGet(`/tv/${serie.tmdb_id}/season/${s.season_number}`);
+          const airedEps = (sd.episodes || []).filter(e => e.air_date && e.air_date <= today).map(e => e.episode_number);
+          const missing = airedEps.filter(n => !got.has(n));
+          if (missing.length) {
+            partialSeasons.push({ season: s.season_number, have: got.size, aired: airedEps.length, missing });
+          }
+        }
+
+        if (missingSeasons.length || partialSeasons.length) {
+          const lo = haveSeasons.length ? haveSeasons[0] : null;
+          const hi = haveSeasons.length ? haveSeasons[haveSeasons.length - 1] : null;
           job.items.push({
-            id: serie.id, title: serie.title,
-            have: haveList, missing: missingSeasons,
-            kind: haveList.length === 0
-              ? 'sem_nenhuma'
-              : missingSeasons.some(n => n < Math.min(...haveList))
-                ? (missingSeasons.some(n => n > Math.max(...haveList)) ? 'ambas' : 'anterior')
-                : 'seguinte',
+            id: serie.id,
+            title: serie.title,
+            have: haveSeasons,
+            missing: missingSeasons,
+            partial: partialSeasons,
+            missingEpisodes: partialSeasons.reduce((n, p) => n + p.missing.length, 0),
+            kind: !missingSeasons.length ? 'episodios'
+              : haveSeasons.length === 0 ? 'sem_nenhuma'
+              : missingSeasons.some(n => n < lo)
+                ? (missingSeasons.some(n => n > hi) ? 'ambas' : 'anterior')
+                : missingSeasons.some(n => n > hi) ? 'seguinte' : 'meio',
           });
         }
       } catch (e) {
+        job.errors++;
         console.error(`[missing-seasons] erro em "${serie.title}" (tmdb ${serie.tmdb_id}):`, e.message);
       }
       job.done++;
       await sleep(260);
     }
+    job.items.sort((a, b) => a.title.localeCompare(b.title));
     job.running = false;
-    console.log(`[missing-seasons] Concluído: ${job.items.length} série(s) com temporada faltando`);
+    console.log(`[missing-seasons] Concluído: ${job.items.length} série(s) com temporada/episódio faltando`);
   })();
 });
 
@@ -2067,9 +2127,9 @@ router.post('/series/:id/refresh-episodes', async (req, res) => {
     if (serieErr || !serie) return res.status(404).json({ error: 'Série não encontrada' });
     if (!serie.tmdb_id) return res.status(400).json({ error: 'Série sem tmdb_id — busque no TMDB e salve primeiro' });
 
-    const { data: episodes, error: epErr } = await supabase
+    const { data: episodes, error: epErr } = await fetchAll(() => supabase
       .from('episodes').select('id, season_number, episode_number')
-      .eq('series_id', serie.id).order('season_number').order('episode_number');
+      .eq('series_id', serie.id).order('season_number').order('episode_number'));
     if (epErr) throw epErr;
     if (!episodes || episodes.length === 0) {
       return res.json({ ok: true, jobId: null, total: 0, message: 'Nenhum episódio cadastrado.' });
@@ -2107,6 +2167,165 @@ router.post('/series/:id/refresh-episodes', async (req, res) => {
     })();
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Reorganizar episódios com numeração absoluta (ex.: One Piece) ──────────
+// Animes longos vêm com o episódio "absoluto" no nome do arquivo (ep 1 a
+// 1100+, tudo temporada 1) e antes o importador só lia 2 dígitos — "S01E062"
+// virava E06. Aqui relemos o nome de cada arquivo já cadastrado, convertemos
+// pra temporada/episódio do TMDB e movemos o vídeo pro lugar certo.
+const EP_FILE_FIELDS = ['file_dubbing', 'file_subtitled', 'file_cinema', 'file_color', 'file_bw'];
+
+async function planRenumber(seriesId) {
+  const { extractInfo, resolveEpisodeNumber, getDetails } = require('../../tmdb-bot');
+  const { data: serie, error: sErr } = await supabase
+    .from('series').select('id, title, tmdb_id').eq('id', seriesId).single();
+  if (sErr || !serie) throw Object.assign(new Error('Série não encontrada'), { status: 404 });
+  if (!serie.tmdb_id) throw Object.assign(new Error('Série sem tmdb_id — busque no TMDB e salve primeiro'), { status: 400 });
+
+  const details = await getDetails(serie.tmdb_id, 'series');
+  const { data: episodes, error } = await fetchAll(() => supabase
+    .from('episodes').select(`id, season_number, episode_number, ${EP_FILE_FIELDS.join(', ')}`)
+    .eq('series_id', seriesId).order('id'));
+  if (error) throw error;
+
+  const moves = [];       // { from:{season,episode,id}, to:{season,episode}, field, url, file }
+  const unknown = [];     // arquivos sem número de episódio no nome
+  for (const ep of episodes || []) {
+    for (const field of EP_FILE_FIELDS) {
+      const url = ep[field];
+      if (!url) continue;
+      const file = decodeURIComponent(String(url).split('/').pop() || '');
+      const info = extractInfo(file);
+      let target = null;
+      if (info.episode) {
+        target = resolveEpisodeNumber(details, info.season, info.episode);
+      } else if (ep.season_number === 1) {
+        // Sem número no nome: se o próprio registro está "fora" da temporada 1
+        // do TMDB (ex.: T1E200), trata o número dele como absoluto.
+        const r = resolveEpisodeNumber(details, 1, ep.episode_number);
+        if (r.absolute) target = r;
+      }
+      if (!target) { if (!info.episode) unknown.push({ season: ep.season_number, episode: ep.episode_number, file }); continue; }
+      if (target.season !== ep.season_number || target.episode !== ep.episode_number) {
+        moves.push({
+          from: { id: ep.id, season: ep.season_number, episode: ep.episode_number },
+          to: { season: target.season, episode: target.episode },
+          field, url, file,
+        });
+      }
+    }
+  }
+  // Dois arquivos indo pro mesmo lugar/versão = conflito (não move nenhum dos dois)
+  const keyOf = m => `${m.to.season}-${m.to.episode}-${m.field}`;
+  const count = {};
+  moves.forEach(m => { count[keyOf(m)] = (count[keyOf(m)] || 0) + 1; });
+  const conflicts = moves.filter(m => count[keyOf(m)] > 1);
+  const okMoves = moves.filter(m => count[keyOf(m)] === 1);
+  return { serie, details, episodes: episodes || [], moves: okMoves, conflicts, unknown };
+}
+
+router.get('/series/:id/renumber-preview', async (req, res) => {
+  try {
+    const plan = await planRenumber(req.params.id);
+    res.json({
+      total: plan.episodes.length,
+      moves: plan.moves.map(m => ({ from: m.from, to: m.to, field: m.field, file: m.file })),
+      conflicts: plan.conflicts.map(m => ({ from: m.from, to: m.to, field: m.field, file: m.file })),
+      unknownCount: plan.unknown.length,
+    });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+router.post('/series/:id/renumber-apply', async (req, res) => {
+  try {
+    const plan = await planRenumber(req.params.id);
+    const jobId = `renumber_${Date.now()}`;
+    const job = { total: plan.moves.length, done: 0, errors: 0, running: true, lastError: '', phase: 'moving' };
+    episodeRefreshJobs.set(jobId, job);
+    res.json({ ok: true, jobId, total: plan.moves.length });
+
+    (async () => {
+      const { getEpisodeDetails } = require('../services/tmdb');
+      const TMDB_IMG = 'https://image.tmdb.org/t/p/w500';
+      const sourceIds = new Set();
+      const targets = new Map(); // "s-e" -> {season, episode}
+
+      // 1) Move os arquivos em duas fases: primeiro limpa TODAS as origens, só
+      // depois grava os destinos — senão um arquivo que acabou de chegar em
+      // T2E1 seria apagado quando o vídeo antigo de T2E1 fosse movido adiante.
+      for (const m of plan.moves) {
+        try {
+          await supabase.from('episodes').update({ [m.field]: null }).eq('id', m.from.id);
+          sourceIds.add(m.from.id);
+        } catch (e) {
+          m.failed = true;
+          job.errors++;
+          job.lastError = `${m.file}: ${e.message?.slice(0, 100)}`;
+        }
+      }
+      for (const m of plan.moves) {
+        if (m.failed) continue;
+        try {
+          const { data: existing } = await supabase.from('episodes').select('id')
+            .eq('series_id', plan.serie.id).eq('season_number', m.to.season).eq('episode_number', m.to.episode).maybeSingle();
+          if (existing) {
+            await supabase.from('episodes').update({ [m.field]: m.url }).eq('id', existing.id);
+          } else {
+            await supabase.from('episodes').insert({
+              series_id: plan.serie.id, season_number: m.to.season, episode_number: m.to.episode,
+              [m.field]: m.url, is_active: true,
+            });
+          }
+          targets.set(`${m.to.season}-${m.to.episode}`, m.to);
+          job.done++;
+        } catch (e) {
+          job.errors++;
+          job.lastError = `${m.file}: ${e.message?.slice(0, 100)}`;
+        }
+      }
+
+      // 2) Apaga registros que ficaram sem nenhum vídeo
+      for (const id of sourceIds) {
+        const { data: row } = await supabase.from('episodes').select(`id, ${EP_FILE_FIELDS.join(', ')}`).eq('id', id).maybeSingle();
+        if (row && !EP_FILE_FIELDS.some(f => row[f])) {
+          await supabase.from('episodes').delete().eq('id', id);
+        }
+      }
+
+      // 3) Nome/sinopse/imagem do TMDB de TODOS os episódios da série
+      job.phase = 'metadata';
+      const { data: all } = await fetchAll(() => supabase.from('episodes').select('id, season_number, episode_number').eq('series_id', plan.serie.id).order('id'));
+      job.total = (all || []).length;
+      job.done = 0;
+      for (const ep of all || []) {
+        try {
+          const d = await getEpisodeDetails(plan.serie.tmdb_id, ep.season_number, ep.episode_number);
+          if (d && !d.status_code) {
+            await supabase.from('episodes').update({
+              title: d.name || null,
+              synopsis: d.overview || null,
+              thumbnail_url: d.still_path ? `${TMDB_IMG}${d.still_path}` : null,
+              duration: d.runtime || null,
+              air_date: d.air_date || null,
+              tmdb_episode_id: d.id || null,
+            }).eq('id', ep.id);
+          }
+        } catch (e) {
+          // episódio que não existe no TMDB (ex.: mais novo que a base) — segue
+        }
+        job.done++;
+        await new Promise(r => setTimeout(r, 260));
+      }
+      await supabase.from('series').update({ total_seasons: plan.details.number_of_seasons || null }).eq('id', plan.serie.id);
+      job.running = false;
+      console.log(`[renumber] "${plan.serie.title}": ${plan.moves.length} arquivo(s) movido(s), ${job.errors} erro(s)`);
+    })();
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 

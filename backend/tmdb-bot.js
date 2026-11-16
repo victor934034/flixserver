@@ -8,20 +8,22 @@ const TMDB_BASE = 'https://api.themoviedb.org/3';
 const TMDB_IMG = 'https://image.tmdb.org/t/p/w500';
 const TMDB_BACKDROP = 'https://image.tmdb.org/t/p/w1280';
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
-);
+const supabase = process.env.SUPABASE_URL
+  ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
+  : null;
+
+// Episódio sem temporada (numeração absoluta de anime, ex: One Piece):
+// "One Piece EP 062", "One.Piece.Episodio.1071", "Naruto - Episode 12"
+const ABSOLUTE_RE = /(?:^|[\s._\-\[(])(?:ep|eps|epis[oó]dio|episode)[\s._\-#]*(\d{1,4})(?![\dx])/i;
 
 function detectType(filename) {
   const seriePatterns = [
-    /s\d{1,2}e\d{1,2}/i,
-    /\d{1,2}x\d{1,2}/i,
-    /t\d{1,2}e\d{1,2}/i,
+    /s\d{1,2}[\s._-]?e\d{1,4}/i,
+    /\d{1,2}x\d{1,4}/i,
+    /t\d{1,2}[\s._-]?e\d{1,4}/i,
     /temporada[\s._]\d/i,
     /season[\s._]\d/i,
-    /episodio[\s._]\d/i,
-    /episode[\s._]\d/i,
+    ABSOLUTE_RE,
   ];
   const name = filename.toLowerCase();
   return seriePatterns.some(p => p.test(name)) ? 'series' : 'movie';
@@ -35,20 +37,27 @@ function extractInfo(filename) {
   let year = null;
 
   if (type === 'series') {
+    // Episódio aceita até 4 dígitos (antes eram 2: "S01E062" virava E06 e
+    // sobrescrevia o episódio 6 — quebrava animes longos como One Piece)
     const match =
-      name.match(/[Ss](\d{1,2})[Ee](\d{1,2})/) ||
-      name.match(/(\d{1,2})x(\d{1,2})/i) ||
-      name.match(/[Tt](\d{1,2})[Ee](\d{1,2})/);
+      name.match(/[Ss](\d{1,2})[\s._-]?[Ee](\d{1,4})/) ||
+      name.match(/(\d{1,2})x(\d{1,4})/i) ||
+      name.match(/[Tt](\d{1,2})[\s._-]?[Ee](\d{1,4})/);
+    const abs = !match && name.match(ABSOLUTE_RE);
 
     if (match) {
       season = parseInt(match[1]);
       episode = parseInt(match[2]);
       // Cut everything from S01E02 marker — only series title remains
-      const markerIdx = name.search(/[Ss]\d{1,2}[Ee]\d{1,2}|[Tt]\d{1,2}[Ee]\d{1,2}|\d{1,2}x\d{1,2}/i);
+      const markerIdx = name.search(/[Ss]\d{1,2}[\s._-]?[Ee]\d{1,4}|[Tt]\d{1,2}[\s._-]?[Ee]\d{1,4}|\d{1,2}x\d{1,4}/i);
       name = name.substring(0, markerIdx);
       // Remove "EP" / "EP." / "Episodio" que fica logo antes do marcador
       // Ex: "Chicago.P.D.Distrito.21.EP." → "Chicago.P.D.Distrito.21."
       name = name.replace(/[\s._-]*\bep(?:is[oó]dio)?\b[\s._-]*$/i, '');
+    } else if (abs) {
+      season = null; // resolvido depois pela lista de temporadas do TMDB
+      episode = parseInt(abs[1]);
+      name = name.substring(0, abs.index);
     }
   }
 
@@ -176,6 +185,36 @@ async function getEpisodeDetails(tmdbId, season, episode) {
   } catch {
     return null;
   }
+}
+
+/**
+ * Converte (temporada, episódio) do arquivo pra numeração do TMDB.
+ * Animes como One Piece costumam vir com numeração ABSOLUTA (ep 1 a 1100+,
+ * tudo "temporada 1"), mas no TMDB a série é dividida em temporadas/arcos
+ * (S1 = 61 eps, S2 = 16 eps...). Sem converter, o ep 62 virava "S1E62", que
+ * não existe no TMDB — ficava sem nome, sem imagem e na temporada errada.
+ *
+ * Trata como absoluto quando: não há temporada no nome, ou é temporada 1 com
+ * número maior que a quantidade de episódios da temporada 1 no TMDB.
+ */
+function resolveEpisodeNumber(details, season, episode) {
+  const seasons = (details?.seasons || [])
+    .filter(s => s.season_number > 0 && s.episode_count > 0)
+    .sort((a, b) => a.season_number - b.season_number);
+  if (!episode || seasons.length === 0) return { season: season || 1, episode, absolute: false };
+
+  const current = seasons.find(s => s.season_number === (season || 1));
+  const isAbsolute = !season || (season === 1 && current && episode > current.episode_count);
+  if (!isAbsolute) return { season, episode, absolute: false };
+
+  let remaining = episode;
+  for (const s of seasons) {
+    if (remaining <= s.episode_count) return { season: s.season_number, episode: remaining, absolute: true };
+    remaining -= s.episode_count;
+  }
+  // Episódio mais novo que a contagem do TMDB: entra no fim da última temporada
+  const last = seasons[seasons.length - 1];
+  return { season: last.season_number, episode: last.episode_count + remaining, absolute: true };
 }
 
 async function saveMovie(details, fileUrl, version, dual = false) {
@@ -311,14 +350,20 @@ async function processFiles(fileList) {
           .catch(e => console.warn('  [subtitles] movie:', e.message));
       } else {
         const seriesRecord = await saveSeries(details);
-        if (season && episode) {
-          const savedEp = await saveEpisode(seriesRecord.id, details.id, season, episode, fileUrl, version, dual);
+        let finalSeason = season;
+        let finalEpisode = episode;
+        if (episode) {
+          const r = resolveEpisodeNumber(details, season, episode);
+          finalSeason = r.season;
+          finalEpisode = r.episode;
+          if (r.absolute) console.log(`  Numeração absoluta: ep ${episode} → T${finalSeason}E${finalEpisode}`);
+          const savedEp = await saveEpisode(seriesRecord.id, details.id, finalSeason, finalEpisode, fileUrl, version, dual);
           autoFetchSubtitles({
             movieId: savedEp.id, tmdbId: details.id, movieType: 'episode',
-            seasonNumber: season, episodeNumber: episode,
+            seasonNumber: finalSeason, episodeNumber: finalEpisode,
           }).catch(e => console.warn('  [subtitles] episode:', e.message));
         }
-        report.success.push({ filename, fileUrl, type: 'series', title: details.name, seriesId: seriesRecord.id, season, episode, dual });
+        report.success.push({ filename, fileUrl, type: 'series', title: details.name, seriesId: seriesRecord.id, season: finalSeason, episode: finalEpisode, dual });
       }
 
       await new Promise(r => setTimeout(r, 260)); // respeita rate limit TMDB
@@ -334,7 +379,7 @@ async function processFiles(fileList) {
   return report;
 }
 
-module.exports = { processFiles, detectType, extractInfo };
+module.exports = { processFiles, detectType, extractInfo, resolveEpisodeNumber, getDetails, getEpisodeDetails };
 
 // Uso via CLI: node tmdb-bot.js "URL1" "URL2"
 if (require.main === module) {

@@ -6,6 +6,9 @@ export const CHANGELOG = [
   {
     version: '1.0.9',
     items: [
+      'Novo chat ao vivo com o suporte (Perfil → Falar com o suporte): mande mensagens, fotos, vídeos e arquivos.',
+      'Botão do grupo no Telegram no Perfil.',
+      'Séries com nome das temporadas (ex.: One Piece mostra "Saga East Blue", "Arco Alabasta"...).',
       'Sem internet: agora dá pra abrir o app e assistir os downloads direto, sem travar na escolha de perfil.',
       'Minha Lista: os títulos ficam lado a lado em grade, ocupando melhor a tela.',
       'Corrigido: remover da Minha Lista não apagava de verdade (o título voltava e o coração continuava vermelho).',

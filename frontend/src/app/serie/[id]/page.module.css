@@ -109,3 +109,14 @@
   display: flex; align-items: center; justify-content: center;
   min-height: 60vh; font-size: 1.2rem; color: var(--text-secondary);
 }
+
+.seasonSelect {
+  background: #1a1a1a; color: #fff; border: 1px solid #333; border-radius: 8px;
+  padding: 0.6rem 0.9rem; font-size: 0.95rem; font-weight: 600; margin-bottom: 1rem;
+  max-width: 100%; cursor: pointer;
+}
+.seasonOverview {
+  color: var(--text-muted, #aaa); font-size: 0.85rem; line-height: 1.5;
+  margin: 0 0 1.2rem; max-width: 900px;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}

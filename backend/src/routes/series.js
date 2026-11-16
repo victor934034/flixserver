@@ -1,5 +1,5 @@
 const router = require('express').Router();
-const { supabase } = require('../services/supabase');
+const { supabase, fetchAll } = require('../services/supabase');
 const { optionalAuth } = require('../middleware/auth');
 const { searchIds, orderByIds } = require('../services/titleSearch');
 
@@ -86,17 +86,17 @@ router.get('/:id', optionalAuth, async (req, res) => {
 router.get('/:id/episodes', async (req, res) => {
   try {
     const { season } = req.query;
-    let query = supabase
-      .from('episodes')
-      .select('id, season_number, episode_number, title, synopsis, duration, thumbnail_url, file_dubbing, file_subtitled, file_cinema, file_color, file_bw, subtitle_pt, subtitle_en, subtitle_es, air_date, views')
-      .eq('series_id', req.params.id)
-      .eq('is_active', true)
-      .order('season_number')
-      .order('episode_number');
-
-    if (season) query = query.eq('season_number', Number(season));
-
-    const { data, error } = await query;
+    const { data, error } = await fetchAll(() => {
+      let query = supabase
+        .from('episodes')
+        .select('id, season_number, episode_number, title, synopsis, duration, thumbnail_url, file_dubbing, file_subtitled, file_cinema, file_color, file_bw, subtitle_pt, subtitle_en, subtitle_es, air_date, views')
+        .eq('series_id', req.params.id)
+        .eq('is_active', true)
+        .order('season_number')
+        .order('episode_number');
+      if (season) query = query.eq('season_number', Number(season));
+      return query;
+    });
     if (error) throw error;
     res.json(data);
   } catch (err) {
@@ -133,6 +133,37 @@ router.get('/section/popular', async (req, res) => {
     res.json(await attachHasBw(data));
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Nomes e imagens das temporadas vindos do TMDB (ex.: One Piece mostra
+// "Saga East Blue", "Arco Alabasta"... em vez de "Temporada 1, 2...").
+// Cache em memória de 12h por série.
+const seasonsCache = new Map();
+router.get('/:id/seasons', async (req, res) => {
+  try {
+    const hit = seasonsCache.get(req.params.id);
+    if (hit && Date.now() - hit.at < 12 * 3600 * 1000) return res.json(hit.data);
+
+    const { data: serie } = await supabase.from('series').select('tmdb_id').eq('id', req.params.id).single();
+    if (!serie?.tmdb_id) return res.json([]);
+
+    const axios = require('axios');
+    const { data } = await axios.get(`https://api.themoviedb.org/3/tv/${serie.tmdb_id}`, {
+      params: { api_key: process.env.TMDB_API_KEY, language: 'pt-BR' }, timeout: 10_000,
+    });
+    const list = (data.seasons || []).map(s => ({
+      season_number: s.season_number,
+      name: s.name || (s.season_number === 0 ? 'Especiais' : `Temporada ${s.season_number}`),
+      episode_count: s.episode_count,
+      overview: s.overview || '',
+      air_date: s.air_date,
+      poster_url: s.poster_path ? `https://image.tmdb.org/t/p/w300${s.poster_path}` : null,
+    }));
+    seasonsCache.set(req.params.id, { at: Date.now(), data: list });
+    res.json(list);
+  } catch (err) {
+    res.json([]); // sem nomes, o app cai no "Temporada N"
   }
 });
 

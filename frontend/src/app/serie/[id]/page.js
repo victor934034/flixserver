@@ -23,6 +23,7 @@ export default function SeriePage() {
   const [watchlistId, setWatchlistId] = useState(null);
   const [epProgress, setEpProgress] = useState({}); // episode_id -> segundos assistidos
   const [nextUp, setNextUp] = useState(null); // episódio sugerido pro botão "Assistir"
+  const [seasonInfo, setSeasonInfo] = useState({}); // season_number -> { name, overview, poster_url }
 
   useEffect(() => {
     api.get(`/series/${id}`)
@@ -30,6 +31,14 @@ export default function SeriePage() {
       .catch(() => setError('Série não encontrada'));
     api.get(`/series/${id}/episodes`)
       .then(r => setEpisodes(r.data || []))
+      .catch(() => {});
+    // Nomes das temporadas no TMDB (ex.: One Piece: "Saga East Blue", "Arco Alabasta")
+    api.get(`/series/${id}/seasons`)
+      .then(r => {
+        const map = {};
+        (r.data || []).forEach(x => { map[x.season_number] = x; });
+        setSeasonInfo(map);
+      })
       .catch(() => {});
 
     if (getToken()) {
@@ -96,6 +105,12 @@ export default function SeriePage() {
 
   const seasons = [...new Set(episodes.map(e => e.season_number))].sort((a, b) => a - b);
   const currentEps = episodes.filter(e => e.season_number === season);
+  const seasonLabel = (n) => {
+    const name = seasonInfo[n]?.name;
+    if (!name || /^(temporada|season)\s*\d+$/i.test(name.trim())) return n === 0 ? 'Especiais' : `Temporada ${n}`;
+    return `${n > 0 ? `T${n} · ` : ''}${name}`;
+  };
+  const currentSeasonInfo = seasonInfo[season];
 
   return (
     <>
@@ -159,17 +174,34 @@ export default function SeriePage() {
             </div>
 
             <div className={styles.episodesSection}>
-              <div className={styles.seasonTabs}>
-                {seasons.map(s => (
-                  <button
-                    key={s}
-                    className={`${styles.seasonTab} ${season === s ? styles.activeTab : ''}`}
-                    onClick={() => setSeason(s)}
-                  >
-                    Temporada {s}
-                  </button>
-                ))}
-              </div>
+              {seasons.length > 6 ? (
+                <select
+                  className={styles.seasonSelect}
+                  value={season}
+                  onChange={e => setSeason(Number(e.target.value))}
+                >
+                  {seasons.map(s => (
+                    <option key={s} value={s}>
+                      {seasonLabel(s)} ({episodes.filter(e => e.season_number === s).length} ep)
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <div className={styles.seasonTabs}>
+                  {seasons.map(s => (
+                    <button
+                      key={s}
+                      className={`${styles.seasonTab} ${season === s ? styles.activeTab : ''}`}
+                      onClick={() => setSeason(s)}
+                    >
+                      {seasonLabel(s)}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {currentSeasonInfo?.overview && seasonLabel(season) !== `Temporada ${season}` && (
+                <p className={styles.seasonOverview}>{currentSeasonInfo.overview}</p>
+              )}
 
               {currentEps.length === 0 ? (
                 <p className={styles.noEps}>Nenhum episódio disponível nessa temporada.</p>

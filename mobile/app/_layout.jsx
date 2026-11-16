@@ -111,6 +111,8 @@ function handleNotificationTap(data, router) {
     else if (screen === 'serie' && id) router.push(`/serie/${id}`);
     else if (screen === 'subscription') router.push('/subscription');
     else if (screen === 'iptv') router.push('/(tabs)/iptv');
+    else if (screen === 'chat') router.push('/chat');
+    else if (screen === 'admin-chat') router.push(data.userId ? `/admin-chat?userId=${data.userId}` : '/admin-chat');
     else if (screen === 'home') router.replace('/(tabs)');
   } catch {}
 }
@@ -251,6 +253,8 @@ function RootLayout() {
                   <Stack.Screen name="filme/[id]" />
                   <Stack.Screen name="serie/[id]" />
                   <Stack.Screen name="historico" />
+                  <Stack.Screen name="chat" />
+                  <Stack.Screen name="admin-chat" />
                   <Stack.Screen name="parental-controls" />
                   <Stack.Screen name="sugestao" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
                   <Stack.Screen name="player" options={{ animation: 'fade', gestureEnabled: false, orientation: 'landscape' }} />

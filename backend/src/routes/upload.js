@@ -1,4 +1,5 @@
 const router = require('express').Router();
+const { fetchAll } = require('../services/supabase');
 const multer = require('multer');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
@@ -998,10 +999,10 @@ router.post('/fix-series-faststart', async (req, res) => {
     // Preferir seriesIds (selecionado via busca na UI - sem ambiguidade).
     // seriesTitles fica so pra compatibilidade com o formato antigo.
     if (hasIds) {
-      const { data: eps, error: epsErr } = await supabase
+      const { data: eps, error: epsErr } = await fetchAll(() => supabase
         .from('episodes')
         .select(['id', 'series_id', ...EPISODE_FIELDS].join(', '))
-        .in('series_id', seriesIdsInput);
+        .in('series_id', seriesIdsInput).order('id'));
       if (epsErr) throw new Error(`Supabase episodes: ${epsErr.message}`);
       for (const row of eps || []) {
         for (const f of EPISODE_FIELDS) {
@@ -1018,10 +1019,10 @@ router.post('/fix-series-faststart', async (req, res) => {
         if (!seriesRows || seriesRows.length === 0) { notFound.push(title); continue; }
 
         const seriesIds = seriesRows.map(s => s.id);
-        const { data: eps, error: epsErr } = await supabase
+        const { data: eps, error: epsErr } = await fetchAll(() => supabase
           .from('episodes')
           .select(['id', 'series_id', ...EPISODE_FIELDS].join(', '))
-          .in('series_id', seriesIds);
+          .in('series_id', seriesIds).order('id'));
         if (epsErr) throw new Error(`Supabase episodes: ${epsErr.message}`);
 
         for (const row of eps || []) {
@@ -1122,10 +1123,10 @@ router.post('/fix-series-audio', async (req, res) => {
   const EPISODE_FIELDS = ['file_dubbing', 'file_subtitled', 'file_cinema'];
   let allItems = [];
   try {
-    const { data: eps, error: epsErr } = await supabase
+    const { data: eps, error: epsErr } = await fetchAll(() => supabase
       .from('episodes')
       .select(['id', 'series_id', ...EPISODE_FIELDS].join(', '))
-      .in('series_id', seriesIdsInput);
+      .in('series_id', seriesIdsInput).order('id'));
     if (epsErr) throw new Error(`Supabase episodes: ${epsErr.message}`);
     for (const row of eps || []) {
       for (const f of EPISODE_FIELDS) {

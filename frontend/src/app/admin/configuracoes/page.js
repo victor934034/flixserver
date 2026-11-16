@@ -50,6 +50,10 @@ export default function Configuracoes() {
   const [seriesAudioFixProgress, setSeriesAudioFixProgress] = useState(null);
   const seriesAudioFixPollRef = useRef(null);
 
+  const [telegramLink, setTelegramLink] = useState('');
+  const [telegramMsg, setTelegramMsg] = useState('');
+  const [telegramSaving, setTelegramSaving] = useState(false);
+
   const [urlFixRunning, setUrlFixRunning] = useState(false);
   const [urlFixMsg, setUrlFixMsg] = useState('');
 
@@ -130,7 +134,7 @@ export default function Configuracoes() {
   const [verConfirm, setVerConfirm] = useState(false);
 
   useEffect(() => {
-    api.get('/settings').then(r => setSettings(r.data)).finally(() => setLoading(false));
+    api.get('/settings').then(r => { setSettings(r.data); setTelegramLink(r.data?.telegram_link || ''); }).finally(() => setLoading(false));
     api.get('/payments/plans/all')
       .then(r => setPlans(r.data?.length ? r.data : DEFAULT_PLANS))
       .catch(() => setPlans(DEFAULT_PLANS))
@@ -172,6 +176,25 @@ export default function Configuracoes() {
       setMsg('Erro ao enviar notificação');
     } finally {
       setSaving('');
+    }
+  }
+
+  async function saveTelegram() {
+    const link = telegramLink.trim();
+    if (link && !/^https?:\/\/(t\.me|telegram\.me|telegram\.dog)\//i.test(link)) {
+      setTelegramMsg('Erro: use um link do Telegram (ex.: https://t.me/+abc123)');
+      return;
+    }
+    setTelegramSaving(true);
+    setTelegramMsg('');
+    try {
+      await api.put('/settings/telegram_link', { value: link });
+      setSettings(prev => ({ ...prev, telegram_link: link }));
+      setTelegramMsg(link ? 'Salvo! O botão já aparece no app e no site.' : 'Link removido — o botão do Telegram foi escondido.');
+    } catch (e) {
+      setTelegramMsg('Erro: ' + (e.response?.data?.error || e.message));
+    } finally {
+      setTelegramSaving(false);
     }
   }
 
@@ -230,6 +253,36 @@ export default function Configuracoes() {
             </button>
           </div>
           {msg && <p style={{ color: msg.startsWith('Erro') ? '#ff6b6b' : '#4caf50', fontSize: 13, margin: 0 }}>{msg}</p>}
+        </div>
+      </section>
+
+      {/* ── GRUPO DO TELEGRAM ── */}
+      <section style={{ marginBottom: 40 }}>
+        <h3 style={{ color: '#fff', marginBottom: 16 }}>Grupo do Telegram</h3>
+        <div style={{ background: '#1a1a1a', borderRadius: 12, padding: 24, border: '1px solid #2a2a2a' }}>
+          <p style={{ color: '#888', fontSize: 13, margin: '0 0 12px' }}>
+            Link de convite do grupo. Aparece como botão no app (Perfil → Suporte) e no site (Suporte).
+            Se o link expirar, é só colar o novo aqui — não precisa atualizar o app. Deixe vazio para esconder o botão.
+          </p>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <input
+              value={telegramLink}
+              onChange={e => setTelegramLink(e.target.value)}
+              placeholder="https://t.me/+xxxxxxxx"
+              style={{ flex: 1, minWidth: 240, padding: '10px 12px', background: '#111', border: '1px solid #333', borderRadius: 8, color: '#fff', fontSize: 14 }}
+            />
+            <button
+              onClick={saveTelegram}
+              disabled={telegramSaving}
+              style={{ padding: '10px 24px', borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: 'pointer', border: 'none', background: '#229ED9', color: '#fff', opacity: telegramSaving ? 0.6 : 1 }}
+            >
+              {telegramSaving ? 'Salvando...' : 'Salvar'}
+            </button>
+            {settings.telegram_link && (
+              <a href={settings.telegram_link} target="_blank" rel="noreferrer" style={{ alignSelf: 'center', color: '#229ED9', fontSize: 13 }}>Testar link</a>
+            )}
+          </div>
+          {telegramMsg && <p style={{ color: telegramMsg.startsWith('Erro') ? '#ff6b6b' : '#4caf50', fontSize: 13, margin: '10px 0 0' }}>{telegramMsg}</p>}
         </div>
       </section>
 

@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Linking, Switch } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -10,6 +10,7 @@ import { useDownloads, fmtBytes } from '../../contexts/DownloadContext';
 import { useParental } from '../../contexts/ParentalContext';
 import CachedImage from '../../components/CachedImage';
 import { usePrefs, setPref } from '../../lib/prefs';
+import api from '../../lib/api';
 
 const APP_VERSION = Constants.expoConfig?.version ?? '1.0.5';
 
@@ -74,6 +75,16 @@ export default function PerfilScreen() {
 
   const plan = formatPlan(user?.plan);
 
+  // Chat de suporte (não lidas) e link do Telegram (configurado no admin)
+  const [chatUnread, setChatUnread] = useState(0);
+  const [adminUnread, setAdminUnread] = useState(0);
+  const [telegram, setTelegram] = useState('');
+  useFocusEffect(useCallback(() => {
+    api.get('/chat/unread').then(r => setChatUnread(r.data?.unread || 0)).catch(() => {});
+    api.get('/settings').then(r => setTelegram(r.data?.telegram_link || '')).catch(() => {});
+    if (user?.is_admin) api.get('/chat/admin/unread').then(r => setAdminUnread(r.data?.unread || 0)).catch(() => {});
+  }, [user?.is_admin]));
+
   return (
     <ScrollView
       style={styles.container}
@@ -112,6 +123,14 @@ export default function PerfilScreen() {
               label="Upload de Vídeo"
               desc="Enviar filme ou série para o servidor"
               onPress={() => router.push('/admin-upload')}
+            />
+            <View style={styles.divider} />
+            <MenuItem
+              icon="chatbubbles-outline"
+              label="Chat ao vivo"
+              desc={adminUnread > 0 ? `${adminUnread} mensagem(ns) não lida(s)` : 'Responder os usuários'}
+              badge={adminUnread}
+              onPress={() => router.push('/admin-chat')}
             />
           </View>
         </View>
@@ -201,6 +220,25 @@ export default function PerfilScreen() {
         <Text style={styles.sectionLabel}>Suporte</Text>
         <View style={styles.card}>
           <MenuItem
+            icon="chatbubble-ellipses-outline"
+            label="Falar com o suporte"
+            desc={chatUnread > 0 ? `${chatUnread} resposta(s) nova(s)` : 'Chat ao vivo · envie fotos, vídeos e arquivos'}
+            badge={chatUnread}
+            onPress={() => router.push('/chat')}
+          />
+          {!!telegram && (
+            <>
+              <View style={styles.divider} />
+              <MenuItem
+                icon="paper-plane-outline"
+                label="Grupo no Telegram"
+                desc="Novidades e comunidade Flixhome"
+                onPress={() => Linking.openURL(telegram)}
+              />
+            </>
+          )}
+          <View style={styles.divider} />
+          <MenuItem
             icon="help-circle-outline"
             label="Ajuda"
             onPress={() => router.push('/ajuda')}
@@ -254,7 +292,7 @@ function ToggleItem({ icon, label, desc, value, onChange }) {
   );
 }
 
-function MenuItem({ icon, label, desc, onPress, disabled }) {
+function MenuItem({ icon, label, desc, onPress, disabled, badge }) {
   return (
     <TouchableOpacity
       style={[styles.menuItem, disabled && styles.menuItemDisabled]}
@@ -268,12 +306,22 @@ function MenuItem({ icon, label, desc, onPress, disabled }) {
         <Text style={[styles.menuLabel, disabled && { color: '#444' }]}>{label}</Text>
         {desc && <Text style={styles.menuDesc}>{desc}</Text>}
       </View>
+      {badge > 0 && (
+        <View style={styles.menuBadge}>
+          <Text style={styles.menuBadgeText}>{badge > 99 ? '99+' : badge}</Text>
+        </View>
+      )}
       <Ionicons name="chevron-forward" size={16} color={disabled ? '#222' : '#333'} />
     </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
+  menuBadge: {
+    minWidth: 20, height: 20, borderRadius: 10, backgroundColor: '#E50914',
+    alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6, marginRight: 6,
+  },
+  menuBadgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
   container: { flex: 1, backgroundColor: '#0a0a0a' },
   header: { alignItems: 'center', paddingBottom: 20, paddingHorizontal: 24 },
   avatar: {

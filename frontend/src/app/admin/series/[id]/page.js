@@ -147,6 +147,12 @@ export default function EditarSerie() {
   const [refreshingEps, setRefreshingEps] = useState(false);
   const [refreshEpsProgress, setRefreshEpsProgress] = useState(null);
   const [refreshEpsMsg, setRefreshEpsMsg] = useState('');
+  // Reorganizar numeração absoluta (One Piece e outros animes longos)
+  const [renumPreview, setRenumPreview] = useState(null);
+  const [renumLoading, setRenumLoading] = useState(false);
+  const [renumRunning, setRenumRunning] = useState(false);
+  const [renumProgress, setRenumProgress] = useState(null);
+  const [renumMsg, setRenumMsg] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -266,6 +272,53 @@ export default function EditarSerie() {
     } catch (err) {
       setRefreshingEps(false);
       setRefreshEpsMsg(err.response?.data?.error || 'Erro ao atualizar episódios');
+    }
+  }
+
+  async function previewRenumber() {
+    if (!form?.tmdb_id) { setRenumMsg('Erro: série sem TMDB ID — busque e salve primeiro'); return; }
+    setRenumLoading(true);
+    setRenumMsg('');
+    setRenumPreview(null);
+    try {
+      const { data } = await api.get(`/admin/series/${id}/renumber-preview`);
+      setRenumPreview(data);
+      if (!data.moves.length) setRenumMsg('✓ Nenhum episódio fora do lugar — tudo já bate com o TMDB. Se faltar nome/imagem, use "Atualizar episódios do TMDB".');
+    } catch (err) {
+      setRenumMsg('Erro: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setRenumLoading(false);
+    }
+  }
+
+  async function applyRenumber() {
+    setRenumRunning(true);
+    setRenumMsg('');
+    try {
+      const { data } = await api.post(`/admin/series/${id}/renumber-apply`);
+      setRenumProgress({ phase: 'moving', total: data.total, done: 0 });
+      const poll = setInterval(async () => {
+        try {
+          const st = await api.get(`/admin/episode-refresh-status?jobId=${data.jobId}`);
+          setRenumProgress({ phase: st.data.phase, total: st.data.total, done: st.data.done });
+          if (!st.data.running) {
+            clearInterval(poll);
+            setRenumRunning(false);
+            setRenumPreview(null);
+            setRenumMsg(st.data.errors
+              ? `Concluído com ${st.data.errors} erro(s)${st.data.lastError ? ': ' + st.data.lastError : ''}`
+              : '✓ Episódios reorganizados e atualizados com nome, imagem e sinopse do TMDB.');
+            loadEpisodes();
+          }
+        } catch {
+          clearInterval(poll);
+          setRenumRunning(false);
+          setRenumMsg('Erro ao verificar progresso.');
+        }
+      }, 2000);
+    } catch (err) {
+      setRenumRunning(false);
+      setRenumMsg('Erro: ' + (err.response?.data?.error || err.message));
     }
   }
 
@@ -554,9 +607,58 @@ export default function EditarSerie() {
                 ? `Atualizando... ${refreshEpsProgress ? `${refreshEpsProgress.done}/${refreshEpsProgress.total}` : ''}`
                 : '↻ Atualizar episódios do TMDB'}
             </button>
+            <button
+              className={f.btnCancel}
+              onClick={previewRenumber}
+              disabled={renumLoading || renumRunning}
+              title="Para animes com numeração absoluta (ex.: One Piece ep 1 a 1100): lê o número no nome de cada arquivo e coloca na temporada/episódio certos do TMDB"
+            >
+              {renumLoading ? 'Analisando...' : '⇅ Reorganizar numeração (anime)'}
+            </button>
             <button className={s.btnAddEp} onClick={startAdd}>+ Adicionar Episódio</button>
           </div>
         </div>
+
+        {(renumPreview?.moves?.length > 0 || renumRunning) && (
+          <div style={{ background: '#141414', border: '1px solid #2a2a2a', borderRadius: 10, padding: 16, marginBottom: 16 }}>
+            {renumRunning ? (
+              <p style={{ color: '#fff', margin: 0 }}>
+                {renumProgress?.phase === 'metadata' ? 'Buscando nome/imagem no TMDB' : 'Movendo arquivos'}
+                {renumProgress ? ` — ${renumProgress.done}/${renumProgress.total}` : ''}...
+              </p>
+            ) : (
+              <>
+                <p style={{ color: '#fff', margin: '0 0 8px', fontWeight: 600 }}>
+                  {renumPreview.moves.length} arquivo(s) serão movidos para a temporada/episódio certos do TMDB
+                  {renumPreview.conflicts.length > 0 && ` · ${renumPreview.conflicts.length} em conflito (não serão movidos)`}
+                </p>
+                <div style={{ maxHeight: 220, overflowY: 'auto', fontSize: 12, color: '#aaa', marginBottom: 12, fontFamily: 'monospace' }}>
+                  {renumPreview.moves.slice(0, 300).map((m, i) => (
+                    <div key={i}>
+                      T{m.from.season}E{String(m.from.episode).padStart(2, '0')} → <span style={{ color: '#4caf50' }}>T{m.to.season}E{String(m.to.episode).padStart(2, '0')}</span>
+                      {'  '}<span style={{ color: '#666' }}>{m.file}</span>
+                    </div>
+                  ))}
+                  {renumPreview.moves.length > 300 && <div>... e mais {renumPreview.moves.length - 300}</div>}
+                  {renumPreview.conflicts.map((m, i) => (
+                    <div key={`c${i}`} style={{ color: '#ff6b6b' }}>
+                      conflito: {m.file} → T{m.to.season}E{m.to.episode}
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className={s.btnAddEp} onClick={applyRenumber}>Aplicar</button>
+                  <button className={f.btnCancel} onClick={() => setRenumPreview(null)}>Cancelar</button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+        {renumMsg && !renumRunning && (
+          <p style={{ color: renumMsg.startsWith('Erro') ? '#ff6b6b' : '#4caf50', fontSize: 13, margin: '0 0 12px' }}>
+            {renumMsg}
+          </p>
+        )}
         {refreshEpsMsg && !refreshingEps && (
           <p style={{ color: refreshEpsMsg.startsWith('✓') ? '#4caf50' : '#ff6b6b', fontSize: 13, margin: '0 0 12px' }}>
             {refreshEpsMsg}

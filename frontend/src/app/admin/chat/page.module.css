@@ -1,0 +1,51 @@
+.page { display: flex; flex-direction: column; height: calc(100vh - 64px); min-height: 500px; }
+.heading { font-size: 1.5rem; font-weight: 700; color: #fff; margin: 0 0 16px; }
+.layout { flex: 1; min-height: 0; display: grid; grid-template-columns: 320px 1fr; gap: 16px; }
+
+.sidebar { display: flex; flex-direction: column; min-height: 0; background: #141414; border: 1px solid #222; border-radius: 12px; overflow: hidden; }
+.search {
+  margin: 10px; padding: 10px 12px; background: #1e1e1e; border: 1px solid #2a2a2a; border-radius: 8px;
+  color: #fff; font-size: 0.88rem; outline: none;
+}
+.search:focus { border-color: #444; }
+.convList { flex: 1; overflow-y: auto; }
+.muted { color: #666; font-size: 0.85rem; text-align: center; padding: 20px; }
+.sectionLabel { color: #888; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 1px; padding: 12px 14px 4px; margin: 0; }
+
+.conv {
+  width: 100%; display: flex; gap: 10px; align-items: center; padding: 10px 14px;
+  background: none; border: none; border-bottom: 1px solid #1c1c1c; cursor: pointer; text-align: left; color: inherit;
+}
+.conv:hover { background: #1a1a1a; }
+.convActive { background: #222 !important; }
+.avatar {
+  flex-shrink: 0; width: 40px; height: 40px; border-radius: 50%; background: #E50914; color: #fff;
+  display: flex; align-items: center; justify-content: center; font-weight: 700;
+}
+.convBody { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.convTop, .convBottom { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.convName { color: #fff; font-weight: 600; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.convTime { color: #666; font-size: 0.72rem; flex-shrink: 0; }
+.convLast { color: #888; font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.badge {
+  flex-shrink: 0; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px;
+  background: #E50914; color: #fff; font-size: 0.72rem; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+
+.thread { display: flex; flex-direction: column; min-height: 0; }
+.threadHead { display: flex; align-items: center; gap: 10px; padding: 0 4px 10px; }
+.threadName { color: #fff; font-weight: 700; }
+.threadEmail { color: #777; font-size: 0.8rem; }
+.back { display: none; background: none; border: none; color: #fff; font-size: 1.3rem; cursor: pointer; }
+.threadBody { flex: 1; min-height: 0; }
+.emptyThread {
+  flex: 1; display: flex; align-items: center; justify-content: center; color: #555;
+  border: 1px dashed #2a2a2a; border-radius: 12px;
+}
+
+@media (max-width: 800px) {
+  .layout { grid-template-columns: 1fr; }
+  .hideOnMobile { display: none; }
+  .back { display: block; }
+}

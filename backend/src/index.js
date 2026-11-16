@@ -28,6 +28,7 @@ const remuxRouter = require('./routes/remux');
 const subtitleRouter = require('./routes/subtitle');
 const collectionsRouter = require('./routes/collections');
 const helpRouter = require('./routes/help');
+const chatRouter = require('./routes/chat');
 
 const REQUIRED_ENV = ['JWT_SECRET', 'SUPABASE_URL', 'SUPABASE_SERVICE_KEY'];
 const missingEnv = REQUIRED_ENV.filter((key) => !process.env[key]);
@@ -97,6 +98,7 @@ app.use('/api/webhook', webhookRouter);
 app.use('/api/cast', castRouter);
 app.use('/api/profiles', profilesRouter);
 app.use('/api/settings', settingsRouter);
+app.use('/api/chat', chatRouter);
 app.use('/api/payments', paymentsRouter);
 app.use('/api/suggestions', suggestionsRouter);
 app.use('/api/streams', streamsRouter);

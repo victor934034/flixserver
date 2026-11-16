@@ -181,3 +181,9 @@
 }
 
 .sugAll:hover { background: rgba(229,9,20,0.1); }
+
+.chatBadge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; padding: 0 5px; margin-left: 5px; border-radius: 9px;
+  background: var(--accent); color: #fff; font-size: 0.68rem; font-weight: 700; vertical-align: middle;
+}

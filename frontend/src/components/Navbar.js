@@ -23,6 +23,7 @@ export default function Navbar() {
   const debounce = useRef(null);
   const wrapRef = useRef(null);
   const { activeProfile } = useProfile();
+  const [chatUnread, setChatUnread] = useState(0);
 
   useEffect(() => {
     getMe().then(setUser).catch(() => setUser(null));
@@ -30,6 +31,16 @@ export default function Navbar() {
     window.addEventListener('scroll', onScroll);
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
+
+  // Respostas do suporte ainda não lidas (badge no link "Suporte")
+  useEffect(() => {
+    if (!user || user._pending) return;
+    let alive = true;
+    const tick = () => api.get('/chat/unread').then(r => { if (alive) setChatUnread(r.data?.unread || 0); }).catch(() => {});
+    tick();
+    const t = setInterval(tick, 30000);
+    return () => { alive = false; clearInterval(t); };
+  }, [user]);
 
   // Close suggestions when clicking outside
   useEffect(() => {
@@ -82,6 +93,11 @@ export default function Navbar() {
         <Link href="/series">Séries</Link>
         <Link href="/cronologias">Cronologias</Link>
         {isLoggedIn && <Link href="/minha-lista">Minha Lista</Link>}
+        {isLoggedIn && (
+          <Link href="/suporte">
+            Suporte{chatUnread > 0 && <span className={styles.chatBadge}>{chatUnread}</span>}
+          </Link>
+        )}
       </div>
 
       <div className={styles.right}>

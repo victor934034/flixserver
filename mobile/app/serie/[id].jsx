@@ -27,6 +27,7 @@ export default function SerieDetail() {
   const [likeData, setLikeData] = useState({ likes: 0, dislikes: 0, userVote: null });
   const [likeLoading, setLikeLoading] = useState(false);
   const [seasonModal, setSeasonModal] = useState(false);
+  const [seasonInfo, setSeasonInfo] = useState({}); // nomes das temporadas no TMDB
   const { getStatus, startDownload, cancelDownload, deleteDownload } = useDownloads();
   const { checkAccess } = useParental();
   const { activeProfile } = useProfile();
@@ -48,6 +49,23 @@ export default function SerieDetail() {
       try { const lr = await api.get(`/likes/series/${id}`); setLikeData(lr.data); } catch {}
     }).catch(() => {}).finally(() => setLoading(false));
   }, [id]);
+
+  // Nomes das temporadas no TMDB (ex.: One Piece: "Saga East Blue", "Arco Alabasta")
+  useEffect(() => {
+    api.get(`/series/${id}/seasons`)
+      .then(r => {
+        const map = {};
+        (Array.isArray(r.data) ? r.data : []).forEach(x => { map[x.season_number] = x; });
+        setSeasonInfo(map);
+      })
+      .catch(() => {});
+  }, [id]);
+
+  const seasonLabel = (n) => {
+    const name = seasonInfo[n]?.name;
+    if (!name || /^(temporada|season)\s*\d+$/i.test(name.trim())) return n === 0 ? 'Especiais' : `Temporada ${n}`;
+    return `${n > 0 ? `T${n} · ` : ''}${name}`;
+  };
 
   // Ao voltar pra tela, confere de novo se a série ainda está na lista.
   useFocusEffect(useCallback(() => {
@@ -376,7 +394,7 @@ export default function SerieDetail() {
 
         {seasons.length > 0 && (
           <TouchableOpacity style={styles.seasonDropBtn} onPress={() => setSeasonModal(true)} activeOpacity={0.7}>
-            <Text style={styles.seasonDropTxt}>Temporada {season}</Text>
+            <Text style={[styles.seasonDropTxt, { flexShrink: 1 }]} numberOfLines={1}>{seasonLabel(season)}</Text>
             <Ionicons name="chevron-down" size={15} color="#fff" />
           </TouchableOpacity>
         )}
@@ -392,19 +410,21 @@ export default function SerieDetail() {
             <View style={styles.modalSheet} onStartShouldSetResponder={() => true}>
               <View style={styles.modalHandle} />
               <Text style={styles.modalTitle}>Temporadas</Text>
-              {seasons.map(s => (
-                <TouchableOpacity
-                  key={s}
-                  style={styles.modalItem}
-                  activeOpacity={0.7}
-                  onPress={() => { setSeason(s); setSeasonModal(false); }}
-                >
-                  <Text style={[styles.modalItemTxt, s === season && styles.modalItemTxtActive]}>
-                    Temporada {s}
-                  </Text>
-                  {s === season && <Ionicons name="checkmark" size={20} color="#E50914" />}
-                </TouchableOpacity>
-              ))}
+              <ScrollView style={{ maxHeight: height * 0.6 }} showsVerticalScrollIndicator={false}>
+                {seasons.map(s => (
+                  <TouchableOpacity
+                    key={s}
+                    style={styles.modalItem}
+                    activeOpacity={0.7}
+                    onPress={() => { setSeason(s); setSeasonModal(false); }}
+                  >
+                    <Text style={[styles.modalItemTxt, s === season && styles.modalItemTxtActive, { flex: 1 }]} numberOfLines={2}>
+                      {seasonLabel(s)}
+                    </Text>
+                    {s === season && <Ionicons name="checkmark" size={20} color="#E50914" />}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
               <View style={{ height: 28 }} />
             </View>
           </TouchableOpacity>
@@ -538,7 +558,7 @@ const styles = StyleSheet.create({
   synopsis: { color: '#ccc', fontSize: 14, lineHeight: 22, marginBottom: 20 },
   seasonDropBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
-    alignSelf: 'flex-start',
+    alignSelf: 'flex-start', maxWidth: '100%',
     paddingHorizontal: 16, paddingVertical: 10,
     borderRadius: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)',
     backgroundColor: 'rgba(255,255,255,0.07)',

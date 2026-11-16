@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { getMe } from '../../lib/auth';
+import api from '../../lib/api';
 import styles from './layout.module.css';
 
 const NAV = [
@@ -15,6 +16,7 @@ const NAV = [
   { href: '/admin/usuarios', label: 'Usuários' },
   { href: '/admin/categorias', label: 'Categorias' },
   { href: '/admin/colecoes', label: 'Cronologias' },
+  { href: '/admin/chat', label: 'Chat ao vivo', badge: 'chat' },
   { href: '/admin/sugestoes', label: 'Sugestões' },
   { href: '/admin/likes', label: 'Likes' },
   { href: '/admin/atividade', label: 'Atividade' },
@@ -29,6 +31,17 @@ export default function AdminLayout({ children }) {
   const [checking, setChecking] = useState(true);
   const router = useRouter();
   const pathname = usePathname();
+  const [chatUnread, setChatUnread] = useState(0);
+
+  // Contador de mensagens não lidas do chat no menu
+  useEffect(() => {
+    if (!user) return;
+    let alive = true;
+    const tick = () => api.get('/chat/admin/unread').then(r => { if (alive) setChatUnread(r.data?.unread || 0); }).catch(() => {});
+    tick();
+    const t = setInterval(tick, 15000);
+    return () => { alive = false; clearInterval(t); };
+  }, [user, pathname]);
 
   useEffect(() => {
     getMe()
@@ -55,6 +68,11 @@ export default function AdminLayout({ children }) {
               className={`${styles.navLink} ${pathname === n.href ? styles.active : ''}`}
             >
               {n.label}
+              {n.badge === 'chat' && chatUnread > 0 && (
+                <span style={{ marginLeft: 8, background: '#E50914', color: '#fff', borderRadius: 10, padding: '1px 7px', fontSize: 11, fontWeight: 700 }}>
+                  {chatUnread}
+                </span>
+              )}
             </Link>
           ))}
         </nav>
