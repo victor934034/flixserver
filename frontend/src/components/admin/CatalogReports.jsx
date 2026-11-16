@@ -64,6 +64,15 @@ export default function CatalogReports() {
   const [seasMsg, setSeasMsg] = useState('');
   const seasPollRef = useRef(null);
 
+  const [epScanRunning, setEpScanRunning] = useState(false);
+  const [epScanProgress, setEpScanProgress] = useState(null);
+  const [epScanResult, setEpScanResult] = useState(null);
+  const [epSelected, setEpSelected] = useState(new Set());
+  const [epFixRunning, setEpFixRunning] = useState(false);
+  const [epFixProgress, setEpFixProgress] = useState(null);
+  const [epMsg, setEpMsg] = useState('');
+  const epPollRef = useRef(null);
+
   const [mfRunning, setMfRunning] = useState(false);
   const [mfProgress, setMfProgress] = useState(null);
   const [mfResult, setMfResult] = useState(null);
@@ -132,6 +141,64 @@ export default function CatalogReports() {
       setSeasRunning(false);
       setSeasMsg('Erro: ' + (e.response?.data?.error || e.message));
     }
+  }
+
+  async function runEpisodesScan() {
+    setEpScanRunning(true);
+    setEpMsg('');
+    setEpScanResult(null);
+    setEpScanProgress(null);
+    try {
+      const r = await api.post('/admin/reports/episodes-scan', {}, { timeout: 60000 });
+      setEpScanProgress({ total: r.data.total, done: 0 });
+      pollJob(r.data.jobId, epPollRef, {
+        onProgress: d => setEpScanProgress({ total: d.total, done: d.done }),
+        onDone: d => {
+          setEpScanRunning(false);
+          setEpScanResult(d.items);
+          setEpSelected(new Set(d.items.map(i => i.id)));
+          setEpMsg(d.items.length === 0
+            ? '✓ Todos os episódios já estão na temporada certa e com nome/imagem.'
+            : `${d.items.length} série(s) com episódio a corrigir${d.errors ? ` · ${d.errors} não consultada(s) (erro no TMDB)` : ''}.`);
+        },
+        onFail: m => { setEpScanRunning(false); setEpMsg('Erro: ' + m); },
+      });
+    } catch (e) {
+      setEpScanRunning(false);
+      setEpMsg('Erro: ' + (e.response?.data?.error || e.message));
+    }
+  }
+
+  async function runEpisodesFix() {
+    const ids = [...epSelected];
+    if (!ids.length) return;
+    setEpFixRunning(true);
+    setEpMsg('');
+    try {
+      const r = await api.post('/admin/reports/episodes-fix', { seriesIds: ids }, { timeout: 60000 });
+      setEpFixProgress({ total: r.data.total, done: 0 });
+      pollJob(r.data.jobId, epPollRef, {
+        onProgress: d => setEpFixProgress({ total: d.total, done: d.done, current: d.current }),
+        onDone: d => {
+          setEpFixRunning(false);
+          setEpScanResult(null);
+          setEpMsg(`✓ Pronto: ${d.moved || 0} arquivo(s) movido(s) pra temporada/episódio certos e ${d.updated || 0} episódio(s) com nome/imagem atualizados`
+            + (d.errors ? ` · ${d.errors} erro(s)${d.lastError ? ': ' + d.lastError : ''}` : '') + '.');
+        },
+        onFail: m => { setEpFixRunning(false); setEpMsg('Erro: ' + m); },
+      });
+    } catch (e) {
+      setEpFixRunning(false);
+      setEpMsg('Erro: ' + (e.response?.data?.error || e.message));
+    }
+  }
+
+  function toggleEp(id) {
+    setEpSelected(prev => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
   }
 
   async function runMissingFiles() {
@@ -274,6 +341,63 @@ export default function CatalogReports() {
               </div>
             ))}
           </div>
+        )}
+      </div>
+
+      {/* Corrigir episódios das séries já adicionadas */}
+      <div style={box}>
+        <p style={{ color: '#fff', fontWeight: 600, margin: '0 0 4px' }}>Corrigir episódios das séries já adicionadas</p>
+        <p style={{ color: '#888', fontSize: 13, margin: '0 0 16px' }}>
+          Procura em todas as séries episódios na temporada/episódio errados (ex.: One Piece com numeração
+          absoluta, ou "S01E062" que antes era lido como episódio 6) e episódios sem nome ou sem imagem.
+          Primeiro mostra o que encontrou; só corrige quando você clicar em "Corrigir". Não apaga vídeos.
+        </p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+          <button disabled={epScanRunning || epFixRunning} onClick={runEpisodesScan} style={btn(epScanRunning || epFixRunning)}>
+            {epScanRunning ? 'Procurando...' : 'Procurar episódios a corrigir'}
+          </button>
+          {epScanProgress && epScanRunning && <span style={{ color: '#888', fontSize: 13 }}>{epScanProgress.done}/{epScanProgress.total} séries</span>}
+          {epFixRunning && epFixProgress && (
+            <span style={{ color: '#888', fontSize: 13 }}>
+              Corrigindo {epFixProgress.done}/{epFixProgress.total}{epFixProgress.current ? ` · ${epFixProgress.current}` : ''}...
+            </span>
+          )}
+          {epMsg && !epFixRunning && <span style={{ color: msgColor(epMsg), fontSize: 13 }}>{epMsg}</span>}
+        </div>
+        {epScanResult && epScanResult.length > 0 && !epFixRunning && (
+          <>
+            <div style={listBox}>
+              {epScanResult.map(item => (
+                <label key={item.id} style={{ display: 'flex', gap: 10, padding: '8px 0', borderBottom: '1px solid #222', cursor: 'pointer', alignItems: 'flex-start' }}>
+                  <input type="checkbox" checked={epSelected.has(item.id)} onChange={() => toggleEp(item.id)} style={{ marginTop: 3 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ color: '#fff', fontSize: 13, fontWeight: 600 }}>
+                      {item.title} <span style={{ color: '#666', fontWeight: 400 }}>· {item.episodes} ep.</span>
+                    </div>
+                    <div style={{ color: '#888', fontSize: 12 }}>
+                      {item.moves > 0 && <span style={{ color: '#ffb74d' }}>{item.moves} no lugar errado</span>}
+                      {item.moves > 0 && item.noMeta > 0 && ' · '}
+                      {item.noMeta > 0 && <span>{item.noMeta} sem nome/imagem</span>}
+                      {item.conflicts > 0 && <span style={{ color: '#ff6b6b' }}> · {item.conflicts} em conflito (ficam como estão)</span>}
+                      {item.sample?.length > 0 && <span style={{ color: '#666' }}> · ex.: {item.sample.join(', ')}</span>}
+                    </div>
+                  </div>
+                  <a href={`/admin/series/${item.id}`} onClick={e => e.stopPropagation()} style={{ color: '#1e88e5', fontSize: 12, flexShrink: 0 }}>abrir</a>
+                </label>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 10, marginTop: 12, alignItems: 'center' }}>
+              <button disabled={!epSelected.size} onClick={runEpisodesFix} style={btn(!epSelected.size, '#2e7d32')}>
+                Corrigir {epSelected.size} série(s)
+              </button>
+              <button
+                onClick={() => setEpSelected(epSelected.size === epScanResult.length ? new Set() : new Set(epScanResult.map(i => i.id)))}
+                style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: 13 }}
+              >
+                {epSelected.size === epScanResult.length ? 'Desmarcar todas' : 'Marcar todas'}
+              </button>
+            </div>
+          </>
         )}
       </div>
 

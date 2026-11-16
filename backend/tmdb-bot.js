@@ -197,6 +197,14 @@ async function getEpisodeDetails(tmdbId, season, episode) {
  * Trata como absoluto quando: não há temporada no nome, ou é temporada 1 com
  * número maior que a quantidade de episódios da temporada 1 no TMDB.
  */
+// Temporada pela pasta do arquivo no armazenamento ("series/One.Piece/Temporada02/ep05.mp4").
+// Upload por temporada (Upload Desenhos) guarda assim — o nome do arquivo às
+// vezes só tem o número do episódio.
+function seasonFromPath(url) {
+  const m = /\/Temporada(\d{1,3})\//i.exec(decodeURIComponent(String(url || '')));
+  return m ? parseInt(m[1], 10) : null;
+}
+
 function resolveEpisodeNumber(details, season, episode) {
   const seasons = (details?.seasons || [])
     .filter(s => s.season_number > 0 && s.episode_count > 0)
@@ -204,17 +212,28 @@ function resolveEpisodeNumber(details, season, episode) {
   if (!episode || seasons.length === 0) return { season: season || 1, episode, absolute: false };
 
   const current = seasons.find(s => s.season_number === (season || 1));
-  const isAbsolute = !season || (season === 1 && current && episode > current.episode_count);
-  if (!isAbsolute) return { season, episode, absolute: false };
+  const overflow = current && episode > current.episode_count;
+  if (season && !overflow) return { season, episode, absolute: false };
 
+  const abs = absoluteToSeason(seasons, episode);
+  // Sem temporada, ou "temporada 1" com número além dela: numeração absoluta.
+  if (!season || season === 1) return { ...abs, absolute: true };
+  // Temporada informada (nome ou pasta) mas com número absoluto dentro dela —
+  // ex.: pasta Temporada02 com "One Piece EP 063" → T2E2. Só aceita se o
+  // número absoluto cair justamente nessa temporada.
+  if (abs.season === season) return { ...abs, absolute: true };
+  return { season, episode, absolute: false };
+}
+
+function absoluteToSeason(seasons, episode) {
   let remaining = episode;
   for (const s of seasons) {
-    if (remaining <= s.episode_count) return { season: s.season_number, episode: remaining, absolute: true };
+    if (remaining <= s.episode_count) return { season: s.season_number, episode: remaining };
     remaining -= s.episode_count;
   }
   // Episódio mais novo que a contagem do TMDB: entra no fim da última temporada
   const last = seasons[seasons.length - 1];
-  return { season: last.season_number, episode: last.episode_count + remaining, absolute: true };
+  return { season: last.season_number, episode: last.episode_count + remaining };
 }
 
 async function saveMovie(details, fileUrl, version, dual = false) {
@@ -324,7 +343,9 @@ async function processFiles(fileList) {
     console.log(`\nProcessando: ${filename}`);
 
     try {
-      const { type, name, season, episode, year } = extractInfo(filename);
+      const info = extractInfo(filename);
+      const { type, name, episode, year } = info;
+      const season = info.season || (episode ? seasonFromPath(fileUrl) : null);
       const version = forcedVersion || detectVersion(filename);
       const dual = isDualAudio(filename);
 
@@ -379,7 +400,7 @@ async function processFiles(fileList) {
   return report;
 }
 
-module.exports = { processFiles, detectType, extractInfo, resolveEpisodeNumber, getDetails, getEpisodeDetails };
+module.exports = { processFiles, detectType, extractInfo, resolveEpisodeNumber, seasonFromPath, getDetails, getEpisodeDetails };
 
 // Uso via CLI: node tmdb-bot.js "URL1" "URL2"
 if (require.main === module) {

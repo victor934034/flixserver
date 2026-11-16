@@ -2178,7 +2178,7 @@ router.post('/series/:id/refresh-episodes', async (req, res) => {
 const EP_FILE_FIELDS = ['file_dubbing', 'file_subtitled', 'file_cinema', 'file_color', 'file_bw'];
 
 async function planRenumber(seriesId) {
-  const { extractInfo, resolveEpisodeNumber, getDetails } = require('../../tmdb-bot');
+  const { extractInfo, resolveEpisodeNumber, seasonFromPath, getDetails } = require('../../tmdb-bot');
   const { data: serie, error: sErr } = await supabase
     .from('series').select('id, title, tmdb_id').eq('id', seriesId).single();
   if (sErr || !serie) throw Object.assign(new Error('Série não encontrada'), { status: 404 });
@@ -2200,7 +2200,9 @@ async function planRenumber(seriesId) {
       const info = extractInfo(file);
       let target = null;
       if (info.episode) {
-        target = resolveEpisodeNumber(details, info.season, info.episode);
+        // Sem temporada no nome: usa a pasta "TemporadaNN" (upload por temporada)
+        const season = info.season || seasonFromPath(url);
+        target = resolveEpisodeNumber(details, season, info.episode);
       } else if (ep.season_number === 1) {
         // Sem número no nome: se o próprio registro está "fora" da temporada 1
         // do TMDB (ex.: T1E200), trata o número dele como absoluto.
@@ -2240,93 +2242,176 @@ router.get('/series/:id/renumber-preview', async (req, res) => {
   }
 });
 
+// Executa um plano: move os arquivos e completa nome/sinopse/imagem do TMDB.
+// onlyMissingMeta: só busca dados pros episódios sem nome/imagem (e os movidos).
+async function applyRenumberPlan(plan, job, { onlyMissingMeta = false } = {}) {
+  const TMDB_IMG = 'https://image.tmdb.org/t/p/w500';
+  const sourceIds = new Set();
+  const touched = new Set(); // "s-e" que receberam arquivo
+
+  // 1) Move em duas fases: primeiro limpa TODAS as origens, depois grava os
+  // destinos — senão um arquivo recém-chegado em T2E1 seria apagado quando o
+  // vídeo antigo de T2E1 fosse movido adiante.
+  for (const m of plan.moves) {
+    try {
+      const { error } = await supabase.from('episodes').update({ [m.field]: null }).eq('id', m.from.id);
+      if (error) throw error;
+      sourceIds.add(m.from.id);
+    } catch (e) {
+      m.failed = true;
+      job.errors++;
+      job.lastError = `${m.file}: ${e.message?.slice(0, 100)}`;
+    }
+  }
+  for (const m of plan.moves) {
+    if (m.failed) continue;
+    try {
+      const { data: existing } = await supabase.from('episodes').select('id')
+        .eq('series_id', plan.serie.id).eq('season_number', m.to.season).eq('episode_number', m.to.episode).maybeSingle();
+      if (existing) {
+        await supabase.from('episodes').update({ [m.field]: m.url }).eq('id', existing.id);
+      } else {
+        await supabase.from('episodes').insert({
+          series_id: plan.serie.id, season_number: m.to.season, episode_number: m.to.episode,
+          [m.field]: m.url, is_active: true,
+        });
+      }
+      touched.add(`${m.to.season}-${m.to.episode}`);
+      job.moved = (job.moved || 0) + 1;
+    } catch (e) {
+      job.errors++;
+      job.lastError = `${m.file}: ${e.message?.slice(0, 100)}`;
+    }
+  }
+
+  // 2) Apaga registros que ficaram sem nenhum vídeo
+  for (const id of sourceIds) {
+    const { data: row } = await supabase.from('episodes').select(`id, ${EP_FILE_FIELDS.join(', ')}`).eq('id', id).maybeSingle();
+    if (row && !EP_FILE_FIELDS.some(f => row[f])) {
+      await supabase.from('episodes').delete().eq('id', id);
+    }
+  }
+
+  // 3) Nome/sinopse/imagem do TMDB — 1 consulta por TEMPORADA (não por episódio)
+  const { data: all } = await fetchAll(() => supabase.from('episodes')
+    .select('id, season_number, episode_number, title, thumbnail_url').eq('series_id', plan.serie.id).order('id'));
+  const need = (all || []).filter(ep => !onlyMissingMeta || !ep.title || !ep.thumbnail_url
+    || touched.has(`${ep.season_number}-${ep.episode_number}`));
+  const bySeason = new Map();
+  for (const ep of need) {
+    if (!bySeason.has(ep.season_number)) bySeason.set(ep.season_number, []);
+    bySeason.get(ep.season_number).push(ep);
+  }
+  for (const [season, eps] of bySeason) {
+    try {
+      const sd = await tmdbGet(`/tv/${plan.serie.tmdb_id}/season/${season}`);
+      const byNum = new Map((sd.episodes || []).map(e => [e.episode_number, e]));
+      for (const ep of eps) {
+        const d = byNum.get(ep.episode_number);
+        if (!d) continue; // episódio que o TMDB ainda não tem
+        await supabase.from('episodes').update({
+          title: d.name || null,
+          synopsis: d.overview || null,
+          thumbnail_url: d.still_path ? `${TMDB_IMG}${d.still_path}` : null,
+          duration: d.runtime || null,
+          air_date: d.air_date || null,
+          tmdb_episode_id: d.id || null,
+        }).eq('id', ep.id);
+        job.updated = (job.updated || 0) + 1;
+      }
+    } catch (e) {
+      if (e.response?.status !== 404) { job.errors++; job.lastError = `T${season}: ${e.message?.slice(0, 100)}`; }
+    }
+    await sleep(260);
+  }
+  await supabase.from('series').update({ total_seasons: plan.details.number_of_seasons || null }).eq('id', plan.serie.id);
+}
+
 router.post('/series/:id/renumber-apply', async (req, res) => {
   try {
     const plan = await planRenumber(req.params.id);
     const jobId = `renumber_${Date.now()}`;
-    const job = { total: plan.moves.length, done: 0, errors: 0, running: true, lastError: '', phase: 'moving' };
+    const job = { total: 1, done: 0, errors: 0, running: true, lastError: '', phase: 'moving' };
     episodeRefreshJobs.set(jobId, job);
     res.json({ ok: true, jobId, total: plan.moves.length });
-
     (async () => {
-      const { getEpisodeDetails } = require('../services/tmdb');
-      const TMDB_IMG = 'https://image.tmdb.org/t/p/w500';
-      const sourceIds = new Set();
-      const targets = new Map(); // "s-e" -> {season, episode}
-
-      // 1) Move os arquivos em duas fases: primeiro limpa TODAS as origens, só
-      // depois grava os destinos — senão um arquivo que acabou de chegar em
-      // T2E1 seria apagado quando o vídeo antigo de T2E1 fosse movido adiante.
-      for (const m of plan.moves) {
-        try {
-          await supabase.from('episodes').update({ [m.field]: null }).eq('id', m.from.id);
-          sourceIds.add(m.from.id);
-        } catch (e) {
-          m.failed = true;
-          job.errors++;
-          job.lastError = `${m.file}: ${e.message?.slice(0, 100)}`;
-        }
-      }
-      for (const m of plan.moves) {
-        if (m.failed) continue;
-        try {
-          const { data: existing } = await supabase.from('episodes').select('id')
-            .eq('series_id', plan.serie.id).eq('season_number', m.to.season).eq('episode_number', m.to.episode).maybeSingle();
-          if (existing) {
-            await supabase.from('episodes').update({ [m.field]: m.url }).eq('id', existing.id);
-          } else {
-            await supabase.from('episodes').insert({
-              series_id: plan.serie.id, season_number: m.to.season, episode_number: m.to.episode,
-              [m.field]: m.url, is_active: true,
-            });
-          }
-          targets.set(`${m.to.season}-${m.to.episode}`, m.to);
-          job.done++;
-        } catch (e) {
-          job.errors++;
-          job.lastError = `${m.file}: ${e.message?.slice(0, 100)}`;
-        }
-      }
-
-      // 2) Apaga registros que ficaram sem nenhum vídeo
-      for (const id of sourceIds) {
-        const { data: row } = await supabase.from('episodes').select(`id, ${EP_FILE_FIELDS.join(', ')}`).eq('id', id).maybeSingle();
-        if (row && !EP_FILE_FIELDS.some(f => row[f])) {
-          await supabase.from('episodes').delete().eq('id', id);
-        }
-      }
-
-      // 3) Nome/sinopse/imagem do TMDB de TODOS os episódios da série
       job.phase = 'metadata';
-      const { data: all } = await fetchAll(() => supabase.from('episodes').select('id, season_number, episode_number').eq('series_id', plan.serie.id).order('id'));
-      job.total = (all || []).length;
-      job.done = 0;
-      for (const ep of all || []) {
-        try {
-          const d = await getEpisodeDetails(plan.serie.tmdb_id, ep.season_number, ep.episode_number);
-          if (d && !d.status_code) {
-            await supabase.from('episodes').update({
-              title: d.name || null,
-              synopsis: d.overview || null,
-              thumbnail_url: d.still_path ? `${TMDB_IMG}${d.still_path}` : null,
-              duration: d.runtime || null,
-              air_date: d.air_date || null,
-              tmdb_episode_id: d.id || null,
-            }).eq('id', ep.id);
-          }
-        } catch (e) {
-          // episódio que não existe no TMDB (ex.: mais novo que a base) — segue
-        }
-        job.done++;
-        await new Promise(r => setTimeout(r, 260));
-      }
-      await supabase.from('series').update({ total_seasons: plan.details.number_of_seasons || null }).eq('id', plan.serie.id);
+      await applyRenumberPlan(plan, job);
+      job.done = 1;
       job.running = false;
-      console.log(`[renumber] "${plan.serie.title}": ${plan.moves.length} arquivo(s) movido(s), ${job.errors} erro(s)`);
+      console.log(`[renumber] "${plan.serie.title}": ${job.moved || 0} movido(s), ${job.updated || 0} atualizado(s), ${job.errors} erro(s)`);
     })();
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
+});
+
+// ── Corrigir episódios de TODAS as séries já cadastradas ─────────────────────
+// 1) scan: pra cada série, vê quantos arquivos estão na temporada/episódio
+//    errados (numeração absoluta, "S01E062" lido como E06...) e quantos
+//    episódios estão sem nome/imagem.
+// 2) apply: corrige as séries escolhidas.
+router.post('/reports/episodes-scan', async (req, res) => {
+  const { data: seriesList, error } = await fetchAll(() => supabase
+    .from('series').select('id, title, tmdb_id').not('tmdb_id', 'is', null).order('title'));
+  if (error) return res.status(500).json({ error: error.message });
+
+  const jobId = `epscan_${Date.now()}`;
+  reportJobs.set(jobId, { total: seriesList.length, done: 0, running: true, items: [], errors: 0 });
+  res.json({ ok: true, jobId, total: seriesList.length });
+
+  (async () => {
+    const job = reportJobs.get(jobId);
+    for (const s of seriesList) {
+      try {
+        const plan = await planRenumber(s.id);
+        const noMeta = plan.episodes.length
+          ? (await fetchAll(() => supabase.from('episodes').select('id, title, thumbnail_url')
+              .eq('series_id', s.id).order('id'))).data.filter(e => !e.title || !e.thumbnail_url).length
+          : 0;
+        if (plan.moves.length || noMeta || plan.conflicts.length) {
+          job.items.push({
+            id: s.id, title: s.title, episodes: plan.episodes.length,
+            moves: plan.moves.length, conflicts: plan.conflicts.length, noMeta,
+            sample: plan.moves.slice(0, 3).map(m => `T${m.from.season}E${m.from.episode} → T${m.to.season}E${m.to.episode}`),
+          });
+        }
+      } catch (e) {
+        job.errors++;
+        console.error(`[episodes-scan] "${s.title}":`, e.message);
+      }
+      job.done++;
+      await sleep(260);
+    }
+    job.running = false;
+    console.log(`[episodes-scan] ${job.items.length} série(s) com episódio a corrigir`);
+  })();
+});
+
+router.post('/reports/episodes-fix', async (req, res) => {
+  const ids = Array.isArray(req.body?.seriesIds) ? req.body.seriesIds : [];
+  if (!ids.length) return res.status(400).json({ error: 'Nenhuma série selecionada' });
+  const jobId = `epfix_${Date.now()}`;
+  reportJobs.set(jobId, { total: ids.length, done: 0, running: true, items: [], errors: 0, moved: 0, updated: 0, lastError: '' });
+  res.json({ ok: true, jobId, total: ids.length });
+
+  (async () => {
+    const job = reportJobs.get(jobId);
+    for (const id of ids) {
+      try {
+        const plan = await planRenumber(id);
+        job.current = plan.serie.title;
+        await applyRenumberPlan(plan, job, { onlyMissingMeta: true });
+      } catch (e) {
+        job.errors++;
+        job.lastError = e.message?.slice(0, 120);
+      }
+      job.done++;
+    }
+    job.current = null;
+    job.running = false;
+    console.log(`[episodes-fix] ${ids.length} série(s): ${job.moved} movido(s), ${job.updated} atualizado(s), ${job.errors} erro(s)`);
+  })();
 });
 
 // Fora de /series/:id pra não colidir com a rota GET /series/:id (que
