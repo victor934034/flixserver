@@ -256,10 +256,11 @@ export default function EditarSerie() {
           if (!s.data.running) {
             clearInterval(poll);
             setRefreshingEps(false);
+            const nf = s.data.notFound || 0;
             setRefreshEpsMsg(
-              s.data.errors === 0
+              s.data.errors === 0 && nf === 0
                 ? `✓ ${s.data.done} episódio(s) atualizado(s).`
-                : `${s.data.done} atualizado(s), ${s.data.errors} não encontrado(s) no TMDB${s.data.lastError ? ' (ex.: ' + s.data.lastError.replace(/:.*$/, '') + ')' : ''} — use "⇅ Reorganizar numeração" para colocar esses episódios na numeração do TMDB.`
+                : `${s.data.done - nf} atualizado(s)${nf ? `, ${nf} fora da numeração do TMDB (${(s.data.lastError || '').replace(/:.*$/, '')}…) — use "⇅ Reorganizar numeração"` : ''}${s.data.errors ? `, ${s.data.errors} erro(s) de rede: ${s.data.lastError}` : ''}.`
             );
             loadEpisodes();
           }
@@ -283,7 +284,8 @@ export default function EditarSerie() {
     try {
       const { data } = await api.get(`/admin/series/${id}/renumber-preview`);
       setRenumPreview(data);
-      if (!data.moves.length) setRenumMsg('✓ Nenhum episódio fora do lugar — tudo já bate com o TMDB. Se faltar nome/imagem, use "Atualizar episódios do TMDB".');
+      if (data.conflicts?.length) setRenumMsg(`Erro: ${data.conflicts.length} arquivo(s) disputam o mesmo episódio (duplicados) — resolva antes de reorganizar.`);
+      else if (!data.moves.length) setRenumMsg('✓ Nenhum episódio fora do lugar — tudo já bate com o TMDB. Se faltar nome/imagem, use "Atualizar episódios do TMDB".');
     } catch (err) {
       setRenumMsg('Erro: ' + (err.response?.data?.error || err.message));
     } finally {

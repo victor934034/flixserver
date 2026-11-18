@@ -218,22 +218,28 @@ async function getSeasonMap(tmdbId, details) {
   const seasons = (details?.seasons || []).filter(s => s.season_number > 0 && s.episode_count > 0)
     .sort((a, b) => a.season_number - b.season_number);
   const map = [];
+  let complete = true;
   for (const s of seasons) {
     let eps = null;
-    try {
-      const { data } = await axios.get(`${TMDB_BASE}/tv/${tmdbId}/season/${s.season_number}`, {
-        params: { api_key: TMDB_API_KEY, language: 'pt-BR' }, timeout: 15000,
-      });
-      eps = (data.episodes || []).map(e => e.episode_number).filter(n => n > 0).sort((a, b) => a - b);
-    } catch {
-      eps = null;
+    // 3 tentativas — uma falha momentânea do TMDB não pode virar "1..N" e
+    // ficar em cache achando que a temporada recomeça no episódio 1.
+    for (let attempt = 0; attempt < 3 && !eps; attempt++) {
+      try {
+        const { data } = await axios.get(`${TMDB_BASE}/tv/${tmdbId}/season/${s.season_number}`, {
+          params: { api_key: TMDB_API_KEY, language: 'pt-BR' }, timeout: 15000,
+        });
+        eps = (data.episodes || []).map(e => e.episode_number).filter(n => n > 0).sort((a, b) => a - b);
+      } catch {
+        eps = null;
+        await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
+      }
     }
     // Sem a lista: assume 1..N (comportamento padrão da maioria das séries)
-    if (!eps || !eps.length) eps = Array.from({ length: s.episode_count }, (_, i) => i + 1);
+    if (!eps || !eps.length) { complete = false; eps = Array.from({ length: s.episode_count }, (_, i) => i + 1); }
     map.push({ season_number: s.season_number, eps });
     await new Promise(r => setTimeout(r, 120));
   }
-  seasonMapCache.set(tmdbId, { at: Date.now(), map });
+  if (complete) seasonMapCache.set(tmdbId, { at: Date.now(), map });
   return map;
 }
 

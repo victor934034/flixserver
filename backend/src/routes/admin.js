@@ -2143,24 +2143,42 @@ router.post('/series/:id/refresh-episodes', async (req, res) => {
       const { getEpisodeDetails } = require('../services/tmdb');
       const TMDB_IMG = 'https://image.tmdb.org/t/p/w500';
       const job = episodeRefreshJobs.get(jobId);
+      // 1 consulta por temporada (não por episódio) e 404 = "TMDB não tem esse
+      // número" (episódio fora do lugar), não é falha de rede.
+      const seasonCache = new Map();
       for (const ep of episodes) {
         try {
-          const details = await getEpisodeDetails(serie.tmdb_id, ep.season_number, ep.episode_number);
-          if (details && !details.status_code) {
+          if (!seasonCache.has(ep.season_number)) {
+            let eps = null;
+            try {
+              const sd = await tmdbGet(`/tv/${serie.tmdb_id}/season/${ep.season_number}`);
+              eps = new Map((sd.episodes || []).map(e => [e.episode_number, e]));
+            } catch (e) {
+              if (e.response?.status !== 404) throw e;
+              eps = new Map();
+            }
+            seasonCache.set(ep.season_number, eps);
+            await new Promise(r => setTimeout(r, 260));
+          }
+          const details = seasonCache.get(ep.season_number).get(ep.episode_number);
+          if (details) {
             await supabase.from('episodes').update({
               title: details.name || null,
               synopsis: details.overview || null,
               thumbnail_url: details.still_path ? `${TMDB_IMG}${details.still_path}` : null,
               duration: details.runtime || null,
               air_date: details.air_date || null,
+              tmdb_episode_id: details.id || null,
             }).eq('id', ep.id);
+          } else {
+            job.notFound = (job.notFound || 0) + 1;
+            job.lastError = `T${ep.season_number}E${ep.episode_number}: não existe no TMDB`;
           }
           job.done++;
         } catch (e) {
           job.errors++;
           job.lastError = `T${ep.season_number}E${ep.episode_number}: ${e.message?.slice(0, 100)}`;
         }
-        await new Promise(r => setTimeout(r, 260)); // não estourar rate limit do TMDB
       }
       job.running = false;
       console.log(`[refresh-episodes] "${serie.title}": ${job.done - job.errors} ok, ${job.errors} erros`);
