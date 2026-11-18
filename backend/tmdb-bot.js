@@ -273,6 +273,15 @@ function resolveEpisodeNumber(details, season, episode, seasonMap) {
   }
   if (season && !cur) return { season, episode, absolute: false }; // temporada que o TMDB não tem
 
+  // Séries em que o TMDB NÃO recomeça a contagem (One Piece: T2 = E62..E77):
+  // o número do episódio já é o do TMDB. "S04E062" é o episódio 62 (que está
+  // na T2), não "62 posições depois do começo da T4".
+  const globalNumbering = map.some(s => s.season_number > 1 && s.eps[0] > 1);
+  if (globalNumbering) {
+    const own = map.find(s => s.eps.includes(episode));
+    if (own) return { season: own.season_number, episode, absolute: true };
+  }
+
   // Numeração absoluta
   const abs = absoluteToSeason(map, episode);
   if (!season || season === 1 || abs.season === season) return { ...abs, absolute: true };
