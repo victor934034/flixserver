@@ -74,13 +74,19 @@ export function AuthProvider({ children }) {
     registerPushToken();
   };
 
+  const refreshUser = async () => {
+    const res = await api.get('/auth/me');
+    const u = res.data?.user || res.data;
+    if (u) { await AsyncStorage.setItem('user', JSON.stringify(u)); setUser(u); }
+  };
+
   const logout = async () => {
     await AsyncStorage.multiRemove(['token', 'user']);
     setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, loginWithToken, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, loginWithToken, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

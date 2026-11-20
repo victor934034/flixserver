@@ -3,7 +3,7 @@ const { supabase, fetchAll } = require('../services/supabase');
 const { optionalAuth } = require('../middleware/auth');
 const { searchIds, orderByIds } = require('../services/titleSearch');
 
-const PUBLIC_FIELDS = 'id, tmdb_id, title, original_title, synopsis, year_start, year_end, total_seasons, rating, genres, poster_url, backdrop_url, trailer_url, age_rating, status, is_featured, views';
+const PUBLIC_FIELDS = 'id, tmdb_id, title, original_title, synopsis, year_start, year_end, total_seasons, rating, genres, poster_url, backdrop_url, trailer_url, age_rating, status, is_featured, views, release_date';
 
 // Series nao tem versao de audio/cor na propria linha (isso vive por episodio),
 // entao pra badge P&B nos cards fazemos 1 query extra: quais series da lista
@@ -22,7 +22,8 @@ async function attachHasBw(list) {
 
 router.get('/', optionalAuth, async (req, res) => {
   try {
-    const { genre, sort = 'created_at', order = 'desc', page = 1, limit = 24 } = req.query;
+    const { genre, year_from, year_to, released_days, min_rating, order = 'desc', page = 1, limit = 24 } = req.query;
+    const sort = ['created_at', 'release_date', 'year_start', 'rating', 'views', 'title'].includes(req.query.sort) ? req.query.sort : 'created_at';
     const offset = (Number(page) - 1) * Number(limit);
 
     let query = supabase
@@ -33,6 +34,13 @@ router.get('/', optionalAuth, async (req, res) => {
       .range(offset, offset + Number(limit) - 1);
 
     if (genre) query = query.contains('genres', [genre]);
+    if (year_from) query = query.gte('year_start', Number(year_from));
+    if (year_to) query = query.lte('year_start', Number(year_to));
+    if (min_rating) query = query.gte('rating', Number(min_rating));
+    if (released_days) {
+      const from = new Date(Date.now() - Number(released_days) * 86400000).toISOString().slice(0, 10);
+      query = query.gte('release_date', from).lte('release_date', new Date().toISOString().slice(0, 10));
+    }
 
     let { data, error, count } = await query;
     if (error) throw error;
@@ -113,6 +121,24 @@ router.get('/section/new', async (req, res) => {
       .order('created_at', { ascending: false })
       .limit(20);
 
+    if (error) throw error;
+    res.json(await attachHasBw(data));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/section/released', async (req, res) => {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const { data, error } = await supabase
+      .from('series')
+      .select(PUBLIC_FIELDS)
+      .eq('is_active', true)
+      .not('release_date', 'is', null)
+      .lte('release_date', today)
+      .order('release_date', { ascending: false })
+      .limit(20);
     if (error) throw error;
     res.json(await attachHasBw(data));
   } catch (err) {

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import api, { moviesAPI, seriesAPI, watchlistAPI, likesAPI } from '../api/index.js';
+import { startTogetherWeb } from '../lib/together.js';
 import { KEY, useKeyDown } from '../hooks/useNav.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 
@@ -101,7 +102,16 @@ function SubtitleBadge({ label }) {
 
 export default function DetailScreen() {
   const [params]          = useSearchParams();
-  const navigate          = useNavigate();
+  const navigate0         = useNavigate();
+  const togetherRef       = useRef(false);
+  const navigate = (path, opts) => {
+    if (path === '/player' && togetherRef.current && opts && opts.state) {
+      togetherRef.current = false;
+      startTogetherWeb(navigate0, opts.state).catch(() => navigate0(path, opts));
+      return;
+    }
+    navigate0(path, opts);
+  };
   const { activeProfile } = useAuth();
   const type = params.get('type') || 'movie';
   const id   = params.get('id');
@@ -232,6 +242,7 @@ export default function DetailScreen() {
     } else {
       versions.forEach(vk => acts.push({ id: 'play_' + vk, label: '▶ ' + (VERSION_META[vk] ? VERSION_META[vk].label : vk) }));
     }
+    acts.push({ id: 'together', label: '👥 Assistir juntos' });
     acts.push({ id: 'watchlist', label: wlItem ? '♥ Minha lista' : '♡ Minha lista' });
     acts.push({ id: 'like',    label: '👍 ' + (likeData.likes > 0 ? likeData.likes : 'Gostei') });
     acts.push({ id: 'dislike', label: '👎 ' + (likeData.dislikes > 0 ? likeData.dislikes : 'Não gostei') });
@@ -283,6 +294,12 @@ export default function DetailScreen() {
     if (!act) return;
     if (act.id.startsWith('play_')) { playMovie(act.id.replace('play_', ''), startAt || movieSeconds); return; }
     if (act.id === 'play') { if (currentEps[0]) playEpisode(currentEps[0], startAt || epSeconds[currentEps[0].id] || 0); return; }
+    if (act.id === 'together') {
+      togetherRef.current = true;
+      if (isSeries) { if (currentEps[0]) playEpisode(currentEps[0], 0); }
+      else if (versions[0]) playMovie(versions[0], 0);
+      return;
+    }
     if (act.id === 'watchlist') {
       setWlLoading(true);
       const profileId = activeProfile && activeProfile.id;

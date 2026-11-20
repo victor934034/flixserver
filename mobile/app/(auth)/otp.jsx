@@ -91,7 +91,7 @@ export default function OTPScreen() {
       setDigits(['', '', '', '', '', '']);
       startCooldown();
       setTimeout(() => inputRefs.current[0]?.focus(), 100);
-      Alert.alert('Código reenviado', `Verifique sua caixa de entrada em ${email}`);
+      Alert.alert('Código reenviado', `Verifique a caixa de entrada de ${email} e também a caixa de spam.`);
     } catch (e) {
       Alert.alert('Erro', e.response?.data?.error || 'Não foi possível reenviar.');
     }
@@ -111,6 +111,7 @@ export default function OTPScreen() {
           Enviamos um código de 6 dígitos para{'\n'}
           <Text style={styles.email}>{email}</Text>
         </Text>
+        <Text style={styles.spamHint}>📬 Não chegou? Olhe também a caixa de <Text style={{ fontWeight: '800', color: '#fbbf24' }}>spam / lixo eletrônico</Text>.</Text>
 
         {/* Caixas OTP */}
         <View style={styles.boxRow}>
@@ -168,6 +169,7 @@ const styles = StyleSheet.create({
     letterSpacing: 6, marginBottom: 32,
   },
   title: { fontSize: 20, fontWeight: '700', color: '#fff', marginBottom: 10 },
+  spamHint: { fontSize: 13, color: '#aaa', textAlign: 'center', lineHeight: 19, marginTop: -24, marginBottom: 28, backgroundColor: 'rgba(251,191,36,0.08)', borderWidth: 1, borderColor: 'rgba(251,191,36,0.25)', borderRadius: 10, paddingVertical: 8, paddingHorizontal: 12 },
   subtitle: { fontSize: 14, color: '#888', textAlign: 'center', lineHeight: 22, marginBottom: 36 },
   email: { color: '#E50914', fontWeight: '600' },
 

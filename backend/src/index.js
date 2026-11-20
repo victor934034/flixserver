@@ -29,6 +29,9 @@ const subtitleRouter = require('./routes/subtitle');
 const collectionsRouter = require('./routes/collections');
 const helpRouter = require('./routes/help');
 const chatRouter = require('./routes/chat');
+const securityRouter = require('./routes/security');
+const togetherRouter = require('./routes/together');
+const { blocklistMiddleware } = require('./services/guard');
 
 const REQUIRED_ENV = ['JWT_SECRET', 'SUPABASE_URL', 'SUPABASE_SERVICE_KEY'];
 const missingEnv = REQUIRED_ENV.filter((key) => !process.env[key]);
@@ -49,12 +52,24 @@ const PORT = process.env.PORT || 3001;
 
 app.set('trust proxy', 1); // EasePanel proxy adds X-Forwarded-For
 
-app.use(helmet());
+app.disable('x-powered-by');
+app.use(helmet({
+  hsts: { maxAge: 63072000, includeSubDomains: true, preload: true },
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+  crossOriginResourcePolicy: { policy: 'cross-origin' }, // imagens/legendas servidas a outros apps
+}));
+
+// CORS: FRONTEND_URL + CORS_ORIGINS (lista separada por vírgula, ex.: TVs/PWAs).
+// Apps nativos não mandam Origin, então não são afetados.
+const allowedOrigins = [process.env.FRONTEND_URL, ...(process.env.CORS_ORIGINS || '').split(',')]
+  .map(o => (o || '').trim().replace(/\/$/, '')).filter(Boolean);
 app.use(cors({
-  origin: process.env.FRONTEND_URL || '*',
+  origin: allowedOrigins.length
+    ? (origin, cb) => cb(null, !origin || allowedOrigins.includes(origin))
+    : '*',
   credentials: true,
 }));
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '2mb' }));
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -84,6 +99,25 @@ const tvCodeLimiter = rateLimit({
 });
 app.use('/api/auth/tv/code', tvCodeLimiter);
 
+// Bloqueio por IP/dispositivo (lista gerenciada no admin). Webhooks e health ficam de fora.
+app.use('/api', (req, res, next) => {
+  if (req.path === '/health' || req.path.startsWith('/webhook') || req.path.startsWith('/payments/webhook')) return next();
+  return blocklistMiddleware(req, res, next);
+});
+
+// Rotas sensíveis a abuso (cadastro, recuperação de senha, pagamento)
+const strictLimiter = (max, windowMs = 15 * 60 * 1000) => rateLimit({
+  windowMs, max,
+  message: { error: 'Muitas tentativas. Aguarde alguns minutos.' },
+});
+app.use('/api/auth/register', strictLimiter(20));
+app.use('/api/auth/register-with-otp', strictLimiter(20));
+app.use('/api/auth/forgot-password', strictLimiter(10));
+app.use('/api/auth/reset-password', strictLimiter(15));
+app.use('/api/payments/checkout', strictLimiter(15));
+app.use('/api/payments/trial/start', strictLimiter(10));
+app.use('/api/admin', strictLimiter(1500));
+
 app.use('/api/movies', moviesRouter);
 app.use('/api/series', seriesRouter);
 app.use('/api/episodes', episodesRouter);
@@ -108,6 +142,39 @@ app.use('/api/remux', remuxRouter);
 app.use('/api/subtitle', subtitleRouter);
 app.use('/api/collections', collectionsRouter);
 app.use('/api/help', helpRouter);
+app.use('/api/security', securityRouter);
+app.use('/api/together', togetherRouter);
+
+// ── Versão do conteúdo: apps/site consultam isso e recarregam a Home sozinhos
+// quando você adiciona filme, troca banner etc. (sem precisar fechar o app).
+let contentBumpedAt = Date.now();
+app.use('/api', (req, res, next) => {
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) &&
+      /^\/(admin|movies|series|episodes|collections|upload|tmdb|help)/.test(req.path)) {
+    res.on('finish', () => { if (res.statusCode < 400) contentBumpedAt = Date.now(); });
+  }
+  next();
+});
+let versionCache = { at: 0, v: 0 };
+app.get('/api/content-version', async (req, res) => {
+  try {
+    if (Date.now() - versionCache.at > 15000) {
+      const { supabase } = require('./services/supabase');
+      const [m, se, ep] = await Promise.all([
+        supabase.from('movies').select('updated_at').order('updated_at', { ascending: false }).limit(1),
+        supabase.from('series').select('updated_at').order('updated_at', { ascending: false }).limit(1),
+        supabase.from('episodes').select('created_at').order('created_at', { ascending: false }).limit(1),
+      ]);
+      const ts = [m.data?.[0]?.updated_at, se.data?.[0]?.updated_at, ep.data?.[0]?.created_at]
+        .filter(Boolean).map(t => new Date(t).getTime());
+      versionCache = { at: Date.now(), v: Math.max(0, ...ts) };
+    }
+    res.set('Cache-Control', 'no-store');
+    res.json({ v: Math.max(contentBumpedAt, versionCache.v) });
+  } catch {
+    res.json({ v: contentBumpedAt });
+  }
+});
 
 app.get('/api/preset-avatars', async (req, res) => {
   const { supabase } = require('./services/supabase');
@@ -251,10 +318,19 @@ app.get('/api/genres', async (req, res) => {
 app.get('/api/featured', async (req, res) => {
   const { supabase } = require('./services/supabase');
   try {
-    const [moviesResult, seriesResult] = await Promise.all([
-      supabase.from('movies').select('id, title, synopsis, year, poster_url, backdrop_url, trailer_url, rating, genres, file_dubbing, file_subtitled, file_cinema, file_4k, file_color, file_bw').eq('is_featured', true).eq('is_active', true).order('featured_order').limit(10),
-      supabase.from('series').select('id, title, synopsis, year_start, poster_url, backdrop_url, trailer_url, rating, genres').eq('is_featured', true).eq('is_active', true).order('featured_order').limit(10),
+    const MCOLS = 'id, title, synopsis, year, poster_url, backdrop_url, trailer_url, rating, genres, file_dubbing, file_subtitled, file_cinema, file_4k, file_color, file_bw';
+    const SCOLS = 'id, title, synopsis, year_start, poster_url, backdrop_url, trailer_url, rating, genres';
+    // Banner = marcados "No banner" no admin (ordem banner_order). Sem nenhum? cai no antigo "destaque".
+    const run = (flag, order) => Promise.all([
+      supabase.from('movies').select(MCOLS + ', ' + order).eq(flag, true).eq('is_active', true).order(order).limit(15),
+      supabase.from('series').select(SCOLS + ', ' + order).eq(flag, true).eq('is_active', true).order(order).limit(15),
     ]);
+    let [moviesResult, seriesResult] = await run('in_banner', 'banner_order');
+    if (moviesResult.error || seriesResult.error || ((moviesResult.data || []).length + (seriesResult.data || []).length) === 0) {
+      [moviesResult, seriesResult] = await run('is_featured', 'featured_order');
+      (moviesResult.data || []).forEach(x => { x.banner_order = x.featured_order; });
+      (seriesResult.data || []).forEach(x => { x.banner_order = x.featured_order; });
+    }
 
     const seriesIds = (seriesResult.data || []).map(s => s.id);
     let bwSet = new Set();
@@ -266,7 +342,7 @@ app.get('/api/featured', async (req, res) => {
     const items = [
       ...(moviesResult.data || []).map(m => ({ ...m, type: 'movie' })),
       ...(seriesResult.data || []).map(s => ({ ...s, type: 'series', has_bw: bwSet.has(s.id) })),
-    ].sort((a, b) => (a.featured_order || 99) - (b.featured_order || 99));
+    ].sort((a, b) => (a.banner_order ?? 99) - (b.banner_order ?? 99));
 
     res.json(items);
   } catch (err) {
@@ -294,7 +370,9 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Erro interno do servidor' });
 });
 
-app.listen(PORT, () => {
+const httpServer = require('http').createServer(app);
+require('./services/together').attach(httpServer); // Socket.IO (Assistir juntos)
+httpServer.listen(PORT, () => {
   console.log(`🚀 Flixhome API rodando na porta ${PORT}`);
 
   if (process.env.BACKBLAZE_KEY_ID && process.env.BACKBLAZE_BUCKET_ID) {

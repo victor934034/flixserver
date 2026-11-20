@@ -678,7 +678,24 @@ export default function HomeScreen({ navigation }) {
     }).catch(() => {});
   }, []);
 
+  // Atualização automática: confere a versão do catálogo e recarrega sozinho
+  const loadDataRef = useRef(null);
   useEffect(() => {
+    let last = null;
+    const check = async () => {
+      try {
+        const { data } = await api.get('/content-version');
+        if (last !== null && data?.v !== last) loadDataRef.current?.();
+        if (data) last = data.v;
+      } catch {}
+    };
+    check();
+    const t = setInterval(check, 45000);
+    return () => clearInterval(t);
+  }, []);
+
+  useEffect(() => {
+    loadDataRef.current = loadData;
     loadData();
     return () => { clearTimeout(blurTimer.current); clearTimeout(searchTimer.current); };
   }, [activeProfile]);
@@ -751,7 +768,7 @@ export default function HomeScreen({ navigation }) {
     if (activeNav === 0) return sections;
     // activeNav 1/2 (Filmes/Series) usam a grade de catalogo completo, nao
     // secoes — ver renderizacao de catalogGrid mais abaixo.
-    if (activeNav === 3) return watchlist.length > 0 ? [{ title: 'Minha Lista', data: watchlist, type: null }] : [];
+    if (activeNav === 3) return watchlist.length > 0 ? [{ title: `Minha Lista (${watchlist.length})`, data: watchlist, type: null }] : [];
     if (activeNav === 4) return [
       ...(searchResults.movies.length > 0 ? [{ title: 'Filmes', data: searchResults.movies, type: 'movie' }] : []),
       ...(searchResults.series.length > 0 ? [{ title: 'Séries', data: searchResults.series, type: 'series' }] : []),

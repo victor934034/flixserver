@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, Pressable, ScrollView,
-  ActivityIndicator, Dimensions,
+  ActivityIndicator, Dimensions, Image,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -113,7 +113,7 @@ function PlanCard({ plan, onFocus, onBlur, onPress, hasTVPreferredFocus, isIPTV,
 }
 
 export default function SubscriptionScreen({ navigation, route }) {
-  const { logout } = useAuth();
+  const { logout, refreshUser } = useAuth();
   const initialTab = route?.params?.tab === 'iptv' ? 1 : 0;
 
   const [tab,         setTab]         = useState(initialTab);
@@ -121,19 +121,38 @@ export default function SubscriptionScreen({ navigation, route }) {
   const [iptvPlans,   setIptvPlans]   = useState([]);
   const [loading,     setLoading]     = useState(true);
   const [statusMsg,   setStatusMsg]   = useState('');
+  const [qrUrl,       setQrUrl]       = useState('');
   const [busyId,      setBusyId]      = useState('');
+  const [trial,       setTrial]       = useState(null);
+  const [trialBusy,   setTrialBusy]   = useState(false);
+  const [trialFoc,    setTrialFoc]    = useState(false);
 
   useEffect(() => {
     Promise.all([
       api.get('/payments/plans').then(r => r.data || []).catch(() => []),
       api.get('/iptv/plans').then(r => r.data || []).catch(() => []),
-    ]).then(([basic, iptv]) => {
+      api.get('/payments/trial').then(r => r.data).catch(() => null),
+    ]).then(([basic, iptv, tr]) => {
+      setTrial(tr);
       setBasicPlans(basic.filter(p => !p.includes_iptv));
       setIptvPlans(iptv.length > 0 ? iptv : basic.filter(p => p.includes_iptv));
     }).finally(() => setLoading(false));
   }, []);
 
   const plans = tab === 0 ? basicPlans : iptvPlans;
+
+  async function startTrial() {
+    if (trialBusy) return;
+    setTrialBusy(true); setStatusMsg('');
+    try {
+      await api.post('/payments/trial/start');
+      await refreshUser?.();
+      navigation.replace('Home');
+    } catch (e) {
+      setStatusMsg('Erro: ' + (e.response?.data?.error || 'Não foi possível ativar o teste grátis.'));
+      setTrialBusy(false);
+    }
+  }
 
   async function handleSubscribe(plan) {
     setBusyId(plan.id);
@@ -142,7 +161,8 @@ export default function SubscriptionScreen({ navigation, route }) {
       const endpoint = tab === 1 ? '/iptv/subscribe' : '/payments/subscribe';
       const { data } = await api.post(endpoint, { plan_id: plan.id });
       if (data.init_point) {
-        setStatusMsg('Acesse no celular para pagar:\n' + data.init_point);
+        setStatusMsg('Escaneie o QR code com o celular para pagar (PIX, cartão ou boleto).\nOu acesse: ' + data.init_point);
+        setQrUrl(String(api.defaults.baseURL || '').replace(/\/api\/?$/, '') + '/api/payments/qr?text=' + encodeURIComponent(data.init_point));
       } else {
         setStatusMsg('Solicitação enviada! O administrador foi notificado e ativará em breve.');
       }
@@ -186,6 +206,19 @@ export default function SubscriptionScreen({ navigation, route }) {
         ))}
       </View>
 
+      {trial?.available && (
+        <TVPressable
+          onFocus={() => setTrialFoc(true)} onBlur={() => setTrialFoc(false)} onPress={startTrial}
+          style={[s.trialBox, trialFoc && s.trialBoxFoc]}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={s.trialTitle}>Teste grátis por {trial.days} dias</Text>
+            <Text style={s.trialSub}>Sem cartão. Cancele quando quiser.</Text>
+          </View>
+          <View style={s.trialBtn}>{trialBusy ? <ActivityIndicator color="#fff" size="small" /> : <Text style={s.trialBtnTxt}>Começar</Text>}</View>
+        </TVPressable>
+      )}
+
       {loading ? (
         <ActivityIndicator color={ACCENT} size="large" style={{ marginTop: r(64) }} />
       ) : (
@@ -221,6 +254,7 @@ export default function SubscriptionScreen({ navigation, route }) {
       {/* Status */}
       {!!statusMsg && (
         <View style={s.statusBox}>
+          {!!qrUrl && <Image source={{ uri: qrUrl }} style={{ width: 220, height: 220, backgroundColor: '#fff', borderRadius: 12, alignSelf: 'center', marginBottom: 14 }} />}
           <Text style={[
             s.statusTxt,
             statusMsg.startsWith('Erro') && { color: '#ff6b6b' }
@@ -261,7 +295,7 @@ const s = StyleSheet.create({
 
   planRow:      { flexDirection: 'row', justifyContent: 'center', paddingHorizontal: r(40), gap: r(20), flexWrap: 'wrap', paddingBottom: r(16) },
   card:         { width: r(300), padding: r(32), borderRadius: r(18), backgroundColor: '#111', borderWidth: 1.5, borderColor: '#1e1e1e' },
-  cardFoc:      { backgroundColor: 'rgba(255,255,255,0.07)', borderColor: '#fff' },
+  cardFoc:      { backgroundColor: 'rgba(255,255,255,0.07)', borderColor: '#fff', borderWidth: 3, transform: [{ scale: 1.06 }] },
   cardHL:       { borderColor: ACCENT },
   badgeWrap:    { marginBottom: r(8) },
   badge:        { color: ACCENT, fontSize: r(10), fontWeight: '800', letterSpacing: 1.5 },
@@ -283,6 +317,13 @@ const s = StyleSheet.create({
   btnHL:        { backgroundColor: ACCENT },
   btnTxt:       { fontSize: r(15), fontWeight: '700', color: '#fff' },
   btnTxtDef:    { color: '#888' },
+
+  trialBox:     { alignSelf: 'center', width: r(760), flexDirection: 'row', alignItems: 'center', gap: r(20), padding: r(18), marginBottom: r(24), borderRadius: r(14), backgroundColor: 'rgba(229,9,20,0.10)', borderWidth: 3, borderColor: 'rgba(229,9,20,0.5)' },
+  trialBoxFoc:  { borderColor: '#fff', backgroundColor: 'rgba(229,9,20,0.22)', transform: [{ scale: 1.06 }] },
+  trialTitle:   { color: '#fff', fontSize: r(22), fontWeight: '800' },
+  trialSub:     { color: '#A3A3A3', fontSize: r(14), marginTop: r(2) },
+  trialBtn:     { backgroundColor: ACCENT, paddingHorizontal: r(28), paddingVertical: r(12), borderRadius: r(10) },
+  trialBtnTxt:  { color: '#fff', fontSize: r(16), fontWeight: '800' },
 
   emptyBox:     { alignItems: 'center', paddingVertical: r(48), gap: r(10) },
   emptyIcon:    { fontSize: r(48) },

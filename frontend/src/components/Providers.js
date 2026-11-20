@@ -2,6 +2,7 @@
 import { ProfileProvider } from '../contexts/ProfileContext';
 import { ParentalProvider } from '../contexts/ParentalContext';
 import ProfileGate from './ProfileGate';
+import BrowserNotice from './BrowserNotice';
 
 export default function Providers({ children }) {
   return (
@@ -9,6 +10,7 @@ export default function Providers({ children }) {
       <ParentalProvider>
         <ProfileGate />
         {children}
+        <BrowserNotice />
       </ParentalProvider>
     </ProfileProvider>
   );

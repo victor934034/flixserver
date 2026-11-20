@@ -12,12 +12,33 @@ export default function Home() {
   const [data, setData] = useState(null);
   const { activeProfile } = useProfile();
 
+  const [reloadKey, setReloadKey] = useState(0);
+
+  // Atualiza sozinho quando o admin adiciona conteúdo/troca banner
+  useEffect(() => {
+    let last = null;
+    const check = async () => {
+      try {
+        const { data } = await api.get('/content-version');
+        if (last !== null && data?.v !== last) setReloadKey(k => k + 1);
+        last = data?.v;
+      } catch {}
+    };
+    check();
+    const t = setInterval(check, 45000);
+    const onVis = () => { if (document.visibilityState === 'visible') check(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', onVis); };
+  }, []);
+
   useEffect(() => {
     const fetches = [
       api.get('/featured').then(r => r.data).catch(() => []),
       api.get('/movies/section/new').then(r => r.data).catch(() => []),
       api.get('/series/section/new').then(r => r.data).catch(() => []),
       api.get('/movies/section/popular').then(r => r.data).catch(() => []),
+      api.get('/movies/section/released').then(r => r.data).catch(() => []),
+      api.get('/series/section/released').then(r => r.data).catch(() => []),
     ];
 
     if (getToken()) {
@@ -33,10 +54,21 @@ export default function Home() {
       fetches.push(Promise.resolve([]));
     }
 
-    Promise.all(fetches).then(([featured, newMovies, newSeries, popularMovies, history]) => {
-      setData({ featured, newMovies, newSeries, popularMovies, history });
+    if (getToken() && activeProfile) {
+      fetches.push(api.get('/recommendations', { params: { profile_id: activeProfile.id, limit: 20 } }).then(r => r.data || []).catch(() => []));
+    } else {
+      fetches.push(Promise.resolve([]));
+    }
+
+    Promise.all(fetches).then(([featured, newMovies, newSeries, popularMovies, relM, relS, history, recommended]) => {
+      const released = [
+        ...(relM || []).map(x => ({ ...x, type: 'movie' })),
+        ...(relS || []).map(x => ({ ...x, type: 'series' })),
+      ].sort((a, b) => String(b.release_date).localeCompare(String(a.release_date))).slice(0, 20);
+      const recs = (recommended || []).map(x => ({ ...x, type: x.content_type === 'movie' ? 'movie' : 'series' }));
+      setData({ featured, newMovies, newSeries, popularMovies, history, released, recs });
     });
-  }, [activeProfile]);
+  }, [activeProfile, reloadKey]);
 
   return (
     <>
@@ -76,6 +108,13 @@ export default function Home() {
                 }))}
                 seeAllHref="/continuar-assistindo"
               />
+            )}
+
+            {data.released?.length > 0 && (
+              <ContentRow title="Recém lançados" items={data.released} />
+            )}
+            {data.recs?.length > 0 && (
+              <ContentRow title="Recomendados para você" items={data.recs} />
             )}
 
             {data.newMovies.length > 0 && (

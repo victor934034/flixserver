@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, ActivityIndicator,
-  TouchableOpacity, useWindowDimensions,
+  TouchableOpacity, useWindowDimensions, AppState, Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -139,6 +139,7 @@ export default function HomeScreen() {
   const [popular, setPopular] = useState([]);
   const [collections, setCollections] = useState([]);
   const [recentEpisodes, setRecentEpisodes] = useState([]);
+  const [released, setReleased] = useState([]);
   const [recommended, setRecommended] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -166,8 +167,8 @@ export default function HomeScreen() {
     } catch {}
   }, [activeProfile?.id]);
 
-  useEffect(() => {
-    Promise.all([
+  const loadHome = useCallback(() => {
+    return Promise.all([
       api.get('/featured').catch(() => ({ data: [] })),
       api.get('/movies?limit=20').catch(() => ({ data: [] })),
       api.get('/series?limit=20').catch(() => ({ data: [] })),
@@ -175,7 +176,12 @@ export default function HomeScreen() {
       api.get('/series/section/popular').catch(() => ({ data: [] })),
       api.get('/collections').catch(() => ({ data: [] })),
       api.get('/episodes/section/recent?limit=20').catch(() => ({ data: [] })),
-    ]).then(([fRes, mRes, sRes, popMoviesRes, popSeriesRes, colRes, recentEpRes]) => {
+      api.get('/movies/section/released').catch(() => ({ data: [] })),
+      api.get('/series/section/released').catch(() => ({ data: [] })),
+    ]).then(([fRes, mRes, sRes, popMoviesRes, popSeriesRes, colRes, recentEpRes, relMRes, relSRes]) => {
+      const relM = (Array.isArray(relMRes.data) ? relMRes.data : []).map(x => ({ ...x, content_type: 'movie' }));
+      const relS = (Array.isArray(relSRes.data) ? relSRes.data : []).map(x => ({ ...x, content_type: 'series' }));
+      setReleased([...relM, ...relS].sort((a, b) => String(b.release_date).localeCompare(String(a.release_date))).slice(0, 20));
       setFeatured(Array.isArray(fRes.data) ? fRes.data : []);
       setMovies(Array.isArray(mRes.data) ? mRes.data : (mRes.data?.data ?? []));
       setSeries(Array.isArray(sRes.data) ? sRes.data : (sRes.data?.data ?? []));
@@ -187,6 +193,39 @@ export default function HomeScreen() {
       setRecentEpisodes(Array.isArray(recentEpRes.data) ? recentEpRes.data : []);
     }).finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => { loadHome(); }, [loadHome]);
+
+  // Atualização automática: consulta a versão do conteúdo a cada 45s e ao voltar
+  // pro app; se mudou (filme novo, banner trocado), recarrega a Home sozinha.
+  useEffect(() => {
+    let last = null;
+    const check = async () => {
+      try {
+        const { data } = await api.get('/content-version');
+        if (last !== null && data?.v !== last) { loadHome(); fetchRecommended?.(); }
+        last = data?.v;
+      } catch {}
+    };
+    check();
+    const t = setInterval(check, 45000);
+    const sub = AppState.addEventListener('change', st => { if (st === 'active') check(); });
+    return () => { clearInterval(t); sub.remove(); };
+  }, [loadHome]);
+
+  // Convites do "Assistir juntos": checa ao abrir/voltar pra Home
+  useFocusEffect(useCallback(() => {
+    let alive = true;
+    api.get('/together/invites').then(({ data }) => {
+      const inv = alive && Array.isArray(data) ? data[0] : null;
+      if (!inv) return;
+      Alert.alert(`${inv.from} chamou você`, `Assistir "${inv.title}" juntos?`, [
+        { text: 'Agora não', style: 'cancel', onPress: () => api.delete(`/together/invites/${inv.code}`).catch(() => {}) },
+        { text: 'Entrar', onPress: () => { api.delete(`/together/invites/${inv.code}`).catch(() => {}); router.push({ pathname: '/juntos', params: { code: inv.code } }); } },
+      ]);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, []));
 
   // Recomendados: afinidade por gênero calculada no backend a partir do
   // histórico do perfil (vazio se o perfil ainda não assistiu nada).
@@ -271,6 +310,10 @@ export default function HomeScreen() {
               ))}
             </ScrollView>
           </View>
+        )}
+
+        {released.length > 0 && (
+          <ContentRow title="Recém lançados" items={released} type="mixed" />
         )}
 
         {recommended.length > 0 && (

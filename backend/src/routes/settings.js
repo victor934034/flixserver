@@ -6,7 +6,9 @@ const { adminMiddleware } = require('../middleware/admin');
 router.get('/', async (req, res) => {
   const { data } = await supabase.from('system_settings').select('key, value');
   const settings = {};
-  (data || []).forEach(r => { settings[r.key] = r.value; });
+  // Nunca expõe chaves que pareçam segredo (o endpoint é público).
+  const SENSITIVE = /secret|token|password|passwd|api_?key|private|credential/i;
+  (data || []).forEach(r => { if (!SENSITIVE.test(r.key)) settings[r.key] = r.value; });
   res.json(settings);
 });
 

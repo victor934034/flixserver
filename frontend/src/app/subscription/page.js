@@ -14,7 +14,7 @@ export default function SubscriptionPage() {
   const [plans, setPlans] = useState([]);
   const [enabled, setEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
-  const [subscribing, setSubscribing] = useState('');
+  const [trial, setTrial] = useState(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -23,23 +23,26 @@ export default function SubscriptionPage() {
       getMe().catch(() => null),
       api.get('/payments/plans').then(r => r.data || []).catch(() => []),
       api.get('/settings').then(r => r.data || {}).catch(() => ({})),
-    ]).then(([user, plansData, settings]) => {
+      api.get('/payments/trial').then(r => r.data).catch(() => null),
+    ]).then(([user, plansData, settings, trialInfo]) => {
+      setTrial(trialInfo);
       setMe(user);
       setPlans(plansData);
       setEnabled(settings.subscription_enabled !== 'false');
     }).finally(() => setLoading(false));
   }, [router]);
 
-  async function subscribe(plan) {
-    if (subscribing) return;
-    setSubscribing(plan.id);
+  function subscribe(plan) {
+    router.push(`/pagamento?kind=plan&plan_id=${encodeURIComponent(plan.id)}`);
+  }
+
+  async function startTrial() {
     setError('');
     try {
-      const { data } = await api.post('/payments/subscribe', { plan_id: plan.id });
-      window.location.href = data.init_point;
+      await api.post('/payments/trial/start');
+      window.location.href = '/';
     } catch (err) {
-      setError(err.response?.data?.error || 'Erro ao iniciar assinatura.');
-      setSubscribing('');
+      setError(err.response?.data?.error || 'Não foi possível ativar o teste grátis.');
     }
   }
 
@@ -77,6 +80,12 @@ export default function SubscriptionPage() {
         ) : (
           <>
             {error && <p className={styles.error}>{error}</p>}
+            {trial?.available && (
+              <div style={{ background: 'rgba(229,9,20,.12)', border: '1px solid #E50914', borderRadius: 16, padding: 20, margin: '0 0 24px', display: 'flex', gap: 16, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                <div><strong style={{ fontSize: 18 }}>Teste grátis por {trial.days} dias</strong><div style={{ color: '#b3b3b3', fontSize: 14 }}>Sem cartão. Cancele quando quiser.</div></div>
+                <button className={styles.btnSubscribe} style={{ width: 'auto', padding: '12px 24px' }} onClick={startTrial}>Começar teste grátis</button>
+              </div>
+            )}
             <div className={styles.grid}>
               {plans.map(plan => {
                 const price = plan.promo_price != null ? plan.promo_price : plan.price;
@@ -96,9 +105,8 @@ export default function SubscriptionPage() {
                     <button
                       className={styles.btnSubscribe}
                       onClick={() => subscribe(plan)}
-                      disabled={subscribing === plan.id}
                     >
-                      {subscribing === plan.id ? 'Redirecionando...' : 'Assinar'}
+                      Assinar
                     </button>
                   </div>
                 );

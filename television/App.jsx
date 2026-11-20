@@ -6,6 +6,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useFonts } from 'expo-font';
 import { Ionicons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
+import TogetherInvites from './src/components/TogetherInvites';
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { ProfileProvider, useProfile } from './src/contexts/ProfileContext';
 
@@ -48,10 +49,12 @@ function ProfileGate({ navigation }) {
 
 function AppNavigator() {
   const { user, loading } = useAuth();
+  const navRef = React.useRef(null);
   if (loading) return null;
 
   return (
-    <NavigationContainer theme={navTheme}>
+    <>
+    <NavigationContainer theme={navTheme} ref={navRef}>
       <Stack.Navigator
         screenOptions={{
           headerShown: false,
@@ -71,6 +74,8 @@ function AppNavigator() {
         <Stack.Screen name="Iptv" component={IptvScreen} />
       </Stack.Navigator>
     </NavigationContainer>
+    <TogetherInvites navigationRef={navRef} />
+    </>
   );
 }
 

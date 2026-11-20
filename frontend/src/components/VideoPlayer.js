@@ -30,7 +30,7 @@ function fmt(s) {
   return `${m}:${String(sec).padStart(2,'0')}`;
 }
 
-export default function VideoPlayer({ content, onProgress, startAt = 0, onClose, onNextEpisode, nextEpisodeLabel, overlayTitle }) {
+export default function VideoPlayer({ content, onProgress, startAt = 0, onClose, onNextEpisode, nextEpisodeLabel, overlayTitle, sync }) {
   const videoRef     = useRef(null);
   const containerRef = useRef(null);
   const hideTimer    = useRef(null);
@@ -152,6 +152,70 @@ export default function VideoPlayer({ content, onProgress, startAt = 0, onClose,
       onProgress?.(video.currentTime, video.duration);
     };
   }, [onProgress, onNextEpisode]);
+
+
+  // ── Assistir juntos: espelha play/pause/seek/áudio/legenda com os outros da sala ──
+  const applyingRemote = useRef(false);
+  const syncRef = useRef(sync);
+  syncRef.current = sync;
+  useEffect(() => {
+    if (!sync) return;
+    const v = videoRef.current;
+    if (!v) return;
+
+    const emitLocal = (type) => {
+      if (applyingRemote.current) return;
+      sync.emit({ type, playing: !v.paused, time: v.currentTime });
+    };
+    const onPlay = () => emitLocal('play');
+    const onPauseS = () => emitLocal('pause');
+    const onSeeked = () => emitLocal('seek');
+    v.addEventListener('play', onPlay);
+    v.addEventListener('pause', onPauseS);
+    v.addEventListener('seeked', onSeeked);
+
+    const apply = (ev) => {
+      const cur = videoRef.current;
+      if (!cur) return;
+      if (ev.type === 'version' && ev.version) { changeVersion(ev.version, true); }
+      if (ev.type === 'subtitle' && ev.subtitle != null) { changeSubtitle(ev.subtitle, true); return; }
+      // compensa a latência: se estava tocando, o ponto certo já avançou desde que o evento saiu
+      const lag = ev.playing ? Math.max(0, (sync.serverNow() - ev.t) / 1000) : 0;
+      const target = ev.time + lag;
+      applyingRemote.current = true;
+      const tolerance = ev.type === 'tick' ? 1.2 : 0.35;
+      if (Math.abs(cur.currentTime - target) > tolerance) cur.currentTime = target;
+      if (ev.playing && cur.paused) cur.play().catch(() => {});
+      if (!ev.playing && !cur.paused) cur.pause();
+      setTimeout(() => { applyingRemote.current = false; }, 400);
+    };
+    const unsub = sync.subscribe(apply);
+
+    // quem entra depois pega o estado atual da sala
+    const initial = sync.initialState;
+    const onReadyInitial = () => {
+      if (initial && initial.t) {
+        if (initial.version) changeVersion(initial.version, true);
+        if (initial.subtitle && initial.subtitle !== 'none') changeSubtitle(initial.subtitle, true);
+        apply({ type: 'seek', playing: initial.playing, time: initial.time, t: initial.t });
+      }
+    };
+    if (v.readyState >= 1) onReadyInitial(); else v.addEventListener('loadedmetadata', onReadyInitial, { once: true });
+
+    // o anfitrião manda um "tick" a cada 4s pra corrigir deriva de quem ficou pra trás
+    const tick = sync.isHost ? setInterval(() => {
+      if (!v.paused) sync.emit({ type: 'tick', playing: true, time: v.currentTime });
+    }, 4000) : null;
+
+    return () => {
+      v.removeEventListener('play', onPlay);
+      v.removeEventListener('pause', onPauseS);
+      v.removeEventListener('seeked', onSeeked);
+      unsub?.();
+      if (tick) clearInterval(tick);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sync]);
 
   // Limite de telas simultâneas por conta — mesmo endpoint/regra usados pelo
   // app mobile (backend conta por user_id, sem distinguir plataforma). Sem
@@ -295,8 +359,9 @@ export default function VideoPlayer({ content, onProgress, startAt = 0, onClose,
     }, 50);
   }
 
-  function changeVersion(key) {
+  function changeVersion(key, fromRemote = false) {
     const saved = videoRef.current?.currentTime || 0;
+    if (sync && !fromRemote) sync.emit({ type: 'version', version: key, subtitle, playing: !videoRef.current?.paused, time: saved });
     setVersion(key);
     setRemuxActive(false);
     setAudioWarning(false);
@@ -327,7 +392,8 @@ export default function VideoPlayer({ content, onProgress, startAt = 0, onClose,
     } catch { setCastStatus('idle'); }
   }
 
-  function changeSubtitle(key) {
+  function changeSubtitle(key, fromRemote = false) {
+    if (sync && !fromRemote) sync.emit({ type: 'subtitle', subtitle: key, playing: !videoRef.current?.paused, time: videoRef.current?.currentTime || 0 });
     setSubtitle(key);
     const tracks = videoRef.current?.textTracks;
     if (tracks) {
@@ -493,7 +559,7 @@ export default function VideoPlayer({ content, onProgress, startAt = 0, onClose,
 
             <div className={styles.sep} />
             <span className={styles.time}>
-              {fmt(currentTime)}<span className={styles.timeDivider}> / </span>{fmt(duration)}
+              {fmt(currentTime)}<span className={styles.timeDivider}> / </span>-{fmt(Math.max(0, duration - currentTime))}
             </span>
           </div>
 

@@ -790,6 +790,26 @@ export default function HomeScreen() {
   const toolbarItems = genres.length > 0 ? ['genre', 'search'] : ['search'];
 
   const dataCache     = useRef({});
+
+  // Atualização automática: confere a versão do catálogo e recarrega a Home sozinha
+  const [refreshKey, setRefreshKey] = useState(0);
+  useEffect(() => {
+    let last = null;
+    const check = async () => {
+      try {
+        const { data } = await api.get('/api/content-version');
+        if (last !== null && data && data.v !== last) {
+          dataCache.current = {};
+          Object.keys(prefetchCache).forEach(k => { delete prefetchCache[k]; });
+          setRefreshKey(k => k + 1);
+        }
+        if (data) last = data.v;
+      } catch {}
+    };
+    check();
+    const t = setInterval(check, 45000);
+    return () => clearInterval(t);
+  }, []);
   const prevProfileId = useRef(undefined);
   const scrollRef  = useRef(null);
   const rowEls     = useRef([]);
@@ -860,7 +880,7 @@ export default function HomeScreen() {
         const items = r.data || [];
         dataCache.current['minha-lista'] = {
           sections: items.length > 0
-            ? [{ key: 'watchlist', title: 'Minha Lista', data: items }]
+            ? [{ key: 'watchlist', title: `Minha Lista (${items.length})`, data: items }]
             : [],
         };
         setFeatured(null);
@@ -952,7 +972,7 @@ export default function HomeScreen() {
         setCatalogGenres(prev => ({ ...prev, [activeNav]: [...set].sort() }));
       }
     }).catch(() => {}).finally(() => setLoadingData(false));
-  }, [activeNav, activeProfile, genreFilter]);
+  }, [activeNav, activeProfile, genreFilter, refreshKey]);
 
   // Smooth vertical scroll to keep focused row visible
   useEffect(() => {

@@ -10,6 +10,9 @@ const api = axios.create({ baseURL });
 
 api.interceptors.request.use((config) => {
   if (typeof window !== 'undefined') {
+    config.headers['X-Platform'] = 'web';
+    const did = (() => { try { let i = localStorage.getItem('device_install_id'); if (!i) { i = 'web-' + (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now()); localStorage.setItem('device_install_id', i); } return i; } catch { return ''; } })();
+    if (did) config.headers['X-Device-Id'] = did;
     const token = localStorage.getItem('flixhome_token');
     if (token) config.headers.Authorization = `Bearer ${token}`;
   }

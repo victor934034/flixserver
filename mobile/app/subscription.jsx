@@ -29,6 +29,8 @@ export default function SubscriptionScreen() {
   const [loadError,   setLoadError]   = useState('');
   const [subscribing, setSubscribing] = useState('');
   const [checking,    setChecking]    = useState(false);
+  const [trial, setTrial] = useState(null);
+  const [trialBusy, setTrialBusy] = useState(false);
   const appState = useRef(AppState.currentState);
 
   useFocusEffect(
@@ -100,6 +102,18 @@ export default function SubscriptionScreen() {
   }, []);
 
   useEffect(() => { loadPlans(); }, []);
+  useEffect(() => { api.get('/payments/trial').then(r => setTrial(r.data)).catch(() => {}); }, []);
+
+  const startTrial = async () => {
+    setTrialBusy(true);
+    try {
+      await api.post('/payments/trial/start');
+      await refreshUser();
+      router.replace('/profile-select');
+    } catch (e) {
+      Alert.alert('Teste grátis', e.response?.data?.error || 'Não foi possível ativar o teste grátis.');
+    } finally { setTrialBusy(false); }
+  };
 
   const plans = tab === 0 ? basicPlans : iptvPlans;
 
@@ -112,7 +126,7 @@ export default function SubscriptionScreen() {
         await Linking.openURL(data.init_point);
         Alert.alert(
           'Pagamento iniciado',
-          'Após o pagamento, volte ao app. O administrador será notificado e ativará sua assinatura.',
+          'Conclua o pagamento na página aberta (PIX, cartão ou boleto). Ao confirmar, sua assinatura é liberada automaticamente — é só voltar ao app.',
           [{ text: 'OK' }]
         );
       } else {
@@ -190,6 +204,18 @@ export default function SubscriptionScreen() {
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}
         >
+          {trial?.available && (
+            <TouchableOpacity style={styles.trialBox} onPress={startTrial} disabled={trialBusy} activeOpacity={0.85}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.trialTitle}>Teste grátis por {trial.days} dias</Text>
+                <Text style={styles.trialSub}>Sem cartão. Cancele quando quiser.</Text>
+              </View>
+              <View style={styles.trialBtn}>
+                {trialBusy ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.trialBtnText}>Começar</Text>}
+              </View>
+            </TouchableOpacity>
+          )}
+
           {tab === 1 && (
             <View style={styles.iptvBanner}>
               <Ionicons name="tv" size={22} color={ACCENT} />
@@ -293,6 +319,12 @@ const styles = StyleSheet.create({
 
   iptvBanner:   { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#1a0a0a', borderRadius: 10, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#2a0a0a' },
   iptvBannerText:{ color: '#aaa', fontSize: 13, flex: 1, lineHeight: 18 },
+
+  trialBox:     { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, marginBottom: 16, borderRadius: 14, backgroundColor: 'rgba(229,9,20,0.10)', borderWidth: 1.5, borderColor: 'rgba(229,9,20,0.5)' },
+  trialTitle:   { color: '#fff', fontSize: 16, fontWeight: '800' },
+  trialSub:     { color: '#A3A3A3', fontSize: 12, marginTop: 2 },
+  trialBtn:     { backgroundColor: ACCENT, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10 },
+  trialBtnText: { color: '#fff', fontWeight: '800', fontSize: 14 },
 
   content:      { paddingHorizontal: 16, paddingBottom: 40 },
 

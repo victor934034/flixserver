@@ -5,6 +5,7 @@ import LoginScreen                  from './screens/LoginScreen.jsx';
 import HomeScreen                   from './screens/HomeScreen.jsx';
 import DetailScreen                 from './screens/DetailScreen.jsx';
 import PlayerScreen                 from './screens/PlayerScreen.jsx';
+import TogetherInvites from './components/TogetherInvites.jsx';
 import SubscriptionScreen           from './screens/SubscriptionScreen.jsx';
 import ProfileSelectScreen          from './screens/ProfileSelectScreen.jsx';
 import SplashScreen                 from './screens/SplashScreen.jsx';
@@ -204,6 +205,7 @@ export default function App() {
           <div style={{ width: 1920, height: 1080, background: '#0a0a0a', overflow: 'hidden', position: 'relative', fontFamily: "'Outfit', system-ui, -apple-system, sans-serif" }}>
             <SplashOrchestrator>
               <CastWatcher />
+              <TogetherInvites />
               <Routes>
                 <Route path="/login"          element={<LoginScreen />} />
                 <Route path="/subscription"   element={<SubscriptionGate />} />

@@ -7,6 +7,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MovieCard from '../../components/MovieCard';
 import api from '../../lib/api';
+import DateChips from '../../components/DateChips';
+import { presetQuery } from '../../lib/datePresets';
 
 export default function SeriesScreen() {
   const insets = useSafeAreaInsets();
@@ -19,6 +21,7 @@ export default function SeriesScreen() {
   const [genres, setGenres] = useState([]);
   const [selectedGenre, setSelectedGenre] = useState(null);
   const [genreModal, setGenreModal] = useState(false);
+  const [datePreset, setDatePreset] = useState('');
 
   const GAP = 8;
   const PAD = 12;
@@ -28,13 +31,15 @@ export default function SeriesScreen() {
     api.get('/genres').then(r => setGenres(Array.isArray(r.data) ? r.data : [])).catch(() => {});
   }, []);
 
-  useEffect(() => { load(1); }, [selectedGenre]);
+  useEffect(() => { load(1); }, [selectedGenre, datePreset]);
 
   const load = useCallback(async (pageNum = 1) => {
     if (pageNum === 1) setLoading(true); else setLoadingMore(true);
     try {
       let url = `/series?limit=21&page=${pageNum}`;
       if (selectedGenre) url += `&genre=${encodeURIComponent(selectedGenre)}`;
+      url += presetQuery(datePreset);
+      if (datePreset) url += '&sort=release_date';
       const res = await api.get(url);
       const items = Array.isArray(res.data) ? res.data : (res.data.data ?? res.data.items ?? []);
       setSeries(prev => pageNum === 1 ? items : [...prev, ...items]);
@@ -42,7 +47,7 @@ export default function SeriesScreen() {
       setPage(pageNum);
     } catch {}
     if (pageNum === 1) setLoading(false); else setLoadingMore(false);
-  }, [selectedGenre]);
+  }, [selectedGenre, datePreset]);
 
   const loadMore = () => {
     if (loadingMore || !hasMore) return;
@@ -62,6 +67,8 @@ export default function SeriesScreen() {
           </TouchableOpacity>
         )}
       </View>
+
+      <DateChips value={datePreset} onChange={setDatePreset} />
 
       <Modal
         visible={genreModal}

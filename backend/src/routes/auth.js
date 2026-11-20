@@ -13,6 +13,21 @@ function generateTvCode() {
   return code;
 }
 
+// Teste grátis automático no cadastro (admin liga em Configurações -> trial_auto_signup).
+async function maybeAutoTrial(user, req) {
+  try {
+    const { data } = await supabase.from('system_settings').select('value').eq('key', 'trial_auto_signup').maybeSingle();
+    if (data?.value !== 'true') return user;
+    const { grantTrial } = require('./payments');
+    if (!(await grantTrial(user.id, req)).ok) return user;
+    const { data: fresh } = await supabase.from('users').select('*').eq('id', user.id).single();
+    return fresh || user;
+  } catch (e) {
+    console.error('[auth] auto trial:', e.message);
+    return user;
+  }
+}
+
 function signToken(user) {
   return jwt.sign(
     { id: user.id, email: user.email, is_admin: user.is_admin },
@@ -43,7 +58,8 @@ router.post('/register', async (req, res) => {
       .single();
     if (userError) return res.status(400).json({ error: userError.message });
 
-    res.status(201).json({ user: userData, token: signToken(userData) });
+    const u1 = await maybeAutoTrial(userData, req);
+    res.status(201).json({ user: u1, token: signToken(u1) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -135,7 +151,8 @@ router.post('/verify-otp', async (req, res) => {
       return res.status(500).json({ error: 'Erro ao criar conta. Contate o suporte.' });
     }
 
-    res.json({ user: newUser, token: signToken(newUser) });
+    const u2 = await maybeAutoTrial(newUser, req);
+    res.json({ user: u2, token: signToken(u2) });
   } catch (e) {
     console.error('[auth] verify-otp error:', e.message);
     res.status(500).json({ error: e.message });
@@ -188,7 +205,8 @@ router.post('/register-with-otp', async (req, res) => {
       return res.status(500).json({ error: 'Erro ao criar conta. Contate o suporte.' });
     }
 
-    res.status(201).json({ user: newUser, token: signToken(newUser) });
+    const u3 = await maybeAutoTrial(newUser, req);
+    res.status(201).json({ user: u3, token: signToken(u3) });
   } catch (e) {
     console.error('[auth] register-with-otp error:', e.message);
     res.status(500).json({ error: e.message });

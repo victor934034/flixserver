@@ -11,7 +11,7 @@ const DECAY = 0.85;
 // Cache em memória por usuário+perfil — evita bater no TMDB de novo toda
 // vez que a Home abre (isso deixou o app "travando" às vezes: o TMDB é uma
 // API externa e pode demorar ou falhar, e isso rodava a cada load da Home).
-const CACHE_TTL_MS = 10 * 60 * 1000; // 10 min
+const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6h — a chave inclui a assinatura do histórico, então muda sozinha quando o usuário assiste algo novo
 const cache = new Map(); // key -> { data, expires }
 
 function getCached(key) {
@@ -45,6 +45,24 @@ const TMDB_BOOST = 4;
 // Busca títulos "parecidos" no TMDB pra um filme/série já assistido.
 // TMDB já combina sinopse, elenco, palavras-chave e gênero no cálculo —
 // muito mais rico do que comparar só a lista de gêneros.
+// Cache longo dos "parecidos" do TMDB. Antes, se o TMDB demorasse mais que o
+// timeout numa chamada, aquela semente sumia do cálculo e a lista inteira
+// mudava sozinha (era o "recomendados para você" trocando sem eu assistir nada).
+const SIMILAR_TTL_MS = 24 * 60 * 60 * 1000;
+const similarCache = new Map(); // "type:id" -> { at, ids }
+async function getSimilar(tmdbId, type, timeoutMs) {
+  const key = `${type}:${tmdbId}`;
+  const hit = similarCache.get(key);
+  if (hit && Date.now() - hit.at < SIMILAR_TTL_MS) return hit.ids;
+  const p = fetchTmdbSimilar(tmdbId, type).then(ids => {
+    if (ids.length) similarCache.set(key, { at: Date.now(), ids });
+    return ids;
+  });
+  // Estourou o tempo? usa o último valor conhecido (mesmo velho) e deixa a
+  // requisição terminar em segundo plano pra preencher o cache.
+  return withTimeout(p, timeoutMs, hit ? hit.ids : []);
+}
+
 async function fetchTmdbSimilar(tmdbId, type) {
   const axios = require('axios');
   const endpoint = type === 'movie' ? 'movie' : 'tv';
@@ -68,9 +86,6 @@ router.get('/', async (req, res) => {
     const profileId = req.query.profile_id || req.headers['x-profile-id'] || null;
     const limit = Math.min(Number(req.query.limit) || 20, 50);
 
-    const cacheKey = `${req.user.id}:${profileId || 'default'}:${limit}`;
-    const cached = getCached(cacheKey);
-    if (cached) return res.json(cached);
 
     let histQ = supabase
       .from('watch_history')
@@ -81,6 +96,12 @@ router.get('/', async (req, res) => {
     histQ = profileId ? histQ.eq('profile_id', profileId) : histQ.is('profile_id', null);
     const { data: history, error: histErr } = await histQ;
     if (histErr) throw histErr;
+
+    // Assinatura do histórico: mesma lista de títulos => mesmo resultado (estável).
+    const sig = history.slice(0, 30).map(h => `${h.content_type}:${h.series_id || h.content_id}`).join('|');
+    const cacheKey = `${req.user.id}:${profileId || 'default'}:${limit}:${require('crypto').createHash('md5').update(sig).digest('hex')}`;
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
 
     const watchedMovieIds = [...new Set(history.filter(h => h.content_type === 'movie').map(h => h.content_id))];
     const watchedSeriesIds = [...new Set(
@@ -139,7 +160,7 @@ router.get('/', async (req, res) => {
     // em vez de segurar a resposta inteira esperando a API externa.
     await Promise.all(seeds.map(async ([key, weight]) => {
       const [type, tmdbId] = key.split(':');
-      const similarIds = await withTimeout(fetchTmdbSimilar(tmdbId, type), TMDB_OVERALL_TIMEOUT_MS, []);
+      const similarIds = await getSimilar(tmdbId, type, TMDB_OVERALL_TIMEOUT_MS);
       similarIds.forEach((id, pos) => {
         const contribution = weight * (1 / (pos + 1));
         tmdbBoost[type][id] = (tmdbBoost[type][id] || 0) + contribution;
@@ -162,7 +183,7 @@ router.get('/', async (req, res) => {
     function scoreOf(genres, type, tmdbId) {
       const genreScore = (genres || []).reduce((sum, g) => sum + (affinity[g] || 0), 0);
       const boost = tmdbId ? (tmdbBoost[type][tmdbId] || 0) : 0;
-      return genreScore + boost * TMDB_BOOST;
+      return Math.round((genreScore + boost * TMDB_BOOST) * 10000) / 10000;
     }
 
     const scoredMovies = (allMoviesRes.data || [])
@@ -176,7 +197,8 @@ router.get('/', async (req, res) => {
       .filter(s => s._score > 0);
 
     const topIds = [...scoredMovies, ...scoredSeries]
-      .sort((a, b) => b._score - a._score)
+      // desempate por id: sem isso, títulos com a mesma nota trocavam de lugar a cada chamada
+      .sort((a, b) => (b._score - a._score) || String(a.id).localeCompare(String(b.id)))
       .slice(0, limit);
 
     const topMovieIds = topIds.filter(t => t.content_type === 'movie').map(t => t.id);

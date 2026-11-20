@@ -9,6 +9,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api, { BASE_URL } from '../lib/api';
+import { useTogether } from '../lib/together';
 import { useProfile } from '../contexts/ProfileContext';
 
 const { width: W, height: H } = Dimensions.get('window');
@@ -158,6 +159,7 @@ export default function PlayerScreen({ navigation, route }) {
     seriesContext             = null,
     contentMeta               = null,
     startAt                   = null,
+    room                      = null,
   } = route.params ?? {};
 
   const availTracks = ['dubbing','subtitled','cinema','color','bw'].filter(k => !!tracks[k]);
@@ -243,6 +245,56 @@ export default function PlayerScreen({ navigation, route }) {
   const { currentTime = 0 } = useEvent(player, 'timeUpdate', { currentTime: 0 });
   const { isPlaying = false } = useEvent(player, 'playingChange', { isPlaying: false });
   const { status = 'idle', error: playerError } = useEvent(player, 'statusChange', { status: 'idle' });
+
+  // ── Assistir juntos: sincroniza play/pause/seek com a sala ──────────────────
+  const tg = useTogether(room ? String(room) : null);
+  const applyingRemote = useRef(false);
+  const lastPosRef = useRef(0);
+  useEffect(() => {
+    if (!tg.active) return;
+    const unlock = () => setTimeout(() => { applyingRemote.current = false; }, 500);
+    const apply = (ev) => {
+      if (ev.type === 'version' || ev.type === 'subtitle') return;
+      const lag = ev.playing ? Math.max(0, (tg.serverNow() - ev.t) / 1000) : 0;
+      const target = ev.time + lag;
+      applyingRemote.current = true;
+      try {
+        const tol = ev.type === 'tick' ? 1.2 : 0.35;
+        if (Math.abs((player.currentTime || 0) - target) > tol) player.currentTime = target;
+        if (ev.playing && !playingRef.current) player.play();
+        if (!ev.playing && playingRef.current) player.pause();
+      } catch {}
+      unlock();
+    };
+    return tg.subscribe(apply);
+  }, [tg.active]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!tg.initialState) return;
+    const st = tg.initialState;
+    const lag = st.playing ? Math.max(0, (tg.serverNow() - st.t) / 1000) : 0;
+    applyingRemote.current = true;
+    try { player.currentTime = st.time + lag; if (st.playing) player.play(); else player.pause(); } catch {}
+    setTimeout(() => { applyingRemote.current = false; }, 800);
+  }, [tg.initialState]); // eslint-disable-line react-hooks/exhaustive-deps
+  // play/pause locais -> sala
+  useEffect(() => {
+    if (!tg.active || tg.status !== 'ready' || applyingRemote.current) return;
+    tg.emit({ type: isPlaying ? 'play' : 'pause', playing: isPlaying, time: player.currentTime || 0 });
+  }, [isPlaying]); // eslint-disable-line react-hooks/exhaustive-deps
+  // pulo local (posição saltou) -> sala
+  useEffect(() => {
+    const prev = lastPosRef.current;
+    lastPosRef.current = currentTime;
+    if (!tg.active || tg.status !== 'ready' || applyingRemote.current) return;
+    if (Math.abs(currentTime - prev) > 3) tg.emit({ type: 'seek', playing: isPlaying, time: currentTime });
+  }, [currentTime]); // eslint-disable-line react-hooks/exhaustive-deps
+  // anfitrião corrige deriva a cada 4s
+  useEffect(() => {
+    if (!tg.active || !tg.isHost) return;
+    const t = setInterval(() => { if (playingRef.current) tg.emit({ type: 'tick', playing: true, time: player.currentTime || 0 }); }, 4000);
+    return () => clearInterval(t);
+  }, [tg.active, tg.isHost]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (tg.status === 'ended') navigation.goBack(); }, [tg.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── State ───────────────────────────────────────────────────────────────────
   const [trackKey,    setTrackKey]   = useState(initKey);
@@ -336,7 +388,7 @@ export default function PlayerScreen({ navigation, route }) {
   useEffect(() => {
     if (isEnded && !endedRef.current) {
       endedRef.current = true;
-      if (nextEp) navigation.replace('Player', nextEp);
+      if (nextEp && !tg.active) navigation.replace('Player', nextEp);
       else navigation.goBack();
     }
   }, [isEnded]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -525,6 +577,16 @@ export default function PlayerScreen({ navigation, route }) {
         nativeControls={false}
         surfaceType="textureView"
       />
+
+      {tg.active && (
+        <View style={s.tgBadge} pointerEvents="none">
+          <Text style={s.tgBadgeTxt}>
+            {tg.status === 'ready' ? `Juntos · ${tg.room?.code || ''} · ${tg.members.length} ${tg.members.length === 1 ? 'pessoa' : 'pessoas'}`
+              : tg.status === 'error' ? tg.error : 'Conectando à sala…'}
+          </Text>
+          {tg.toasts.map(t => <Text key={t.id} style={s.tgToast}>{t.text}</Text>)}
+        </View>
+      )}
 
       {/* Loading */}
       {!error && !loaded && (
@@ -769,7 +831,7 @@ export default function PlayerScreen({ navigation, route }) {
             </View>
 
             {/* Duração total */}
-            <Text style={[s.timeTxt, s.timeRight]}>{fmt(displayDur)}</Text>
+            <Text style={[s.timeTxt, s.timeRight]}>{'-' + fmt(Math.max(0, displayDur - displayPos))}</Text>
           </View>
         </View>
       </Animated.View>
@@ -779,6 +841,9 @@ export default function PlayerScreen({ navigation, route }) {
 
 // ── Styles ─────────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
+  tgBadge:      { position: 'absolute', top: r(24), right: r(32), zIndex: 30, alignItems: 'flex-end', gap: r(6) },
+  tgBadgeTxt:   { color: '#fff', fontSize: r(15), fontWeight: '700', backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: r(14), paddingVertical: r(8), borderRadius: r(999), overflow: 'hidden' },
+  tgToast:      { color: '#fff', fontSize: r(14), backgroundColor: 'rgba(229,9,20,0.85)', paddingHorizontal: r(12), paddingVertical: r(6), borderRadius: r(8), overflow: 'hidden' },
   root: { flex: 1, backgroundColor: '#000' },
 
   center: {

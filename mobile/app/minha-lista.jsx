@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
-  Image, ActivityIndicator, Alert, useWindowDimensions,
+  Image, ActivityIndicator, Alert, useWindowDimensions, TextInput,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,6 +21,9 @@ export default function MinhaListaScreen() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [removing, setRemoving] = useState(null);
+  const [q, setQ] = useState('');
+  const norm = t => (t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  const shown = q.trim() ? items.filter(i => norm(i.title || i.name).includes(norm(q.trim()))) : items;
 
   const numColumns = width >= 900 ? 5 : width >= 600 ? 4 : 3;
   const cardWidth = (width - H_PADDING * 2 - GAP * (numColumns - 1)) / numColumns;
@@ -111,7 +114,15 @@ export default function MinhaListaScreen() {
           <Ionicons name="arrow-back" size={22} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Minha Lista</Text>
+        <Text style={styles.count}>{items.length} {items.length === 1 ? 'item' : 'itens'}</Text>
       </View>
+      {items.length > 0 && (
+        <View style={styles.searchBox}>
+          <Ionicons name="search" size={16} color="#888" />
+          <TextInput style={styles.searchInput} value={q} onChangeText={setQ} placeholder="Buscar nos favoritos" placeholderTextColor="#666" returnKeyType="search" autoCorrect={false} />
+          {q ? <TouchableOpacity onPress={() => setQ('')}><Ionicons name="close-circle" size={18} color="#888" /></TouchableOpacity> : null}
+        </View>
+      )}
 
       {loading ? (
         <View style={styles.center}>
@@ -128,7 +139,8 @@ export default function MinhaListaScreen() {
       ) : (
         <FlatList
           key={`cols-${numColumns}`}
-          data={items}
+          data={shown}
+          ListEmptyComponent={<Text style={styles.emptyText}>Nenhum favorito encontrado</Text>}
           numColumns={numColumns}
           keyExtractor={item => String(wid(item))}
           renderItem={renderItem}
@@ -149,6 +161,9 @@ const styles = StyleSheet.create({
   },
   backBtn: { padding: 6 },
   headerTitle: { fontSize: 20, fontWeight: '700', color: '#fff' },
+  count: { color: '#888', fontSize: 13, fontWeight: '600', marginLeft: 'auto' },
+  searchBox: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginBottom: 12, paddingHorizontal: 12, height: 42, borderRadius: 10, backgroundColor: '#141414', borderWidth: 1, borderColor: '#2a2a2a' },
+  searchInput: { flex: 1, color: '#fff', fontSize: 14, padding: 0 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
   emptyText: { color: '#555', fontSize: 16, fontWeight: '600', marginTop: 16 },
   emptyHint: { color: '#333', fontSize: 13, textAlign: 'center', marginTop: 8, lineHeight: 20 },

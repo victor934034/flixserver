@@ -52,8 +52,8 @@ export default function ForgotPasswordScreen() {
         <Text style={styles.title}>{step === 1 ? 'Esqueci minha senha' : 'Redefinir senha'}</Text>
         <Text style={styles.subtitle}>
           {step === 1
-            ? 'Informe seu email e enviaremos um código de 6 dígitos.'
-            : `Código enviado para ${email}. Verifique sua caixa de entrada.`}
+            ? 'Informe seu email e enviaremos um código de 6 dígitos. Se não chegar, olhe a caixa de spam.'
+            : `Código enviado para ${email}. Verifique sua caixa de entrada e a caixa de spam.`}
         </Text>
 
         {step === 1 ? (

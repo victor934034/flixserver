@@ -23,15 +23,21 @@ export default function SubscriptionScreen() {
   const [loading,     setLoading]     = useState(true);
   const [focused,     setFocused]     = useState(0); // 0..tabItems-1 = plan, last = logout
   const [status,      setStatus]      = useState('');
+  const [qrUrl,       setQrUrl]       = useState('');
   const [subscribing, setSubscribing] = useState(false);
 
+  const [trial, setTrial] = useState(null);
+  const [trialBusy, setTrialBusy] = useState(false);
+  const off = trial && trial.available ? 1 : 0;
   const st = useRef({});
 
   useEffect(() => {
     Promise.all([
       api.get('/api/payments/plans').then(r => r.data || []).catch(() => []),
       api.get('/api/iptv/plans').then(r => r.data || []).catch(() => []),
-    ]).then(([basic, iptv]) => {
+      api.get('/api/payments/trial').then(r => r.data).catch(() => null),
+    ]).then(([basic, iptv, tr]) => {
+      setTrial(tr);
       setBasicPlans(basic.filter(p => !p.includes_iptv));
       setIptvPlans(iptv.length > 0 ? iptv : basic.filter(p => p.includes_iptv));
     }).finally(() => setLoading(false));
@@ -40,13 +46,14 @@ export default function SubscriptionScreen() {
   const plans    = tab === 0 ? basicPlans : iptvPlans;
   const total    = plans.length + 2; // plans + tabs + logout
   const tabFocus = focused < 2 ? focused : -1;
-  const planFocus = focused >= 2 && focused < plans.length + 2 ? focused - 2 : -1;
-  const logoutFocused = focused === plans.length + 2;
+  const planFocus = focused >= 2 + off && focused < plans.length + 2 + off ? focused - 2 - off : -1;
+  const trialFocus = off === 1 && focused === 2;
+  const logoutFocused = focused === plans.length + 2 + off;
 
-  st.current = { tab, plans, focused, total, subscribing, loading };
+  st.current = { tab, plans, focused, total, subscribing, loading, off };
 
   useKeyDown(e => {
-    const { tab, plans, focused, total, subscribing, loading } = st.current;
+    const { tab, plans, focused, total, subscribing, loading, off } = st.current;
     if (loading || subscribing) return;
     const k = e.keyCode;
 
@@ -55,28 +62,29 @@ export default function SubscriptionScreen() {
       setFocused(f => Math.max(0, f - 1));
     } else if (k === KEY.DOWN) {
       e.preventDefault();
-      setFocused(f => Math.min(plans.length + 2, f + 1));
+      setFocused(f => Math.min(plans.length + 2 + off, f + 1));
     } else if (k === KEY.LEFT) {
       e.preventDefault();
       if (focused < 2) {
         // navigate tabs
         if (tab > 0) { setTab(t => t - 1); setFocused(0); }
-      } else if (focused >= 2 && focused <= plans.length + 1) {
-        setFocused(f => Math.max(2, f - 1));
+      } else if (focused >= 2 + off && focused <= plans.length + 1 + off) {
+        setFocused(f => Math.max(2 + off, f - 1));
       }
     } else if (k === KEY.RIGHT) {
       e.preventDefault();
       if (focused < 2) {
         if (tab < TABS.length - 1) { setTab(t => t + 1); setFocused(1); }
-      } else if (focused >= 2 && focused <= plans.length + 1) {
-        setFocused(f => Math.min(plans.length + 1, f + 1));
+      } else if (focused >= 2 + off && focused <= plans.length + 1 + off) {
+        setFocused(f => Math.min(plans.length + 1 + off, f + 1));
       }
     } else if (k === KEY.ENTER) {
       e.preventDefault();
       if (focused === 0) { setTab(0); }
       else if (focused === 1) { setTab(1); }
-      else if (focused >= 2 && focused <= plans.length + 1) {
-        const plan = plans[focused - 2];
+      else if (off === 1 && focused === 2) { startTrial(); }
+      else if (focused >= 2 + off && focused <= plans.length + 1 + off) {
+        const plan = plans[focused - 2 - off];
         if (plan) handleSubscribe(plan);
       } else {
         logout();
@@ -87,6 +95,19 @@ export default function SubscriptionScreen() {
     }
   }, []);
 
+  async function startTrial() {
+    if (trialBusy) return;
+    setTrialBusy(true);
+    setStatus('Ativando seu teste grátis…');
+    try {
+      await api.post('/api/payments/trial/start');
+      window.location.reload();
+    } catch (e) {
+      setStatus('Erro: ' + ((e.response && e.response.data && e.response.data.error) || 'Não foi possível ativar o teste grátis.'));
+      setTrialBusy(false);
+    }
+  }
+
   async function handleSubscribe(plan) {
     setSubscribing(true);
     setStatus('Solicitando plano…');
@@ -94,7 +115,8 @@ export default function SubscriptionScreen() {
       const endpoint = tab === 1 ? '/api/iptv/subscribe' : '/api/payments/subscribe';
       const { data } = await api.post(endpoint, { plan_id: plan.id });
       if (data.init_point) {
-        setStatus('Acesse no celular para pagar:\n' + data.init_point);
+        setStatus('Escaneie o QR code com o celular para pagar (PIX, cartão ou boleto).\nOu acesse: ' + data.init_point);
+        setQrUrl((api.defaults.baseURL || '') + '/api/payments/qr?text=' + encodeURIComponent(data.init_point));
       } else {
         setStatus('Solicitação enviada! O administrador foi notificado e ativará em breve.');
       }
@@ -151,6 +173,26 @@ export default function SubscriptionScreen() {
         })}
       </div>
 
+      {/* Teste grátis */}
+      {off === 1 && (
+        <div
+          onClick={() => { setFocused(2); startTrial(); }}
+          style={{
+            width: 640, maxWidth: '90%', boxSizing: 'border-box', padding: '16px 24px', borderRadius: 14, marginBottom: 28, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 20,
+            background: trialFocus ? 'rgba(229,9,20,0.22)' : 'rgba(229,9,20,0.10)',
+            border: '3px solid ' + (trialFocus ? '#fff' : 'rgba(229,9,20,0.5)'),
+            transform: trialFocus ? 'scale(1.04)' : 'none', transition: 'transform 0.15s, background 0.15s',
+          }}
+        >
+          <div>
+            <div style={{ fontSize: 20, fontWeight: 800 }}>Teste grátis por {trial.days} dias</div>
+            <div style={{ fontSize: 14, color: '#A3A3A3' }}>Sem cartão. Cancele quando quiser.</div>
+          </div>
+          <div style={{ padding: '12px 24px', borderRadius: 10, background: '#E50914', fontWeight: 800, fontSize: 15 }}>{trialBusy ? 'Aguarde…' : 'Começar'}</div>
+        </div>
+      )}
+
       {/* Plans */}
       {loading ? (
         <div style={{ color: '#555', fontSize: 17 }}>Carregando planos…</div>
@@ -168,12 +210,13 @@ export default function SubscriptionScreen() {
             return (
               <div
                 key={plan.id}
-                onClick={() => { setFocused(idx + 2); handleSubscribe(plan); }}
+                onClick={() => { setFocused(idx + 2 + off); handleSubscribe(plan); }}
                 style={{
                   width: 300, padding: '32px 28px', borderRadius: 18, cursor: 'pointer',
                   background: isFoc ? 'rgba(255,255,255,0.06)' : '#111',
-                  border: '2px solid ' + (isFoc ? '#fff' : plan.highlight ? ACCENT : '#1e1e1e'),
-                  transition: 'background 0.15s, border-color 0.15s',
+                  border: '3px solid ' + (isFoc ? '#fff' : plan.highlight ? ACCENT : '#1e1e1e'),
+                  transform: isFoc ? 'scale(1.06)' : 'none',
+                  transition: 'background 0.15s, border-color 0.15s, transform 0.15s',
                   opacity: subscribing ? 0.7 : 1,
                   position: 'relative',
                 }}
@@ -232,6 +275,7 @@ export default function SubscriptionScreen() {
           color: status.startsWith('Erro') ? '#ff6b6b' : '#fff',
           fontSize: 14, lineHeight: 1.6, whiteSpace: 'pre-line',
         }}>
+          {qrUrl && <img src={qrUrl} alt="QR code" style={{ width: 220, height: 220, background: '#fff', borderRadius: 12, padding: 8, display: 'block', margin: '0 auto 14px' }} />}
           {status}
         </div>
       )}

@@ -4,6 +4,7 @@ import { useParams } from 'next/navigation';
 import Image from 'next/image';
 import Navbar from '../../../components/Navbar';
 import VideoPlayer from '../../../components/VideoPlayer';
+import TogetherButton from '../../../components/TogetherButton';
 import api from '../../../lib/api';
 import { getToken } from '../../../lib/auth';
 import { useProfile } from '../../../contexts/ProfileContext';
@@ -129,6 +130,9 @@ export default function FilmePage() {
                   </button>
                 ) : (
                   <span className={styles.noVideo}>Vídeo não disponível</span>
+                )}
+                {(movie.file_dubbing || movie.file_subtitled || movie.file_cinema || movie.file_4k) && getToken() && (
+                  <TogetherButton contentType="movie" contentId={movie.id} title={movie.title} poster={movie.poster_url} style={{ background: '#1f1f1f', color: '#e5e5e5', border: '1px solid #2a2a2a', borderRadius: 8, padding: '12px 20px', fontWeight: 700, cursor: 'pointer', fontSize: 15 }} />
                 )}
                 {movie.trailer_url && (
                   <a href={movie.trailer_url} target="_blank" rel="noreferrer" className={styles.btnTrailer}>

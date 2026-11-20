@@ -6,7 +6,10 @@ const router = require('express').Router();
 // URL: https://movies0-movie.mgf7wb.easypanel.host/api/webhook/b2?secret=SEU_B2_WEBHOOK_SECRET
 router.post('/b2', async (req, res) => {
   const secret = req.query.secret || req.headers['x-bz-event-secret'];
-  if (process.env.B2_WEBHOOK_SECRET && secret !== process.env.B2_WEBHOOK_SECRET) {
+  // Secret OBRIGATÓRIO: sem ele qualquer um poderia disparar importações.
+  if (!process.env.B2_WEBHOOK_SECRET) return res.status(503).json({ error: 'Webhook não configurado' });
+  const a = Buffer.from(String(secret || '')), b = Buffer.from(process.env.B2_WEBHOOK_SECRET);
+  if (a.length !== b.length || !require('crypto').timingSafeEqual(a, b)) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 

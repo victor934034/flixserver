@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import api, { moviesAPI, seriesAPI, watchlistAPI, likesAPI } from '../api/index.js';
+import { startTogetherWeb } from '../lib/together.js';
 import { KEY, useKeyDown } from '../hooks/useNav.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 
@@ -194,7 +195,16 @@ function EpisodeItem({ ep, focused, onClick, epProgress, innerRef }) {
 
 export default function DetailScreen() {
   const [params]          = useSearchParams();
-  const navigate          = useNavigate();
+  const navigate0         = useNavigate();
+  const togetherRef       = useRef(false);
+  const navigate = (path, opts) => {
+    if (path === '/player' && togetherRef.current && opts && opts.state) {
+      togetherRef.current = false;
+      startTogetherWeb(navigate0, opts.state).catch(() => navigate0(path, opts));
+      return;
+    }
+    navigate0(path, opts);
+  };
   const { activeProfile } = useAuth();
   const type = params.get('type') || 'movie';
   const id   = params.get('id');
@@ -328,6 +338,7 @@ export default function DetailScreen() {
         acts.push({ id: 'play_' + vk, label: vm.label || vk, sublabel: vm.sub, icon: vm.icon || '▶', primary: i === 0 });
       });
     }
+    acts.push({ id: 'together', label: '👥 Assistir juntos' });
     acts.push({ id: 'watchlist', label: wlItem ? 'Na Minha Lista' : 'Minha Lista', icon: wlItem ? '✓' : '+' });
     acts.push({ id: 'like',    label: 'Gostei' + (likeData.likes > 0 ? ' · ' + likeData.likes : ''), icon: '👍', active: likeData.userVote === 'like' });
     acts.push({ id: 'dislike', label: 'Não gostei' + (likeData.dislikes > 0 ? ' · ' + likeData.dislikes : ''), icon: '👎', active: likeData.userVote === 'dislike', danger: likeData.userVote === 'dislike' });
@@ -379,6 +390,12 @@ export default function DetailScreen() {
     if (!act) return;
     if (act.id.startsWith('play_')) { playMovie(act.id.replace('play_', ''), startAt || movieSeconds); return; }
     if (act.id === 'play') { if (firstEp) playEpisode(firstEp, startAt || epSeconds[firstEp.id] || 0); return; }
+    if (act.id === 'together') {
+      togetherRef.current = true;
+      if (isSeries) { if (currentEps[0]) playEpisode(currentEps[0], 0); }
+      else if (versions[0]) playMovie(versions[0], 0);
+      return;
+    }
     if (act.id === 'watchlist') {
       const profileId = activeProfile && activeProfile.id;
       try {

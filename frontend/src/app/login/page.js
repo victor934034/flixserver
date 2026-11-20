@@ -25,7 +25,8 @@ export default function LoginPage() {
         if (!name.trim()) { setError('Nome é obrigatório'); setLoading(false); return; }
         await register(email, password, name);
       }
-      router.push('/');
+      const next = new URLSearchParams(window.location.search).get('next');
+      router.push(next && next.startsWith('/') && !next.startsWith('//') ? next : '/');
     } catch (err) {
       const msg = err.response?.data?.error;
       setError(msg && typeof msg === 'string' ? msg : 'Ocorreu um erro. Tente novamente.');

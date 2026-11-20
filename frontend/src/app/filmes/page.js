@@ -9,11 +9,30 @@ import styles from './page.module.css';
 
 const GENRES = ['Ação','Aventura','Animação','Comédia','Crime','Documentário','Drama','Fantasia','Ficção Científica','Horror','Mistério','Romance','Terror','Thriller'];
 const SORTS = [
-  { value: 'created_at', label: 'Mais Recentes' },
+  { value: 'created_at', label: 'Adicionados recentemente' },
+  { value: 'release_date', label: 'Lançamento mais recente' },
   { value: 'views', label: 'Mais Assistidos' },
   { value: 'rating', label: 'Melhor Avaliados' },
   { value: 'title', label: 'A-Z' },
 ];
+
+const YEAR = new Date().getFullYear();
+const DATE_PRESETS = [
+  { value: '', label: 'Qualquer data' },
+  { value: '30d', label: 'Últimos 30 dias' },
+  { value: '180d', label: 'Últimos 6 meses' },
+  { value: 'year', label: `Este ano (${YEAR})` },
+  { value: '2020s', label: 'Anos 2020' },
+  { value: '2010s', label: 'Anos 2010' },
+  { value: '2000s', label: 'Anos 2000' },
+  { value: '1990s', label: 'Anos 90' },
+];
+function applyPreset(params, key) {
+  if (key === '30d') params.set('released_days', 30);
+  else if (key === '180d') params.set('released_days', 180);
+  else if (key === 'year') { params.set('year_from', YEAR); params.set('year_to', YEAR); }
+  else if (/^\d{4}s$/.test(key)) { params.set('year_from', key.slice(0, 4)); params.set('year_to', Number(key.slice(0, 4)) + 9); }
+}
 
 function FilmesContent() {
   const searchParams = useSearchParams();
@@ -25,6 +44,7 @@ function FilmesContent() {
   const page = Number(searchParams.get('page') || 1);
   const genre = searchParams.get('genre') || '';
   const sort = searchParams.get('sort') || 'created_at';
+  const date = searchParams.get('date') || '';
 
   const totalPages = Math.ceil(total / 24);
 
@@ -32,11 +52,12 @@ function FilmesContent() {
     setLoading(true);
     const params = new URLSearchParams({ page, sort, limit: 24 });
     if (genre) params.set('genre', genre);
+    applyPreset(params, date);
     api.get(`/movies?${params}`)
       .then(r => { setMovies(r.data.data || []); setTotal(r.data.total || 0); })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [page, genre, sort]);
+  }, [page, genre, sort, date]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -64,6 +85,9 @@ function FilmesContent() {
         <select className={styles.select} value={genre} onChange={e => setParam('genre', e.target.value)}>
           <option value="">Todos os Gêneros</option>
           {GENRES.map(g => <option key={g} value={g}>{g}</option>)}
+        </select>
+        <select className={styles.select} value={date} onChange={e => setParam('date', e.target.value)}>
+          {DATE_PRESETS.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
         </select>
         <select className={styles.select} value={sort} onChange={e => setParam('sort', e.target.value)}>
           {SORTS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}

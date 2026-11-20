@@ -10,12 +10,14 @@
     "update": "eas update --branch production --message \"update\""
   },
   "dependencies": {
+    "@config-plugins/react-native-webrtc": "^13.0.0",
     "@expo/vector-icons": "^15.0.3",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/netinfo": "11.4.1",
     "@sentry/react-native": "~7.2.0",
     "axios": "^1.7.2",
     "expo": "~54.0.0",
+    "expo-application": "~7.0.8",
     "expo-av": "~16.0.8",
     "expo-blur": "~15.0.8",
     "expo-brightness": "~14.0.8",
@@ -45,7 +47,9 @@
     "react-native-safe-area-context": "~5.6.0",
     "react-native-screens": "~4.16.0",
     "react-native-web": "^0.21.0",
-    "react-native-worklets": "0.5.1"
+    "react-native-webrtc": "^124.0.7",
+    "react-native-worklets": "0.5.1",
+    "socket.io-client": "^4.8.4"
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",

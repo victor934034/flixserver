@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS movies (
   file_subtitled TEXT,
   file_cinema TEXT,
   file_4k TEXT,
+  file_color TEXT,
+  file_bw TEXT,
   subtitle_pt TEXT,
   subtitle_en TEXT,
   subtitle_es TEXT,
@@ -69,6 +71,8 @@ CREATE TABLE IF NOT EXISTS episodes (
   file_dubbing TEXT,
   file_subtitled TEXT,
   file_cinema TEXT,
+  file_color TEXT,
+  file_bw TEXT,
   subtitle_pt TEXT,
   subtitle_en TEXT,
   subtitle_es TEXT,
@@ -178,3 +182,23 @@ CREATE POLICY "movies_public_read" ON movies FOR SELECT USING (is_active = true)
 CREATE POLICY "series_public_read" ON series FOR SELECT USING (is_active = true);
 CREATE POLICY "episodes_public_read" ON episodes FOR SELECT USING (is_active = true);
 CREATE POLICY "categories_public_read" ON categories FOR SELECT USING (is_active = true);
+
+-- Chat de suporte: ver supabase/migrations/20261115_support_chat.sql
+CREATE TABLE IF NOT EXISTS support_messages (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  sender VARCHAR(10) NOT NULL CHECK (sender IN ('user', 'admin')),
+  body TEXT NOT NULL DEFAULT '',
+  attachment_url TEXT,
+  attachment_type VARCHAR(10) CHECK (attachment_type IN ('image', 'video', 'file')),
+  attachment_name TEXT,
+  attachment_size BIGINT,
+  is_read BOOLEAN DEFAULT false,   -- lida pelo destinatário
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_support_messages_user ON support_messages(user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_support_messages_created ON support_messages(created_at DESC);
+
+-- Só o backend (service key) acessa; sem leitura pública.
+ALTER TABLE support_messages ENABLE ROW LEVEL SECURITY;

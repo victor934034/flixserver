@@ -22,8 +22,10 @@ const NAV = [
   { href: '/admin/atividade', label: 'Atividade' },
   { href: '/admin/avatares', label: 'Avatares' },
   { href: '/admin/iptv', label: 'IPTV' },
+  { href: '/admin/pagamentos', label: 'Assinaturas' },
+  { href: '/admin/seguranca', label: 'Bloqueios e segurança' },
   { href: '/admin/ajuda', label: 'Ajuda/FAQ' },
-  { href: '/admin/configuracoes', label: 'Configurações' },
+  { href: '/admin/configuracoes', label: 'Configurações e banners' },
 ];
 
 export default function AdminLayout({ children }) {

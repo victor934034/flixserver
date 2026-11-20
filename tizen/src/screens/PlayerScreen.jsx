@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useTogether } from '../lib/together.js';
 import { KEY, useKeyDown } from '../hooks/useNav.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { historyAPI } from '../api/index.js';
@@ -198,6 +199,7 @@ export default function PlayerScreen() {
     seriesContext          = null,
     contentMeta            = null,
     startAt                = null,
+    room                   = null,
   } = state || {};
 
   const availTracks = ['dubbing','subtitled','cinema','color','bw'].filter(k => !!tracks[k]);
@@ -240,6 +242,67 @@ export default function PlayerScreen() {
 
   const currentUrl    = tracks[trackKey] || initialUrl;
 
+  // ── Assistir juntos: sincroniza play/pause/seek com a sala ──
+  const tg = useTogether(room ? String(room) : null);
+  const applyingRemote = useRef(false);
+  const tgRef = useRef(tg);
+  tgRef.current = tg;
+  useEffect(() => {
+    if (!tg.active) return undefined;
+    const v = videoRef.current;
+    if (!v) return undefined;
+    const unlock = () => setTimeout(() => { applyingRemote.current = false; }, 500);
+    const local = (type) => {
+      const t = tgRef.current;
+      if (applyingRemote.current || t.status !== 'ready' || forcedPauseRef.current) return;
+      t.emit({ type, playing: !v.paused, time: v.currentTime });
+    };
+    const onPlay = () => local('play');
+    const onPause = () => local('pause');
+    const onSeeked = () => local('seek');
+    v.addEventListener('play', onPlay);
+    v.addEventListener('pause', onPause);
+    v.addEventListener('seeked', onSeeked);
+    const apply = (ev) => {
+      if (ev.type === 'version' || ev.type === 'subtitle') return;
+      const cur = videoRef.current;
+      if (!cur) return;
+      const lag = ev.playing ? Math.max(0, (tgRef.current.serverNow() - ev.t) / 1000) : 0;
+      const target = ev.time + lag;
+      applyingRemote.current = true;
+      const tol = ev.type === 'tick' ? 1.2 : 0.35;
+      if (Math.abs(cur.currentTime - target) > tol) cur.currentTime = target;
+      if (ev.playing && cur.paused) cur.play().catch(() => {});
+      if (!ev.playing && !cur.paused) cur.pause();
+      unlock();
+    };
+    const unsub = tg.subscribe(apply);
+    const tick = setInterval(() => {
+      const t = tgRef.current;
+      if (t.isHost && t.status === 'ready' && !v.paused) t.emit({ type: 'tick', playing: true, time: v.currentTime });
+    }, 4000);
+    return () => {
+      v.removeEventListener('play', onPlay); v.removeEventListener('pause', onPause); v.removeEventListener('seeked', onSeeked);
+      unsub(); clearInterval(tick);
+    };
+  }, [tg.active]);
+  useEffect(() => {
+    const st0 = tg.initialState;
+    if (!st0) return;
+    const v = videoRef.current;
+    if (!v) return;
+    const go = () => {
+      const lag = st0.playing ? Math.max(0, (tg.serverNow() - st0.t) / 1000) : 0;
+      applyingRemote.current = true;
+      v.currentTime = st0.time + lag;
+      if (st0.playing) v.play().catch(() => {}); else v.pause();
+      setTimeout(() => { applyingRemote.current = false; }, 800);
+    };
+    if (v.readyState >= 1) go(); else v.addEventListener('loadedmetadata', go, { once: true });
+  }, [tg.initialState]);
+  useEffect(() => { if (tg.status === 'ended') navigate(-1); }, [tg.status]);
+
+
   // Inicia o primeiro play quando há INITIAL_BUFFER_S disponível (ou no timeout)
   const startInitialPlay = useCallback(() => {
     const v = videoRef.current;
@@ -279,6 +342,7 @@ export default function PlayerScreen() {
     if (playFillRef.current)  playFillRef.current.style.width  = pct + '%';
     if (playThumbRef.current) playThumbRef.current.style.left  = pct + '%';
     if (timeLeftRef.current)  timeLeftRef.current.textContent  = fmt(ct);
+    if (timeDurRef.current)   timeDurRef.current.textContent   = '-' + fmt(Math.max(0, dur - ct));
   }
 
   function updateBufferDOM(buf, dur) {

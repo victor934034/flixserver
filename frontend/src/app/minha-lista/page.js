@@ -10,6 +10,7 @@ import styles from './page.module.css';
 export default function MinhaListaPage() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [q, setQ] = useState('');
   const { activeProfile } = useProfile();
 
   useEffect(() => {
@@ -28,11 +29,19 @@ export default function MinhaListaPage() {
       .catch(() => {});
   }
 
+  const norm = t => (t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  const shown = q.trim() ? items.filter(i => norm(i.title).includes(norm(q.trim()))) : items;
+
   return (
     <>
       <Navbar />
       <main className={styles.main}>
-        <h1 className={styles.title}>Minha Lista</h1>
+        <h1 className={styles.title}>Minha Lista <span style={{ color: '#888', fontWeight: 600, fontSize: '0.6em' }}>({items.length} {items.length === 1 ? 'item' : 'itens'})</span></h1>
+        {items.length > 0 && (
+          <input type="search" value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar nos favoritos" aria-label="Buscar nos favoritos"
+            style={{ width: '100%', maxWidth: 420, height: 42, padding: '0 14px', margin: '0 0 20px', borderRadius: 10, border: '1px solid #2a2a2a', background: '#141414', color: '#e5e5e5', fontSize: 14, outline: 'none' }} />
+        )}
+        {items.length > 0 && shown.length === 0 && <p className={styles.loading}>Nenhum favorito encontrado para “{q}”.</p>}
 
         {loading && <p className={styles.loading}>Carregando...</p>}
 
@@ -44,7 +53,7 @@ export default function MinhaListaPage() {
         )}
 
         <div className={styles.grid}>
-          {items.map(item => {
+          {shown.map(item => {
             const href = item.content_type === 'series' ? `/serie/${item.content_id}` : `/filme/${item.content_id}`;
             return (
               <div key={item.watchlist_id || item.id} className={styles.card}>

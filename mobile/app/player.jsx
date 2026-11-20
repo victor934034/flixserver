@@ -14,6 +14,8 @@ import * as NavigationBar from 'expo-navigation-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import CachedImage from '../components/CachedImage';
 import api from '../lib/api';
+import { useTogether } from '../lib/together';
+import TogetherOverlay from '../components/TogetherOverlay';
 import { useProfile } from '../contexts/ProfileContext';
 import { useDownloads } from '../contexts/DownloadContext';
 import NetInfo from '@react-native-community/netinfo';
@@ -197,6 +199,11 @@ export default function PlayerScreen() {
   const { isPlaying = false } = useEvent(player, 'playingChange', { isPlaying: false });
   const { status = 'idle', error: playerError } = useEvent(player, 'statusChange', { status: 'idle' });
 
+  // ─── Assistir juntos (sincronia + chat) ───────────────────────────────────
+  const tg = useTogether(params.room ? String(params.room) : null);
+  const applyingRemote = useRef(false);
+  const switchVerRef = useRef(null);
+
   // ─── Google Cast (Chromecast) — hooks ─────────────────────────────────────
   const castClient = useRemoteMediaClient();
   const castState = useCastState();
@@ -331,6 +338,7 @@ export default function PlayerScreen() {
       castClient.seek({ position: t, resumeState: remoteIsPlaying ? 'play' : 'pause' }).catch(() => {});
     } else {
       player.currentTime = t;
+      if (tg.active && !applyingRemote.current) tg.emit({ type: 'seek', playing: isPlaying, time: t });
     }
   };
   // Refs pra handlers criados uma vez só (PanResponder) enxergarem o valor atual
@@ -578,7 +586,9 @@ export default function PlayerScreen() {
       schedHide();
       return;
     }
-    isPlaying ? player.pause() : player.play();
+    const willPlay = !isPlaying;
+    willPlay ? player.play() : player.pause();
+    if (tg.active && !applyingRemote.current) tg.emit({ type: willPlay ? 'play' : 'pause', playing: willPlay, time: player.currentTime });
     schedHide();
   };
 
@@ -589,6 +599,7 @@ export default function PlayerScreen() {
       return;
     }
     player.seekBy(sec);
+    if (tg.active && !applyingRemote.current) tg.emit({ type: 'seek', playing: isPlaying, time: Math.max(0, player.currentTime + sec) });
     schedHide();
   };
 
@@ -630,7 +641,7 @@ export default function PlayerScreen() {
     };
   }, []);
 
-  const switchVer = (v) => {
+  const switchVer = (v, fromRemote = false) => {
     if (v !== activeVer) {
       const isDualAudio = versions[v] === versions[activeVer] && audioTracks.length > 1;
       if (isDualAudio) {
@@ -646,9 +657,58 @@ export default function PlayerScreen() {
         }
       }
       setActiveVer(v);
+      if (tg.active && !fromRemote) tg.emit({ type: 'version', version: v, playing: isPlaying, time: currentTime });
     }
     setSheet(null);
   };
+  switchVerRef.current = switchVer;
+
+  // Eventos dos outros da sala: aplica compensando a latência
+  useEffect(() => {
+    if (!tg.active) return;
+    const apply = (ev) => {
+      if (ev.type === 'version' && ev.version && versions[ev.version]) switchVerRef.current?.(ev.version, true);
+      if (ev.type === 'subtitle') { applyingRemote.current = true; setActiveSub(ev.subtitle === 'none' ? null : ev.subtitle); setTimeout(() => { applyingRemote.current = false; }, 500); return; }
+      const lag = ev.playing ? Math.max(0, (tg.serverNow() - ev.t) / 1000) : 0;
+      const target = ev.time + lag;
+      applyingRemote.current = true;
+      try {
+        if (Math.abs(player.currentTime - target) > (ev.type === 'tick' ? 1.2 : 0.4)) player.currentTime = target;
+        ev.playing ? player.play() : player.pause();
+      } catch {}
+      setTimeout(() => { applyingRemote.current = false; }, 500);
+    };
+    const unsub = tg.subscribe(apply);
+    return unsub;
+  }, [tg.active]);
+
+  // Quem entra depois pega o estado atual da sala
+  useEffect(() => {
+    const st = tg.initialState;
+    if (!st) return;
+    if (st.version && versions[st.version] && st.version !== activeVer) switchVerRef.current?.(st.version, true);
+    const lag = st.playing ? Math.max(0, (tg.serverNow() - st.t) / 1000) : 0;
+    applyingRemote.current = true;
+    try { player.currentTime = st.time + lag; st.playing ? player.play() : player.pause(); } catch {}
+    setTimeout(() => { applyingRemote.current = false; }, 500);
+  }, [tg.initialState]);
+
+  // Legenda local -> sala
+  useEffect(() => {
+    if (tg.active && tg.status === 'ready' && !applyingRemote.current) tg.emit({ type: 'subtitle', subtitle: activeSub || 'none', playing: isPlaying, time: currentTime });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSub]);
+
+  // O anfitrião manda um tick a cada 4s pra corrigir deriva de quem ficou pra trás
+  useEffect(() => {
+    if (!tg.active || !tg.isHost) return;
+    const t = setInterval(() => { if (player.playing) tg.emit({ type: 'tick', playing: true, time: player.currentTime }); }, 4000);
+    return () => clearInterval(t);
+  }, [tg.active, tg.isHost]);
+
+  // Sessão encerrada pelo anfitrião: sai do player
+  useEffect(() => { if (tg.status === 'ended') router.back(); }, [tg.status]);
+
 
   // "Tentar novamente": cada toque tenta algo diferente em vez de repetir a
   // mesma URL que ja falhou -
@@ -1091,7 +1151,7 @@ export default function PlayerScreen() {
 
             <View style={styles.timeRow}>
               <Text style={styles.timeText}>{fmtSec(displayTime)}</Text>
-              <Text style={styles.timeText}>{fmtSec(durSec)}</Text>
+              <Text style={styles.timeText}>{'-' + fmtSec(Math.max(0, durSec - displayTime))}</Text>
             </View>
 
             {/* Action bar */}
@@ -1523,6 +1583,8 @@ export default function PlayerScreen() {
           </TouchableOpacity>
         </TouchableOpacity>
       )}
+
+      {tg.active && <TogetherOverlay tg={tg} visible={ctrlVisible} />}
     </View>
   );
 }

@@ -5,6 +5,25 @@ const { sendPushToAll } = require('../services/notifications');
 
 router.use(adminMiddleware);
 
+
+// ---- helpers da lista de conteúdo (filmes/séries) ----
+function applyContentFilter(query, f, kind) {
+  if (f === 'featured') query = query.eq('is_featured', true);
+  else if (f === 'banner') query = query.eq('in_banner', true);
+  else if (f === 'hidden') query = query.eq('is_active', false);
+  else if (f === 'no_poster') query = query.is('poster_url', null);
+  else if (f === 'no_date') query = query.is('release_date', null);
+  else if (f === 'recent') query = query.gte('created_at', new Date(Date.now() - 7 * 86400000).toISOString());
+  else if (kind === 'movies' && f === 'no_video') query = query.is('file_dubbing', null).is('file_subtitled', null).is('file_cinema', null).is('file_4k', null);
+  else if (kind === 'movies' && f === 'no_subtitle') query = query.is('subtitle_pt', null);
+  return query;
+}
+function sortContent(query, sort) {
+  if (sort === 'title') return query.order('title', { ascending: true });
+  if (sort === 'release') return query.order('release_date', { ascending: false, nullsFirst: false });
+  return query.order('created_at', { ascending: false });
+}
+
 // ---- STATS ----
 router.get('/stats', async (req, res) => {
   try {
@@ -128,16 +147,17 @@ function detectVersionFromName(filename = '') {
 // ---- MOVIES CRUD ----
 router.get('/movies', async (req, res) => {
   try {
-    const { page = 1, limit = 30, q } = req.query;
+    const { page = 1, limit = 30, q, filter, sort } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
 
     let query = supabase
       .from('movies')
       .select('*', { count: 'exact' })
-      .order('created_at', { ascending: false })
       .range(offset, offset + Number(limit) - 1);
 
-    if (q) query = query.ilike('title', `%${q}%`);
+    if (q) query = /^\d+$/.test(q.trim()) ? query.or(`title.ilike.%${q}%,tmdb_id.eq.${q.trim()}`) : query.ilike('title', `%${q}%`);
+    query = applyContentFilter(query, filter, 'movies');
+    query = sortContent(query, sort);
 
     const { data, error, count } = await query;
     if (error) throw error;
@@ -197,16 +217,17 @@ router.delete('/movies/:id', async (req, res) => {
 // ---- SERIES CRUD ----
 router.get('/series', async (req, res) => {
   try {
-    const { page = 1, limit = 30, q } = req.query;
+    const { page = 1, limit = 30, q, filter, sort } = req.query;
     const offset = (Number(page) - 1) * Number(limit);
 
     let query = supabase
       .from('series')
       .select('*', { count: 'exact' })
-      .order('created_at', { ascending: false })
       .range(offset, offset + Number(limit) - 1);
 
-    if (q) query = query.ilike('title', `%${q}%`);
+    if (q) query = /^\d+$/.test(q.trim()) ? query.or(`title.ilike.%${q}%,tmdb_id.eq.${q.trim()}`) : query.ilike('title', `%${q}%`);
+    query = applyContentFilter(query, filter, 'series');
+    query = sortContent(query, sort);
 
     const { data, error, count } = await query;
     if (error) throw error;
@@ -2440,6 +2461,122 @@ router.get('/episode-refresh-status', (req, res) => {
   const job = episodeRefreshJobs.get(jobId);
   if (!job) return res.status(404).json({ error: 'Job não encontrado' });
   res.json(job);
+});
+
+// POST /api/admin/backfill-release-dates - preenche a data real de lancamento
+// (TMDB) dos filmes/series que ainda nao tem. Roda em segundo plano.
+let backfillState = { running: false, done: 0, total: 0, failed: 0 };
+router.get('/backfill-release-dates', (req, res) => res.json(backfillState));
+router.post('/backfill-release-dates', async (req, res) => {
+  if (backfillState.running) return res.json(backfillState);
+  const axios = require('axios');
+  const [m, se] = await Promise.all([
+    supabase.from('movies').select('id, tmdb_id').is('release_date', null).not('tmdb_id', 'is', null),
+    supabase.from('series').select('id, tmdb_id').is('release_date', null).not('tmdb_id', 'is', null),
+  ]);
+  const jobs = [
+    ...(m.data || []).map(r => ({ ...r, table: 'movies', ep: 'movie', field: 'release_date' })),
+    ...(se.data || []).map(r => ({ ...r, table: 'series', ep: 'tv', field: 'first_air_date' })),
+  ];
+  backfillState = { running: true, done: 0, total: jobs.length, failed: 0 };
+  res.json(backfillState);
+  (async () => {
+    let idx = 0;
+    const worker = async () => {
+      while (idx < jobs.length) {
+        const j = jobs[idx++];
+        try {
+          const { data } = await axios.get('https://api.themoviedb.org/3/' + j.ep + '/' + j.tmdb_id, { params: { api_key: process.env.TMDB_API_KEY }, timeout: 8000 });
+          const d = data[j.field];
+          if (d) await supabase.from(j.table).update({ release_date: d }).eq('id', j.id);
+        } catch { backfillState.failed++; }
+        backfillState.done++;
+      }
+    };
+    await Promise.all([worker(), worker(), worker(), worker()]);
+    backfillState.running = false;
+  })();
+});
+
+// ---- contagens dos chips (Todos, Em destaque, No banner...) ----
+router.get('/content-counts', async (req, res) => {
+  try {
+    const kind = req.query.type === 'series' ? 'series' : 'movies';
+    const filters = ['', 'featured', 'banner', 'recent', 'no_poster', ...(kind === 'movies' ? ['no_video', 'no_subtitle'] : []), 'hidden'];
+    const counts = {};
+    await Promise.all(filters.map(async f => {
+      const q = applyContentFilter(supabase.from(kind).select('id', { count: 'exact', head: true }), f, kind);
+      const { count } = await q;
+      counts[f || 'all'] = count || 0;
+    }));
+    res.json(counts);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ---- ações em massa: destacar / banner / ocultar ----
+router.post('/bulk', async (req, res) => {
+  try {
+    const { type, ids, patch } = req.body || {};
+    const table = type === 'series' ? 'series' : 'movies';
+    if (!Array.isArray(ids) || !ids.length || ids.length > 200) return res.status(400).json({ error: 'ids inválidos' });
+    const allowed = ['is_featured', 'in_banner', 'is_active'];
+    const clean = {};
+    for (const k of allowed) if (typeof patch?.[k] === 'boolean') clean[k] = patch[k];
+    if (!Object.keys(clean).length) return res.status(400).json({ error: 'nada para alterar' });
+    if (clean.in_banner === true) {
+      // entra no fim da fila de banners
+      const [m, se] = await Promise.all([
+        supabase.from('movies').select('banner_order').eq('in_banner', true).order('banner_order', { ascending: false }).limit(1),
+        supabase.from('series').select('banner_order').eq('in_banner', true).order('banner_order', { ascending: false }).limit(1),
+      ]);
+      clean.banner_order = Math.max(m.data?.[0]?.banner_order ?? 0, se.data?.[0]?.banner_order ?? 0) + 1;
+    }
+    if (clean.in_banner === false) clean.banner_order = null;
+    const { error } = await supabase.from(table).update(clean).in('id', ids);
+    if (error) throw error;
+    res.json({ ok: true, updated: ids.length });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ---- banners da Home ----
+router.get('/banners', async (req, res) => {
+  try {
+    const [m, se] = await Promise.all([
+      supabase.from('movies').select('id, title, year, backdrop_url, poster_url, genres, banner_order').eq('in_banner', true).eq('is_active', true),
+      supabase.from('series').select('id, title, year_start, backdrop_url, poster_url, genres, banner_order').eq('in_banner', true).eq('is_active', true),
+    ]);
+    const items = [
+      ...(m.data || []).map(x => ({ ...x, type: 'movie' })),
+      ...(se.data || []).map(x => ({ ...x, type: 'series', year: x.year_start })),
+    ].sort((a, b) => (a.banner_order ?? 99) - (b.banner_order ?? 99));
+    res.json(items);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+router.put('/banners/order', async (req, res) => {
+  try {
+    const list = Array.isArray(req.body?.items) ? req.body.items : [];
+    await Promise.all(list.map((it, idx) => supabase
+      .from(it.type === 'series' ? 'series' : 'movies').update({ banner_order: idx + 1 }).eq('id', it.id)));
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ---- ativa pedido IPTV já com usuário/senha do servidor ----
+router.post('/iptv/orders/:id/activate-with-credentials', async (req, res) => {
+  try {
+    const { xc_username, xc_password } = req.body || {};
+    if (!xc_username || !xc_password) return res.status(400).json({ error: 'Informe usuário e senha do servidor' });
+    const { data: order, error: oErr } = await supabase.from('iptv_orders').select('user_id').eq('id', req.params.id).single();
+    if (oErr || !order) return res.status(404).json({ error: 'Pedido não encontrado' });
+    const { error: cErr } = await supabase.from('iptv_credentials')
+      .upsert({ user_id: order.user_id, xc_username, xc_password, active: true, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
+    if (cErr) throw cErr;
+    // reaproveita a rota de ativação (expiração + push)
+    req.url = '/iptv/orders/' + req.params.id + '/activate';
+    req.method = 'PATCH';
+    return router.handle(req, res, () => res.status(500).json({ error: 'falha ao ativar' }));
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 module.exports = router;

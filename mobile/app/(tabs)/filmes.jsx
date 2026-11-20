@@ -4,6 +4,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MovieCard from '../../components/MovieCard';
 import api from '../../lib/api';
+import DateChips from '../../components/DateChips';
+import { presetQuery } from '../../lib/datePresets';
 
 export default function FilmesScreen() {
   const insets = useSafeAreaInsets();
@@ -19,18 +21,21 @@ export default function FilmesScreen() {
   const [genres, setGenres] = useState([]);
   const [selectedGenre, setSelectedGenre] = useState(null);
   const [genreModal, setGenreModal] = useState(false);
+  const [datePreset, setDatePreset] = useState('');
 
   useEffect(() => {
     api.get('/genres').then(r => setGenres(Array.isArray(r.data) ? r.data : [])).catch(() => {});
   }, []);
 
-  useEffect(() => { load(1, true); }, [selectedGenre]);
+  useEffect(() => { load(1, true); }, [selectedGenre, datePreset]);
 
   const load = async (p, reset = false) => {
     if (reset) setLoading(true); else setLoadingMore(true);
     try {
       let url = `/movies?page=${p}&limit=21`;
       if (selectedGenre) url += `&genre=${encodeURIComponent(selectedGenre)}`;
+      url += presetQuery(datePreset);
+      if (datePreset) url += '&sort=release_date';
       const res = await api.get(url);
       const data = Array.isArray(res.data) ? res.data : (res.data.data ?? res.data.items ?? []);
       setMovies(prev => reset ? data : [...prev, ...data]);
@@ -59,6 +64,8 @@ export default function FilmesScreen() {
           </TouchableOpacity>
         )}
       </View>
+
+      <DateChips value={datePreset} onChange={setDatePreset} />
 
       <Modal
         visible={genreModal}

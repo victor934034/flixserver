@@ -114,6 +114,7 @@ function handleNotificationTap(data, router) {
     else if (screen === 'chat') router.push('/chat');
     else if (screen === 'admin-chat') router.push(data.userId ? `/admin-chat?userId=${data.userId}` : '/admin-chat');
     else if (screen === 'home') router.replace('/(tabs)');
+    else if (screen === 'juntos' && data.code) router.push({ pathname: '/juntos', params: { code: data.code } });
   } catch {}
 }
 

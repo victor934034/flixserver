@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { startTogether } from '../lib/together';
 import api from '../lib/api';
 import { useProfile } from '../contexts/ProfileContext';
 
@@ -273,10 +274,10 @@ export default function DetailScreen({ navigation, route }) {
     try { epListRef.current?.scrollToOffset({ offset: 0, animated: false }); } catch {}
   }
 
-  function playMovie(version) {
+  function buildMovieParams(version) {
     const url = detail[`file_${version}`] || detail.file_dubbing || detail.file_subtitled || detail.file_cinema;
-    if (!url) return;
-    navigation.navigate('Player', {
+    if (!url) return null;
+    return {
       url,
       title: detail.title || detail.name,
       poster: detail.backdrop_url,
@@ -291,15 +292,26 @@ export default function DetailScreen({ navigation, route }) {
         es: detail.subtitle_es || null,
       },
       contentMeta: { content_type: 'movie', content_id: detail.id },
-    });
+    };
   }
 
-  function playEpisode(ep) {
+  function playMovie(version) {
+    const p = buildMovieParams(version);
+    if (p) navigation.navigate('Player', p);
+  }
+
+  async function watchTogether(params) {
+    if (!params) return;
+    try { await startTogether(navigation, params); }
+    catch (e) { /* sem sala: assiste sozinho */ navigation.navigate('Player', params); }
+  }
+
+  function buildEpisodeParams(ep) {
     const url = ep.file_dubbing || ep.file_subtitled || ep.file_cinema;
-    if (!url) return;
+    if (!url) return null;
     const epLabel = `T${ep.season_number}E${String(ep.episode_number).padStart(2, '0')}`;
     const title = `${detail.title || detail.name} · ${epLabel}${ep.title ? ` · ${ep.title}` : ''}`;
-    navigation.navigate('Player', {
+    return {
       url,
       title,
       poster: ep.thumbnail_url || detail.backdrop_url,
@@ -321,7 +333,12 @@ export default function DetailScreen({ navigation, route }) {
         currentEpId: ep.id,
       },
       contentMeta: { content_type: 'episode', content_id: ep.id, episode_id: ep.id, series_id: detail.id },
-    });
+    };
+  }
+
+  function playEpisode(ep) {
+    const p = buildEpisodeParams(ep);
+    if (p) navigation.navigate('Player', p);
   }
 
   const versions = [];
@@ -459,6 +476,11 @@ export default function DetailScreen({ navigation, route }) {
                   />
                 ))}
                 <ActionBtn
+                  label="Assistir juntos"
+                  icon="people"
+                  onPress={() => watchTogether(buildMovieParams(versions[0]?.key))}
+                />
+                <ActionBtn
                   label={watchlistId ? 'Na Minha Lista' : 'Minha Lista'}
                   icon={watchlistId ? 'checkmark' : 'add'}
                   onPress={toggleWatchlist}
@@ -477,6 +499,11 @@ export default function DetailScreen({ navigation, route }) {
                   hasTVPreferredFocus
                   nextFocusRight={firstEpHandle}
                   onPress={() => playEpisode(firstEp)}
+                />
+                <ActionBtn
+                  label="Assistir juntos"
+                  icon="people"
+                  onPress={() => watchTogether(buildEpisodeParams(firstEp))}
                 />
                 <ActionBtn
                   label={watchlistId ? 'Na Minha Lista' : 'Minha Lista'}

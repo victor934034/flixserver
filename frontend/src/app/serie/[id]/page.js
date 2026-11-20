@@ -4,6 +4,7 @@ import { useParams } from 'next/navigation';
 import Image from 'next/image';
 import Navbar from '../../../components/Navbar';
 import VideoPlayer from '../../../components/VideoPlayer';
+import TogetherButton from '../../../components/TogetherButton';
 import api from '../../../lib/api';
 import { getToken } from '../../../lib/auth';
 import { useProfile } from '../../../contexts/ProfileContext';
@@ -125,6 +126,11 @@ export default function SeriePage() {
       <main className={styles.main}>
         {playing ? (
           <div className={styles.playerWrap}>
+            {getToken() && (
+              <div style={{ position: 'absolute', top: 12, right: 12, zIndex: 30 }}>
+                <TogetherButton contentType="episode" contentId={playing.id} title={`${serie.title} — T${playing.season_number}E${playing.episode_number}`} poster={serie.poster_url} style={{ background: '#1f1f1f', color: '#e5e5e5', border: '1px solid #2a2a2a', borderRadius: 8, padding: '12px 20px', fontWeight: 700, cursor: 'pointer', fontSize: 15 }} />
+              </div>
+            )}
             <VideoPlayer
               key={playing.id}
               content={playing}

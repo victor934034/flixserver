@@ -46,7 +46,7 @@ export default function RegisterScreen() {
         <Text style={styles.logo}>FLIXHOME</Text>
         <Text style={styles.title}>Criar conta</Text>
         <Text style={styles.subtitle}>
-          Preencha os dados abaixo. Enviaremos um código para confirmar seu email.
+          Preencha os dados abaixo. Enviaremos um código para confirmar seu email (se não chegar, olhe a caixa de spam).
         </Text>
 
         <TextInput

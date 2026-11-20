@@ -8,6 +8,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import api from '../../lib/api';
+import { startTogether } from '../../lib/togetherNav';
 import { useDownloads } from '../../contexts/DownloadContext';
 import { useParental } from '../../contexts/ParentalContext';
 import { useProfile } from '../../contexts/ProfileContext';
@@ -247,6 +248,12 @@ export default function FilmeDetail() {
               <Ionicons name="logo-youtube" size={22} color="#fff" />
             </TouchableOpacity>
           )}
+          <TouchableOpacity style={styles.btnList} onPress={async () => {
+            try { if (await checkAccess(movie)) await startTogether(router, { type: 'movie', content: movie, title: movie.title }); }
+            catch (e) { Alert.alert('Assistir juntos', e.response?.data?.error || e.message || 'Não foi possível criar a sessão.'); }
+          }}>
+            <Ionicons name="people" size={22} color="#fff" />
+          </TouchableOpacity>
           <TouchableOpacity style={styles.btnList} onPress={toggleList} disabled={listLoading}>
             {listLoading
               ? <ActivityIndicator size="small" color="#E50914" />

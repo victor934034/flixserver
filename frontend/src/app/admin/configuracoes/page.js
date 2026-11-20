@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import api from '../../../lib/api';
 import styles from '../filmes/novo/page.module.css';
+import BannersTrial from './BannersTrial';
 
 const DEFAULT_PLANS = [
   { id: 'monthly_2',   name: 'Mensal · 2 Telas',     price: 9.90,   promo_price: 2.90, duration_days: 30,  active: true,  badge: null,           description: 'Acesso por 1 mês',       highlight: false, max_streams: 2 },
@@ -221,7 +222,9 @@ export default function Configuracoes() {
 
   return (
     <div>
-      <h1 className={styles.heading}>Configurações</h1>
+      <h1 className={styles.heading}>Configurações e banners</h1>
+
+      <BannersTrial />
 
       {/* ── ASSINATURA GLOBAL ── */}
       <section style={{ marginBottom: 40 }}>

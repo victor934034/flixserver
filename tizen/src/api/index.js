@@ -1,13 +1,28 @@
 import axios from 'axios';
 
-const BASE_URL = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) || '';
+export const BASE_URL = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) || '';
 
 const api = axios.create({ baseURL: BASE_URL, timeout: 15000 });
+
+// ID do aparelho (anti-abuso do teste grátis). Samsung: DUID real; LG/outros: UUID persistido.
+function tvDeviceId() {
+  try {
+    if (typeof webapis !== 'undefined' && webapis.productinfo && webapis.productinfo.getDuid) {
+      const d = webapis.productinfo.getDuid();
+      if (d) return 'tizen:' + d;
+    }
+  } catch {}
+  let id = localStorage.getItem('device_install_id');
+  if (!id) { id = 'tv-' + String(Math.random()).slice(2) + Date.now(); localStorage.setItem('device_install_id', id); }
+  return id;
+}
 
 api.interceptors.request.use((config) => {
   try {
     const token = localStorage.getItem('token');
     if (token) config.headers.Authorization = 'Bearer ' + token;
+    config.headers['X-Platform'] = 'tv';
+    config.headers['X-Device-Id'] = tvDeviceId();
   } catch {}
   return config;
 });
