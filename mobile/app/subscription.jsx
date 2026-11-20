@@ -117,31 +117,18 @@ export default function SubscriptionScreen() {
 
   const plans = tab === 0 ? basicPlans : iptvPlans;
 
-  const handleSubscribe = async (plan) => {
-    setSubscribing(plan.id);
-    try {
-      const endpoint = tab === 1 ? '/iptv/subscribe' : '/payments/subscribe';
-      const { data } = await api.post(endpoint, { plan_id: plan.id });
-      if (data.init_point) {
-        await Linking.openURL(data.init_point);
-        Alert.alert(
-          'Pagamento iniciado',
-          'Conclua o pagamento na página aberta (PIX, cartão ou boleto). Ao confirmar, sua assinatura é liberada automaticamente — é só voltar ao app.',
-          [{ text: 'OK' }]
-        );
-      } else {
-        Alert.alert(
-          'Solicitação enviada!',
-          'O administrador foi notificado e ativará sua assinatura em breve.',
-          [{ text: 'OK' }]
-        );
-      }
-    } catch (e) {
-      Alert.alert('Erro', e.response?.data?.error || 'Não foi possível iniciar o pagamento.');
-    } finally {
-      setSubscribing('');
-    }
+  const [selected, setSelected] = useState(null);
+  useEffect(() => {
+    // seleciona o plano em destaque (ou o primeiro) ao carregar/trocar de aba
+    const list = tab === 0 ? basicPlans : iptvPlans;
+    if (list.length && !list.find(p => p.id === selected)) setSelected((list.find(p => p.highlight) || list[0]).id);
+  }, [tab, basicPlans, iptvPlans]);
+
+  const goCheckout = () => {
+    if (!selected) return;
+    router.push({ pathname: '/checkout', params: { kind: tab === 1 ? 'iptv' : 'plan', plan_id: selected } });
   };
+  const periodOf = (p) => (p.duration_days ? (p.duration_days <= 31 ? '/mês' : p.duration_days <= 100 ? '/trimestre' : '/ano') : '');
 
   const fmt = (val) => 'R$ ' + Number(val).toFixed(2).replace('.', ',');
 
@@ -235,60 +222,30 @@ export default function SubscriptionScreen() {
             </View>
           ) : (
             plans.map(plan => {
-              const price  = plan.promo_price != null ? plan.promo_price : plan.price;
-              const isBusy = subscribing === plan.id;
+              const price = plan.promo_price != null ? plan.promo_price : plan.price;
+              const on = selected === plan.id;
               return (
-                <View key={plan.id} style={[styles.card, plan.highlight && styles.cardHighlight]}>
-                  {plan.badge && (
-                    <View style={styles.badgeWrap}>
-                      <Text style={styles.badge}>{plan.badge}</Text>
-                    </View>
-                  )}
-
-                  <Text style={styles.planName}>{plan.name}</Text>
-
-                  {/* Price */}
-                  <View style={styles.priceRow}>
-                    <Text style={styles.price}>{fmt(price)}</Text>
-                    {plan.promo_price != null && (
-                      <Text style={styles.priceOld}>{fmt(plan.price)}</Text>
-                    )}
-                  </View>
-
-                  {plan.description ? (
-                    <Text style={styles.desc}>{plan.description}</Text>
+                <TouchableOpacity key={plan.id} activeOpacity={0.9} onPress={() => setSelected(plan.id)}
+                  style={[styles.card, plan.highlight && styles.cardGlow, on && styles.cardOn]}>
+                  {plan.badge ? (
+                    <View style={styles.badgePill}><Text style={styles.badgeTxt}>{plan.badge}</Text></View>
                   ) : null}
-
-                  {/* Features */}
-                  <View style={styles.features}>
-                    {plan.max_streams && (
-                      <View style={styles.feature}>
-                        <Ionicons name="people-outline" size={14} color="#666" />
-                        <Text style={styles.featureText}>
-                          {plan.max_streams} tela{plan.max_streams > 1 ? 's' : ''} simultânea{plan.max_streams > 1 ? 's' : ''}
-                        </Text>
-                      </View>
-                    )}
-                    {tab === 1 && (
-                      <View style={styles.feature}>
-                        <Ionicons name="tv-outline" size={14} color="#666" />
-                        <Text style={styles.featureText}>Canais ao vivo incluídos</Text>
-                      </View>
-                    )}
+                  <View style={styles.cardTop}>
+                    <Text style={styles.planName}>{plan.name}</Text>
+                    <View style={[styles.radio, on && styles.radioOn]}>{on && <View style={styles.radioDot} />}</View>
                   </View>
-
-                  <TouchableOpacity
-                    style={[styles.btn, plan.highlight && styles.btnHL, isBusy && styles.btnDisabled]}
-                    onPress={() => handleSubscribe(plan)}
-                    disabled={!!subscribing}
-                    activeOpacity={0.85}
-                  >
-                    {isBusy
-                      ? <ActivityIndicator color="#fff" size="small" />
-                      : <Text style={styles.btnText}>Assinar agora</Text>
-                    }
-                  </TouchableOpacity>
-                </View>
+                  <View style={styles.priceRow}>
+                    <View>
+                      {plan.promo_price != null ? <Text style={styles.priceOld}>{fmt(plan.price)}</Text> : null}
+                      <Text style={styles.price}>{fmt(price)}</Text>
+                    </View>
+                    <Text style={styles.per}>{periodOf(plan)}</Text>
+                  </View>
+                  <Text style={styles.feat}>
+                    {[plan.max_streams ? `${plan.max_streams} tela${plan.max_streams > 1 ? 's' : ''}` : null, plan.duration_days ? `${plan.duration_days} dias` : null, tab === 1 ? 'Canais ao vivo' : null].filter(Boolean).join(' · ')}
+                  </Text>
+                  {plan.description ? <Text style={styles.desc}>{plan.description}</Text> : null}
+                </TouchableOpacity>
               );
             })
           )}
@@ -297,6 +254,15 @@ export default function SubscriptionScreen() {
             <Text style={styles.logoutText}>Sair da conta</Text>
           </TouchableOpacity>
         </ScrollView>
+      )}
+
+      {!loading && !loadError && plans.length > 0 && (
+        <View style={[styles.cta, { paddingBottom: insets.bottom + 12 }]}>
+          <TouchableOpacity style={[styles.ctaBtn, !selected && { opacity: 0.5 }]} disabled={!selected} onPress={goCheckout} activeOpacity={0.9}>
+            <Text style={styles.ctaTxt}>Assinar agora</Text>
+          </TouchableOpacity>
+          <Text style={styles.ctaSub}>PIX, cartão ou boleto · pagamento seguro</Text>
+        </View>
       )}
     </View>
   );
@@ -333,13 +299,27 @@ const styles = StyleSheet.create({
   emptyTitle:   { color: '#fff', fontSize: 17, fontWeight: '700' },
   emptySub:     { color: '#555', fontSize: 13, textAlign: 'center' },
 
-  card:         { backgroundColor: '#111', borderRadius: 16, padding: 22, marginBottom: 14, borderWidth: 1.5, borderColor: '#1a1a1a' },
+  card:         { backgroundColor: '#141414', borderRadius: 16, padding: 20, paddingTop: 24, marginTop: 10, marginBottom: 6, borderWidth: 2, borderColor: '#1F1F1F' },
+  cardGlow:     { shadowColor: '#E50914', shadowOpacity: 0.45, shadowRadius: 14, shadowOffset: { width: 0, height: 0 }, elevation: 8 },
+  cardOn:       { borderColor: ACCENT },
+  badgePill:    { position: 'absolute', top: -11, left: 18, backgroundColor: ACCENT, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 4 },
+  badgeTxt:     { color: '#fff', fontSize: 11, fontWeight: '900', letterSpacing: 0.5 },
+  cardTop:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  radio:        { width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: '#555', alignItems: 'center', justifyContent: 'center' },
+  radioOn:      { borderColor: ACCENT },
+  radioDot:     { width: 12, height: 12, borderRadius: 6, backgroundColor: ACCENT },
+  per:          { color: '#888', fontSize: 14, paddingBottom: 6 },
+  feat:         { color: '#A3A3A3', fontSize: 13, marginTop: 4 },
+  cta:          { paddingHorizontal: 16, paddingTop: 12, backgroundColor: '#0A0A0A', borderTopWidth: 1, borderTopColor: '#1F1F1F', gap: 6 },
+  ctaBtn:       { height: 54, borderRadius: 12, backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center' },
+  ctaTxt:       { color: '#fff', fontSize: 17, fontWeight: '800' },
+  ctaSub:       { color: '#666', fontSize: 12, textAlign: 'center' },
   cardHighlight:{ borderColor: ACCENT },
   badgeWrap:    { marginBottom: 10 },
   badge:        { color: ACCENT, fontSize: 10, fontWeight: '800', letterSpacing: 1.5 },
   planName:     { color: '#fff', fontSize: 18, fontWeight: '800', marginBottom: 10 },
-  priceRow:     { flexDirection: 'row', alignItems: 'baseline', gap: 8, marginBottom: 6 },
-  price:        { color: '#fff', fontSize: 28, fontWeight: '900' },
+  priceRow:     { flexDirection: 'row', alignItems: 'flex-end', gap: 6 },
+  price:        { color: '#fff', fontSize: 34, fontWeight: '900' },
   priceOld:     { color: '#444', fontSize: 14, textDecorationLine: 'line-through' },
   desc:         { color: '#666', fontSize: 13, marginBottom: 14, lineHeight: 18 },
   features:     { gap: 8, marginBottom: 18 },

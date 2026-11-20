@@ -6,60 +6,8 @@ import s from './bt.module.css';
 export default function BannersTrial() {
   return (
     <div className={s.wrap}>
-      <TrialCard />
       <Banners />
     </div>
-  );
-}
-
-function Toggle({ on, onChange, label }) {
-  return (
-    <button type="button" role="switch" aria-checked={on} aria-label={label} className={`${s.sw} ${on ? s.swOn : ''}`} onClick={() => onChange(!on)}><i /></button>
-  );
-}
-
-function TrialCard() {
-  const [cfg, setCfg] = useState(null);
-  const [stats, setStats] = useState(null);
-  const [msg, setMsg] = useState('');
-
-  useEffect(() => {
-    api.get('/settings').then(r => setCfg(r.data)).catch(() => setCfg({}));
-    api.get('/payments/admin/trial-stats').then(r => setStats(r.data)).catch(() => {});
-  }, []);
-
-  const save = useCallback(async (key, value) => {
-    setCfg(c => ({ ...c, [key]: String(value) }));
-    try { await api.put(`/settings/${key}`, { value: String(value) }); setMsg('Salvo'); } catch { setMsg('Erro ao salvar'); }
-    setTimeout(() => setMsg(''), 1800);
-  }, []);
-
-  if (!cfg) return null;
-  const on = k => cfg[k] === 'true';
-  return (
-    <section className={s.card}>
-      <div className={s.cardHead}><h2>Teste grátis</h2>{msg && <span className={s.ok}>{msg}</span>}</div>
-      <div className={s.row}><div><b>Teste grátis ativo</b><small>Novos usuários podem iniciar o teste</small></div><Toggle on={on('trial_enabled')} onChange={v => save('trial_enabled', v)} label="Teste grátis ativo" /></div>
-      <div className={s.row}><div><b>Duração</b><small>Dias de acesso no teste</small></div>
-        <span className={s.stepper}>
-          <button aria-label="Menos" onClick={() => save('trial_days', Math.max(1, (parseInt(cfg.trial_days) || 7) - 1))}>−</button>
-          <b>{parseInt(cfg.trial_days) || 7} dias</b>
-          <button aria-label="Mais" onClick={() => save('trial_days', Math.min(60, (parseInt(cfg.trial_days) || 7) + 1))}>+</button>
-        </span></div>
-      <div className={s.row}><div><b>Ativar automaticamente no cadastro</b><small>Sem precisar tocar no botão</small></div><Toggle on={on('trial_auto_signup')} onChange={v => save('trial_auto_signup', v)} label="Ativar no cadastro" /></div>
-      <div className={s.row}><div><b>Bloquear VPN e proxy</b><small>Impede teste por VPN, Tor e datacenter</small></div><Toggle on={cfg.trial_block_vpn !== 'false'} onChange={v => save('trial_block_vpn', v)} label="Bloquear VPN" /></div>
-      <div className={s.row}><div><b>Máximo por IP (web/PC)</b><small>No celular é um por aparelho</small></div>
-        <span className={s.stepper}>
-          <button aria-label="Menos" onClick={() => save('trial_max_per_ip', Math.max(1, (parseInt(cfg.trial_max_per_ip) || 1) - 1))}>−</button>
-          <b>{parseInt(cfg.trial_max_per_ip) || 1}</b>
-          <button aria-label="Mais" onClick={() => save('trial_max_per_ip', Math.min(20, (parseInt(cfg.trial_max_per_ip) || 1) + 1))}>+</button>
-        </span></div>
-      <div className={s.stats}>
-        <div><span>Testes ativos</span><b>{stats?.active ?? '—'}</b></div>
-        <div><span>Convertidos</span><b style={{ color: '#4ADE80' }}>{stats?.converted ?? '—'}</b></div>
-        <div><span>Taxa de conversão</span><b>{stats ? `${stats.rate}%` : '—'}</b></div>
-      </div>
-    </section>
   );
 }
 

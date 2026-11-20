@@ -17,6 +17,7 @@ export function useTogether(code) {
   const [toasts, setToasts] = useState([]);
   const [initialState, setInitialState] = useState(null);
   const [resyncing, setResyncing] = useState(false);
+  const [started, setStarted] = useState(false);
   const [voiceOn, setVoiceOn] = useState(false);
   const [muted, setMuted] = useState(false);
   const [speaking, setSpeaking] = useState({});   // socketId -> true
@@ -62,7 +63,7 @@ export function useTogether(code) {
       await syncClock(sock);
       sock.emit('room:join', { code }, (res) => {
         if (!res?.ok) { setStatus('error'); setError(res?.error || 'Não foi possível entrar.'); return; }
-        setRoom(res.room); setYou(res.you); youRef.current = res.you;
+        setRoom(res.room); setStarted(!!res.room?.started); setYou(res.you); youRef.current = res.you;
         setMembers(res.members); setMessages(res.messages || []);
         setInitialState(res.state && res.state.t && (res.state.time > 0 || res.state.playing) ? res.state : null);
         setStatus('ready'); setResyncing(false);
@@ -75,6 +76,7 @@ export function useTogether(code) {
     sock.on('room:members', setMembers);
     sock.on('toast', (t) => toast(t.text));
     sock.on('chat', (m) => setMessages(list => [...list.slice(-199), m]));
+    sock.on('room:started', () => setStarted(true));
     sock.on('room:ended', () => { setStatus('ended'); });
     sock.on('room:kicked', () => { setStatus('error'); setError('Você entrou nesta sala em outra aba.'); });
     sock.on('state', (ev) => {
@@ -212,7 +214,9 @@ export function useTogether(code) {
   }
 
   return {
-    status, error, room, you, members, messages, toasts, resyncing, sync,
+    status, error, room, you, members, messages, toasts, resyncing, sync, started,
+    startRoom: () => sockRef.current?.emit('room:start'),
+    updateAvatar: (url) => sockRef.current?.emit('member:update', { avatar: url }),
     sendChat, endRoom, toast,
     voice: { on: voiceOn, muted, speaking, micError, join: joinVoice, leave: leaveVoiceInternal, toggleMute },
   };

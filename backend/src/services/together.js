@@ -32,6 +32,7 @@ function createRoom({ host, content_type, content_id, title, poster_url, control
     members: new Map(),       // socket.id -> { userId, name, avatar, voice }
     state: { playing: false, time: 0, version: null, subtitle: 'none', t: Date.now() },
     messages: [],
+    started: false,           // false = sala de espera (lobby); true = sessão rolando
     createdAt: Date.now(), touchedAt: Date.now(),
   };
   rooms.set(code, room);
@@ -40,7 +41,7 @@ function createRoom({ host, content_type, content_id, title, poster_url, control
 
 const publicRoom = r => ({
   code: r.code, content_type: r.content_type, content_id: r.content_id, title: r.title,
-  poster_url: r.poster_url, host_name: r.hostName, control: r.control, members: r.members.size,
+  poster_url: r.poster_url, host_name: r.hostName, control: r.control, members: r.members.size, started: !!r.started,
 });
 const memberList = r => [...r.members.entries()].map(([id, m]) => ({ id, userId: m.userId, name: m.name, avatar: m.avatar, voice: !!m.voice, host: m.userId === r.hostId }));
 
@@ -99,6 +100,25 @@ function attach(httpServer) {
         ok: true, room: publicRoom(r), you: { id: socket.id, userId: socket.user.id, host: socket.user.id === r.hostId },
         members: memberList(r), state: r.state, messages: r.messages.slice(-50), serverTime: Date.now(),
       });
+    });
+
+    // Sala de espera: o anfitrião inicia a sessão pra todo mundo ao mesmo tempo
+    socket.on('room:start', () => {
+      if (!room || socket.user.id !== room.hostId || room.started) return;
+      room.started = true;
+      room.touchedAt = Date.now();
+      io.to(room.code).emit('room:started', { t: Date.now() });
+    });
+
+    // Foto/nome personalizado na sala (a URL precisa ser do nosso CDN)
+    socket.on('member:update', ({ avatar } = {}) => {
+      if (!room) return;
+      const m = room.members.get(socket.id); if (!m) return;
+      const cdn = String(process.env.CDN_BASE_URL || '').replace(/\/$/, '');
+      if (avatar === null || (typeof avatar === 'string' && cdn && avatar.startsWith(cdn + '/') && avatar.length < 400)) {
+        m.avatar = avatar;
+        io.to(room.code).emit('room:members', memberList(room));
+      }
     });
 
     // play / pause / seek / tick / version / subtitle
@@ -170,13 +190,22 @@ function attach(httpServer) {
       room.members.delete(socket.id);
       room.touchedAt = Date.now();
       io.to(room.code).emit('voice:left', socket.id);
-      if (room.members.size) {
-        if (socket.user.id === room.hostId) {          // anfitrião saiu: passa o comando pro mais antigo
-          const [, first] = [...room.members.entries()][0];
-          room.hostId = first.userId; room.hostName = first.name;
+      const left = room, leftUser = socket.user;
+      if (left.members.size) {
+        io.to(left.code).emit('room:members', memberList(left));
+        // não avisa "saiu" na troca lobby -> player (a mesma conta reconecta em instantes)
+        setTimeout(() => {
+          if (![...left.members.values()].some(m => m.userId === leftUser.id)) io.to(left.code).emit('toast', { text: `${leftUser.name} saiu` });
+        }, 4000);
+        if (leftUser.id === left.hostId) {             // anfitrião saiu de vez: passa o comando pro mais antigo
+          setTimeout(() => {
+            if (!rooms.has(left.code) || !left.members.size) return;
+            if ([...left.members.values()].some(m => m.userId === left.hostId)) return; // voltou
+            const [, first] = [...left.members.entries()][0];
+            left.hostId = first.userId; left.hostName = first.name;
+            io.to(left.code).emit('room:members', memberList(left));
+          }, 20000);
         }
-        io.to(room.code).emit('room:members', memberList(room));
-        io.to(room.code).emit('toast', { text: `${socket.user.name} saiu` });
       }
     });
   });

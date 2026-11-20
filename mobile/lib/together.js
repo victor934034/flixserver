@@ -21,6 +21,7 @@ export function useTogether(code) {
   const [toasts, setToasts] = useState([]);
   const [initialState, setInitialState] = useState(null);
   const [unread, setUnread] = useState(0);
+  const [started, setStarted] = useState(false);
   const [voiceOn, setVoiceOn] = useState(false);
   const [muted, setMuted] = useState(false);
   const [micError, setMicError] = useState('');
@@ -67,7 +68,7 @@ export function useTogether(code) {
         await syncClock();
         sock.emit('room:join', { code }, (res) => {
           if (!res?.ok) { setStatus('error'); setError(res?.error || 'Não foi possível entrar.'); return; }
-          setRoom(res.room); setYou(res.you); setMembers(res.members); setMessages(res.messages || []);
+          setRoom(res.room); setStarted(!!res.room?.started); setYou(res.you); setMembers(res.members); setMessages(res.messages || []);
           setInitialState(res.state && res.state.t && (res.state.time > 0 || res.state.playing) ? res.state : null);
           setStatus('ready');
         });
@@ -110,6 +111,7 @@ export function useTogether(code) {
           }
         } catch {}
       });
+      sock.on('room:started', () => setStarted(true));
       sock.on('room:ended', () => setStatus('ended'));
       sock.on('room:kicked', () => { setStatus('error'); setError('Você entrou nesta sala em outro aparelho.'); });
       sock.on('state', ev => {
@@ -167,7 +169,9 @@ export function useTogether(code) {
 
   return {
     active: !!code, status, error, room, you, members, messages, toasts, initialState, unread,
-    isHost: !!you?.host,
+    isHost: !!you?.host, started,
+    startRoom: () => sockRef.current?.emit('room:start'),
+    updateAvatar: (url) => sockRef.current?.emit('member:update', { avatar: url }),
     voice: { supported: voiceSupported, on: voiceOn, muted, micError, join: joinVoice, leave: leaveVoice, toggleMute },
     ...api2,
     sendChat: (text) => sockRef.current?.emit('chat', { text }),

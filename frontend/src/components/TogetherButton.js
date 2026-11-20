@@ -13,7 +13,7 @@ export default function TogetherButton({ contentType, contentId, title, poster, 
     setBusy(true);
     try {
       const { data } = await api.post('/together/rooms', { content_type: contentType, content_id: contentId, title, poster_url: poster });
-      router.push(`/juntos/${data.code}`);
+      router.push(`/juntos/${data.code}?host=1`);
     } catch (e) {
       alert(e.response?.data?.error || 'Não foi possível criar a sessão.');
       setBusy(false);

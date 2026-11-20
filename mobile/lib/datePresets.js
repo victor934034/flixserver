@@ -1,5 +1,7 @@
 // Filtros de data de lançamento (iguais no app, site e TV)
 const year = new Date().getFullYear();
+export const MIN_YEAR = 1950;
+export const MAX_YEAR = year;
 export const DATE_PRESETS = [
   { key: '', label: 'Qualquer data' },
   { key: '30d', label: 'Últimos 30 dias' },
@@ -12,7 +14,16 @@ export const DATE_PRESETS = [
 ];
 
 // Converte o preset em parâmetros de query da API
+export function dateLabel(key) {
+  const m = /^range:(\d{4})-(\d{4})$/.exec(key || '');
+  if (m) return `${m[1]}–${m[2]}`;
+  const p = DATE_PRESETS.find(x => x.key === key);
+  return p ? p.label : '';
+}
+
 export function presetQuery(key) {
+  const m = /^range:(\d{4})-(\d{4})$/.exec(key || '');
+  if (m) return `&year_from=${m[1]}&year_to=${m[2]}`;
   switch (key) {
     case '30d': return '&released_days=30';
     case '180d': return '&released_days=180';

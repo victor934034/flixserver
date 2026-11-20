@@ -7,7 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MovieCard from '../../components/MovieCard';
 import api from '../../lib/api';
-import DateChips from '../../components/DateChips';
+import FilterBar from '../../components/FilterBar';
 import { presetQuery } from '../../lib/datePresets';
 
 export default function SeriesScreen() {
@@ -58,45 +58,7 @@ export default function SeriesScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      <View style={styles.headerRow}>
-        <Text style={styles.header}>Séries</Text>
-        {genres.length > 0 && (
-          <TouchableOpacity style={styles.genreDropBtn} onPress={() => setGenreModal(true)} activeOpacity={0.7}>
-            <Text style={styles.genreDropTxt} numberOfLines={1}>{selectedGenre || 'Todos os gêneros'}</Text>
-            <Ionicons name="chevron-down" size={15} color="#fff" />
-          </TouchableOpacity>
-        )}
-      </View>
-
-      <DateChips value={datePreset} onChange={setDatePreset} />
-
-      <Modal
-        visible={genreModal}
-        transparent
-        animationType="slide"
-        statusBarTranslucent
-        onRequestClose={() => setGenreModal(false)}
-      >
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setGenreModal(false)}>
-          <View style={styles.modalSheet} onStartShouldSetResponder={() => true}>
-            <View style={styles.modalHandle} />
-            <Text style={styles.modalTitle}>Gêneros</Text>
-            <ScrollView style={{ maxHeight: '70%' }}>
-              <TouchableOpacity style={styles.modalItem} activeOpacity={0.7} onPress={() => selectGenre(null)}>
-                <Text style={[styles.modalItemTxt, !selectedGenre && styles.modalItemTxtActive]}>Todos os gêneros</Text>
-                {!selectedGenre && <Ionicons name="checkmark" size={20} color="#E50914" />}
-              </TouchableOpacity>
-              {genres.map(g => (
-                <TouchableOpacity key={g} style={styles.modalItem} activeOpacity={0.7} onPress={() => selectGenre(g)}>
-                  <Text style={[styles.modalItemTxt, selectedGenre === g && styles.modalItemTxtActive]}>{g}</Text>
-                  {selectedGenre === g && <Ionicons name="checkmark" size={20} color="#E50914" />}
-                </TouchableOpacity>
-              ))}
-              <View style={{ height: 12 }} />
-            </ScrollView>
-          </View>
-        </TouchableOpacity>
-      </Modal>
+      <FilterBar title="Séries" genres={genres} genre={selectedGenre} onGenre={setSelectedGenre} dateKey={datePreset} onDate={setDatePreset} />
 
       {loading ? (
         <View style={styles.loader}><ActivityIndicator size="large" color="#E50914" /></View>

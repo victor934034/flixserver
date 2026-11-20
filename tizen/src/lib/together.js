@@ -47,6 +47,7 @@ export function useTogether(code) {
         setRoom(res.room); setYou(res.you); setMembers(res.members);
         setInitialState(res.state && res.state.t && (res.state.time > 0 || res.state.playing) ? res.state : null);
         setStatus('ready');
+        if (res.you && res.you.host && res.room && !res.room.started) sock.emit('room:start');
       });
     });
     sock.on('disconnect', () => setStatus(s => (s === 'ended' ? s : 'reconnecting')));

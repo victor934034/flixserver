@@ -1,10 +1,11 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Navbar from '../../../components/Navbar';
 import VideoPlayer from '../../../components/VideoPlayer';
 import TogetherPanel from '../../../components/TogetherPanel';
 import TogetherInvite from '../../../components/TogetherInvite';
+import TogetherLobby from '../../../components/TogetherLobby';
 import api from '../../../lib/api';
 import { getToken } from '../../../lib/auth';
 import { useTogether } from '../../../lib/together';
@@ -14,9 +15,11 @@ export default function JuntosPage() {
   const { code: rawCode } = useParams();
   const code = String(rawCode || '').toUpperCase();
   const router = useRouter();
+  const sp = useSearchParams();
+  const isHostLink = sp.get('host') === '1';
   const [info, setInfo] = useState(null);
   const [infoErr, setInfoErr] = useState('');
-  const [joined, setJoined] = useState(false);
+  const [joined, setJoined] = useState(isHostLink); // quem criou a sala entra direto na sala de espera
   const [content, setContent] = useState(null);
   const [showInvite, setShowInvite] = useState(false);
   const [blocked, setBlocked] = useState('');
@@ -30,11 +33,10 @@ export default function JuntosPage() {
 
   // carrega o vídeo quando a sala conecta
   useEffect(() => {
-    if (tg.status !== 'ready' || !tg.room || content) return;
+    if (tg.status !== 'ready' || !tg.room || content || !tg.started) return;
     const path = tg.room.content_type === 'movie' ? `/movies/${tg.room.content_id}` : `/episodes/${tg.room.content_id}`;
     api.get(path).then(r => setContent(r.data)).catch(() => setBlocked('Não foi possível carregar o conteúdo.'));
-    if (tg.you?.host) setShowInvite(true);
-  }, [tg.status, tg.room, tg.you, content]);
+  }, [tg.status, tg.room, tg.started, content]);
 
   if (infoErr) return <><Navbar /><main className={styles.center}><div className={styles.card}><h1>Convite inválido</h1><p>{infoErr}</p><a className={styles.btn} href="/">Ir para o início</a></div></main></>;
   if (!info) return <><Navbar /><main className={styles.center}><p className={styles.muted}>Carregando…</p></main></>;
@@ -49,7 +51,7 @@ export default function JuntosPage() {
             <p className={styles.muted}>{info.host_name} chamou você pra assistir junto</p>
             <h1>{info.title}</h1>
             <p className={styles.muted}>{info.members} {info.members === 1 ? 'pessoa já está' : 'pessoas já estão'} na sala</p>
-            <button className={styles.btn} onClick={() => setJoined(true)}>Entrar na sessão</button>
+            <button className={styles.btn} onClick={() => setJoined(true)}>Entrar na sala de espera</button>
           </div>
         </main>
       </>
@@ -61,6 +63,17 @@ export default function JuntosPage() {
   }
   if (tg.status === 'ended') {
     return <><Navbar /><main className={styles.center}><div className={styles.card}><h1>Sessão encerrada</h1><p>O anfitrião encerrou a sessão.</p><a className={styles.btn} href="/">Ir para o início</a></div></main></>;
+  }
+
+  // sala de espera: todo mundo que entra pelo link cai aqui até o anfitrião iniciar
+  if (!tg.started) {
+    if (tg.status !== 'ready') return <><Navbar /><main className={styles.center}><p className={styles.muted}>Conectando à sala…</p></main></>;
+    return (
+      <>
+        <Navbar />
+        <TogetherLobby tg={tg} code={code} onLeave={() => { if (tg.you?.host) tg.endRoom(); router.push('/'); }} />
+      </>
+    );
   }
 
   return (

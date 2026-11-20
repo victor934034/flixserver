@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import api from '../../../lib/api';
 import s from './page.module.css';
+import t from '../configuracoes/bt.module.css';
 
 const PAID = ['CONFIRMED', 'RECEIVED', 'RECEIVED_IN_CASH'];
 const brl = v => `R$ ${Number(v || 0).toFixed(2).replace('.', ',')}`;
@@ -84,6 +85,7 @@ export default function PagamentosPage() {
         <button role="tab" aria-selected={tab === 'pay'} className={`${s.tab} ${tab === 'pay' ? s.tabOn : ''}`} onClick={() => setTab('pay')}>Pagamentos</button>
         <button role="tab" aria-selected={tab === 'iptv'} className={`${s.tab} ${tab === 'iptv' ? s.tabOn : ''}`} onClick={() => setTab('iptv')}>IPTV {sum?.iptv_pending > 0 && <span className={s.count}>{sum.iptv_pending}</span>}</button>
         <button role="tab" aria-selected={tab === 'plans'} className={`${s.tab} ${tab === 'plans' ? s.tabOn : ''}`} onClick={() => setTab('plans')}>Planos</button>
+        <button role="tab" aria-selected={tab === 'trial'} className={`${s.tab} ${tab === 'trial' ? s.tabOn : ''}`} onClick={() => setTab('trial')}>Teste grátis</button>
       </div>
 
       {tab === 'pay' && (
@@ -134,7 +136,8 @@ export default function PagamentosPage() {
       )}
 
       {tab === 'iptv' && <IptvPending onDone={load} full />}
-      {tab === 'plans' && <PlansEditor />}
+      {tab === 'plans' && <><SubscriptionSwitch /><PlansEditor /></>}
+      {tab === 'trial' && <TrialCard />}
     </div>
   );
 }
@@ -217,7 +220,7 @@ function PlansEditor() {
     <div className={s.card}>
       <div className={s.tableWrap} style={{ flex: 'none' }}>
         <table className={`${s.table} ${s.plans}`}>
-          <thead><tr><th>Nome</th><th>Preço</th><th>Promoção</th><th>Dias</th><th>Telas</th><th>Selo</th><th>Ativo</th></tr></thead>
+          <thead><tr><th>Nome</th><th>Preço</th><th>Promoção</th><th>Dias</th><th>Telas</th><th>Selo</th><th>Descrição</th><th>Destaque</th><th>Ativo</th></tr></thead>
           <tbody>
             {plans.map((p, i) => (
               <tr key={p.id}>
@@ -227,6 +230,8 @@ function PlansEditor() {
                 <td><input type="number" value={p.duration_days} onChange={e => set(i, 'duration_days', Number(e.target.value))} /></td>
                 <td><input type="number" value={p.max_streams ?? ''} onChange={e => set(i, 'max_streams', Number(e.target.value))} /></td>
                 <td><input type="text" value={p.badge || ''} onChange={e => set(i, 'badge', e.target.value || null)} /></td>
+                <td><input type="text" value={p.description || ''} onChange={e => set(i, 'description', e.target.value)} /></td>
+                <td><input type="checkbox" checked={!!p.highlight} onChange={e => set(i, 'highlight', e.target.checked)} style={{ width: 18, height: 18, accentColor: '#E50914' }} /></td>
                 <td><input type="checkbox" checked={!!p.active} onChange={e => set(i, 'active', e.target.checked)} style={{ width: 18, height: 18, accentColor: '#E50914' }} /></td>
               </tr>
             ))}
@@ -237,3 +242,82 @@ function PlansEditor() {
     </div>
   );
 }
+
+// ── Sistema de assinatura on/off (antes ficava em Configurações) ──
+function SubscriptionSwitch() {
+  const [on, setOn] = useState(null);
+  const [msg, setMsg] = useState('');
+  useEffect(() => { api.get('/settings').then(r => setOn(r.data.subscription_enabled === 'true')).catch(() => setOn(false)); }, []);
+  async function toggle(v) {
+    setOn(v);
+    try { await api.put('/settings/subscription_enabled', { value: String(v) }); setMsg('Salvo'); } catch { setMsg('Erro ao salvar'); setOn(!v); }
+    setTimeout(() => setMsg(''), 1800);
+  }
+  if (on === null) return null;
+  return (
+    <div className={s.card}>
+      <div className={t.row} style={{ borderTop: 0, padding: 0 }}>
+        <div>
+          <b>Sistema de assinatura: <span style={{ color: on ? '#4ADE80' : '#F87171' }}>{on ? 'ATIVADO' : 'DESATIVADO'}</span></b>
+          <small>{on ? 'Usuários sem plano ativo vão para a tela de planos.' : 'Todos têm acesso livre, independente de assinatura.'}</small>
+        </div>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {msg && <span className={t.ok}>{msg}</span>}
+          <button type="button" role="switch" aria-checked={on} aria-label="Sistema de assinatura" className={`${t.sw} ${on ? t.swOn : ''}`} onClick={() => toggle(!on)}><i /></button>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function Toggle({ on, onChange, label }) {
+  return (
+    <button type="button" role="switch" aria-checked={on} aria-label={label} className={`${s.sw} ${on ? s.swOn : ''}`} onClick={() => onChange(!on)}><i /></button>
+  );
+}
+
+function TrialCard() {
+  const [cfg, setCfg] = useState(null);
+  const [stats, setStats] = useState(null);
+  const [msg, setMsg] = useState('');
+
+  useEffect(() => {
+    api.get('/settings').then(r => setCfg(r.data)).catch(() => setCfg({}));
+    api.get('/payments/admin/trial-stats').then(r => setStats(r.data)).catch(() => {});
+  }, []);
+
+  const save = useCallback(async (key, value) => {
+    setCfg(c => ({ ...c, [key]: String(value) }));
+    try { await api.put(`/settings/${key}`, { value: String(value) }); setMsg('Salvo'); } catch { setMsg('Erro ao salvar'); }
+    setTimeout(() => setMsg(''), 1800);
+  }, []);
+
+  if (!cfg) return null;
+  const on = k => cfg[k] === 'true';
+  return (
+    <section className={s.card}>
+      <div className={s.cardHead}><h2>Teste grátis</h2>{msg && <span className={s.ok}>{msg}</span>}</div>
+      <div className={s.row}><div><b>Teste grátis ativo</b><small>Novos usuários podem iniciar o teste</small></div><Toggle on={on('trial_enabled')} onChange={v => save('trial_enabled', v)} label="Teste grátis ativo" /></div>
+      <div className={s.row}><div><b>Duração</b><small>Dias de acesso no teste</small></div>
+        <span className={s.stepper}>
+          <button aria-label="Menos" onClick={() => save('trial_days', Math.max(1, (parseInt(cfg.trial_days) || 7) - 1))}>−</button>
+          <b>{parseInt(cfg.trial_days) || 7} dias</b>
+          <button aria-label="Mais" onClick={() => save('trial_days', Math.min(60, (parseInt(cfg.trial_days) || 7) + 1))}>+</button>
+        </span></div>
+      <div className={s.row}><div><b>Ativar automaticamente no cadastro</b><small>Sem precisar tocar no botão</small></div><Toggle on={on('trial_auto_signup')} onChange={v => save('trial_auto_signup', v)} label="Ativar no cadastro" /></div>
+      <div className={s.row}><div><b>Bloquear VPN e proxy</b><small>Impede teste por VPN, Tor e datacenter</small></div><Toggle on={cfg.trial_block_vpn !== 'false'} onChange={v => save('trial_block_vpn', v)} label="Bloquear VPN" /></div>
+      <div className={s.row}><div><b>Máximo por IP (web/PC)</b><small>No celular é um por aparelho</small></div>
+        <span className={s.stepper}>
+          <button aria-label="Menos" onClick={() => save('trial_max_per_ip', Math.max(1, (parseInt(cfg.trial_max_per_ip) || 1) - 1))}>−</button>
+          <b>{parseInt(cfg.trial_max_per_ip) || 1}</b>
+          <button aria-label="Mais" onClick={() => save('trial_max_per_ip', Math.min(20, (parseInt(cfg.trial_max_per_ip) || 1) + 1))}>+</button>
+        </span></div>
+      <div className={s.stats}>
+        <div><span>Testes ativos</span><b>{stats?.active ?? '—'}</b></div>
+        <div><span>Convertidos</span><b style={{ color: '#4ADE80' }}>{stats?.converted ?? '—'}</b></div>
+        <div><span>Taxa de conversão</span><b>{stats ? `${stats.rate}%` : '—'}</b></div>
+      </div>
+    </section>
+  );
+}
+

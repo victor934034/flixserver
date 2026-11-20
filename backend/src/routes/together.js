@@ -4,6 +4,22 @@ const { supabase } = require('../services/supabase');
 const { authMiddleware } = require('../middleware/auth');
 const { sendPush } = require('../services/notifications');
 const { rooms, invites, createRoom, publicRoom } = require('../services/together');
+const multer = require('multer');
+const { uploadFile } = require('../services/backblaze');
+
+const photoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024, files: 1 },
+  fileFilter: (req, file, cb) => cb(null, /^image\/(jpeg|png|webp)$/.test(file.mimetype)),
+});
+// confere a assinatura real do arquivo (não confia só no mimetype)
+function imageKind(buf) {
+  if (buf.length < 12) return null;
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return { ext: '.jpg', mime: 'image/jpeg' };
+  if (buf.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return { ext: '.png', mime: 'image/png' };
+  if (buf.slice(0, 4).toString() === 'RIFF' && buf.slice(8, 12).toString() === 'WEBP') return { ext: '.webp', mime: 'image/webp' };
+  return null;
+}
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 60 * 1000, max: 60, message: { error: 'Muitas requisições.' } }));
@@ -24,6 +40,28 @@ router.get('/rooms/:code', (req, res) => {
   const r = rooms.get(String(req.params.code).toUpperCase());
   if (!r) return res.status(404).json({ error: 'Sala não encontrada ou encerrada.' });
   res.json({ ...publicRoom(r), link: `${APP_URL()}/juntos/${r.code}` });
+});
+
+// POST /api/together/avatar (multipart "file") — foto personalizada do usuário (JPG/PNG/WEBP até 2 MB)
+router.post('/avatar', (req, res, next) => photoUpload.single('file')(req, res, err => {
+  if (err) return res.status(400).json({ error: err.code === 'LIMIT_FILE_SIZE' ? 'A foto pode ter no máximo 2 MB.' : 'Envie uma imagem válida.' });
+  next();
+}), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Envie uma imagem JPG, PNG ou WEBP.' });
+    const kind = imageKind(req.file.buffer);
+    if (!kind) return res.status(400).json({ error: 'Arquivo de imagem inválido.' });
+    const filename = `user-avatars/${req.user.id}_${Date.now()}${kind.ext}`;
+    const result = await uploadFile(req.file.buffer, filename, kind.mime);
+    await supabase.from('users').update({ avatar_url: result.cdnUrl }).eq('id', req.user.id);
+    res.json({ avatar_url: result.cdnUrl });
+  } catch (e) { res.status(500).json({ error: 'Não foi possível enviar a foto.' }); }
+});
+
+// DELETE /api/together/avatar — volta pra inicial colorida
+router.delete('/avatar', async (req, res) => {
+  await supabase.from('users').update({ avatar_url: null }).eq('id', req.user.id);
+  res.json({ ok: true });
 });
 
 // GET /api/together/ice — servidores STUN/TURN pra voz (TURN opcional via env: TURN_URL, TURN_USERNAME, TURN_CREDENTIAL)

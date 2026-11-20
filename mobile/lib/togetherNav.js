@@ -24,7 +24,7 @@ export function buildPlayerParams(type, c, { title, seriesId, room } = {}) {
   return params;
 }
 
-// Anfitrião: cria a sala e abre o player nela
+// Anfitrião: cria a sala e abre a sala de espera (lobby)
 export async function startTogether(router, { type, content, title, seriesId }) {
   const { data: room } = await api.post('/together/rooms', {
     content_type: type === 'movie' ? 'movie' : 'episode',
@@ -32,15 +32,16 @@ export async function startTogether(router, { type, content, title, seriesId }) 
   });
   const params = buildPlayerParams(type, content, { title, seriesId, room: room.code });
   if (!params) throw new Error('Vídeo indisponível');
-  router.push({ pathname: '/player', params });
+  router.push({ pathname: '/juntos-sala', params: { code: room.code, host: '1', player: JSON.stringify(params) } });
 }
 
-// Convidado: busca o conteúdo da sala e abre o player
+// Convidado: busca a sala; se já começou vai direto pro player, senão entra na sala de espera
 export async function joinTogether(router, code) {
   const { data: info } = await api.get(`/together/rooms/${code}`);
   const isMovie = info.content_type === 'movie';
   const { data: c } = await api.get(isMovie ? `/movies/${info.content_id}` : `/episodes/${info.content_id}`);
   const params = buildPlayerParams(isMovie ? 'movie' : 'episode', c, { title: info.title, seriesId: c.series_id, room: info.code });
   if (!params) throw new Error('Vídeo indisponível');
-  router.replace({ pathname: '/player', params });
+  if (info.started) router.replace({ pathname: '/player', params });
+  else router.replace({ pathname: '/juntos-sala', params: { code: info.code, host: '0', player: JSON.stringify(params) } });
 }
