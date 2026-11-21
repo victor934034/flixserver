@@ -112,9 +112,9 @@ INSERT INTO iptv_plans (name, description, price, duration_months, is_active, or
   ('[ONE X] PACOTE 1 MÊS SEM ADULTO',          '1 conexão · canais ao vivo, filmes e séries',          11.90,  1,  true, 0, false, 1),
   ('[ONE X] PACOTE 1 MÊS SEM ADULTO 2 TELAS',  '2 conexões ao mesmo tempo',                            16.90,  1,  true, 1, false, 2),
   ('[ONE X] PACOTE 1 MÊS COM ADULTO',          '1 conexão · inclui conteúdo adulto (18+)',             17.90,  1,  true, 2, true,  1),
-  ('[ONE X] PACOTE 3 MESES SEM ADULTO',        '1 conexão · 3 meses',                                  19.90,  3,  true, 3, false, 1),
-  ('[ONE X] PACOTE 3 MESES COM ADULTO',        '1 conexão · 3 meses · inclui conteúdo adulto (18+)',   24.90,  3,  true, 4, true,  1),
-  ('[ONE X] PACOTE 6 MESES SEM ADULTO',        '1 conexão · 6 meses',                                  34.90, 6,  true, 5, false, 1),
-  ('[ONE X] PACOTE 6 MESES COM ADULTO',        '1 conexão · 6 meses · inclui conteúdo adulto (18+)',   39.90, 6,  true, 6, true,  1),
-  ('[ONE X] PACOTE 12 MESES SEM ADULTO',       '1 conexão · 12 meses',                                 59.90, 12, true, 7, false, 1),
-  ('[ONE X] PACOTE 12 MESES COM ADULTO',       '1 conexão · 12 meses · inclui conteúdo adulto (18+)',  69.90, 12, true, 8, true,  1);
+  ('[ONE X] PACOTE 3 MESES SEM ADULTO',        '1 conexão · 3 meses',                                  29.90,  3,  true, 3, false, 1),
+  ('[ONE X] PACOTE 3 MESES COM ADULTO',        '1 conexão · 3 meses · inclui conteúdo adulto (18+)',   44.90,  3,  true, 4, true,  1),
+  ('[ONE X] PACOTE 6 MESES SEM ADULTO',        '1 conexão · 6 meses',                                  54.90, 6,  true, 5, false, 1),
+  ('[ONE X] PACOTE 6 MESES COM ADULTO',        '1 conexão · 6 meses · inclui conteúdo adulto (18+)',   82.90, 6,  true, 6, true,  1),
+  ('[ONE X] PACOTE 12 MESES SEM ADULTO',       '1 conexão · 12 meses',                                 99.90, 12, true, 7, false, 1),
+  ('[ONE X] PACOTE 12 MESES COM ADULTO',       '1 conexão · 12 meses · inclui conteúdo adulto (18+)',  149.90, 12, true, 8, true,  1);
