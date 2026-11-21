@@ -6,6 +6,15 @@ import api from '../api/index.js';
 
 const ACCENT = '#c91c2c';
 
+const monthsOf = p => Number(p.duration_months) || Math.max(1, Math.round((Number(p.duration_days) || 30) / 30));
+const priceOf = p => (p.promo_price != null && Number(p.promo_price) < Number(p.price) ? Number(p.promo_price) : Number(p.price));
+const titleOf = p => {
+  const m = /(COM|SEM)\s+ADULTO/i.exec(p.name || '');
+  if (m) return m[1].toUpperCase() === 'COM' ? 'Com adulto 18+' : 'Sem adulto';
+  const parts = String(p.name || '').split('·');
+  return parts[parts.length - 1].trim();
+};
+
 const TABS = [
   { key: 'streaming', label: 'Filmes & Séries' },
   { key: 'iptv',      label: 'Com IPTV' },
@@ -31,6 +40,7 @@ export default function SubscriptionScreen() {
   const [trialBusy, setTrialBusy] = useState(false);
   const off = trial && trial.available ? 1 : 0;
   const [selIdx, setSelIdx] = useState(0);
+  const [period, setPeriod] = useState(null);
   const st = useRef({});
 
   useEffect(() => {
@@ -56,53 +66,70 @@ export default function SubscriptionScreen() {
     return () => clearInterval(t);
   }, [qrUrl]);
 
-  const plans    = tab === 0 ? basicPlans : iptvPlans;
-  useEffect(() => { const l = tab === 0 ? basicPlans : iptvPlans; const h = l.findIndex(p => p.highlight); setSelIdx(h >= 0 ? h : 0); }, [tab, basicPlans, iptvPlans]);
-  const total    = plans.length + 2; // plans + tabs + logout
+  const allPlans = tab === 0 ? basicPlans : iptvPlans;
+  const periods  = [...new Set(allPlans.map(monthsOf))].sort((a, b) => a - b);
+  const curPeriod = periods.includes(period) ? period : periods[0];
+  const P        = periods.length;
+  const plans    = allPlans.filter(p => monthsOf(p) === curPeriod)
+    .sort((a, b) => (a.is_adult ? 1 : 0) - (b.is_adult ? 1 : 0) || (a.max_streams || 1) - (b.max_streams || 1));
+  const bestMonthly = mo => Math.min(...allPlans.filter(p => monthsOf(p) === mo).map(p => priceOf(p) / mo));
+  const saving = mo => (P && mo !== periods[0] ? Math.round((1 - bestMonthly(mo) / bestMonthly(periods[0])) * 100) : 0);
+  useEffect(() => { setPeriod(null); }, [tab]);
+  useEffect(() => { const h = plans.findIndex(p => p.highlight); setSelIdx(h >= 0 ? h : 0); }, [tab, curPeriod, basicPlans, iptvPlans]);
+  const base     = 2 + P; // 0..1 abas, 2..base-1 períodos, depois planos
+  const total    = plans.length + base;
   const tabFocus = focused < 2 ? focused : -1;
-  const planFocus = focused >= 2 && focused < plans.length + 2 ? focused - 2 : -1;
-  const payFocus = focused === plans.length + 2;
-  const trialFocus = off === 1 && focused === plans.length + 3;
-  const logoutFocused = focused === plans.length + 3 + off;
+  const chipFocus = focused >= 2 && focused < base ? focused - 2 : -1;
+  const planFocus = focused >= base && focused < plans.length + base ? focused - base : -1;
+  const payFocus = focused === plans.length + base;
+  const trialFocus = off === 1 && focused === plans.length + base + 1;
+  const logoutFocused = focused === plans.length + base + 1 + off;
   const selPlan = plans[Math.min(selIdx, Math.max(0, plans.length - 1))];
 
-  st.current = { tab, plans, focused, total, subscribing, loading, off, qrUrl, selIdx };
+  st.current = { tab, plans, focused, total, subscribing, loading, off, qrUrl, selIdx, P, periods, curPeriod };
 
   useKeyDown(e => {
-    const { tab, plans, focused, total, subscribing, loading, off, qrUrl: qr0 } = st.current;
+    const { tab, plans, focused, total, subscribing, loading, off, qrUrl: qr0, P, periods, curPeriod } = st.current;
     if (loading || subscribing) return;
     const k = e.keyCode;
     if (qr0) { if (k === KEY.ENTER || k === KEY.BACK || k === KEY.BACKSPACE || k === 461) { e.preventDefault(); setQrUrl(''); setStatus(''); } return; }
 
     const n = plans.length;
-    const pay = n + 2, tri = n + 3, out = n + 3 + off;
+    const base = 2 + P;
+    const pay = n + base, tri = pay + 1, out = pay + 1 + off;
+    const selFocus = base + Math.max(0, Math.min(st.current.selIdx, n - 1));
+    const pi = Math.max(0, periods.indexOf(curPeriod));
     if (k === KEY.UP) {
       e.preventDefault();
-      if (focused === pay) setFocused(2 + Math.min(st.current.selIdx, n - 1));
-      else if (focused === tri) setFocused(2 + Math.min(st.current.selIdx, n - 1));
+      if (focused === pay || focused === tri) setFocused(n > 0 ? selFocus : (P > 0 ? 2 + pi : 0));
       else if (focused === out) setFocused(pay);
-      else if (focused >= 2 && focused < pay) setFocused(tab === 0 ? 0 : 1);
+      else if (focused >= base && focused < pay) setFocused(P > 0 ? 2 + pi : (tab === 0 ? 0 : 1));
+      else if (focused >= 2 && focused < base) setFocused(tab === 0 ? 0 : 1);
       else setFocused(0);
     } else if (k === KEY.DOWN) {
       e.preventDefault();
-      if (focused < 2) setFocused(n > 0 ? 2 + Math.min(st.current.selIdx, n - 1) : out);
+      if (focused < 2) setFocused(P > 0 ? 2 + pi : (n > 0 ? selFocus : out));
+      else if (focused < base) setFocused(n > 0 ? selFocus : out);
       else if (focused < pay) setFocused(pay);
       else if (focused === pay || focused === tri) setFocused(out);
     } else if (k === KEY.LEFT) {
       e.preventDefault();
       if (focused < 2) { if (tab > 0) { setTab(t => t - 1); setFocused(0); } }
-      else if (focused >= 2 && focused < pay) setFocused(f => Math.max(2, f - 1));
+      else if (focused < base) { const i = Math.max(0, focused - 3); setPeriod(periods[i]); setFocused(2 + i); }
+      else if (focused >= base && focused < pay) setFocused(f => Math.max(base, f - 1));
       else if (focused === tri) setFocused(pay);
     } else if (k === KEY.RIGHT) {
       e.preventDefault();
       if (focused < 2) { if (tab < TABS.length - 1) { setTab(t => t + 1); setFocused(1); } }
-      else if (focused >= 2 && focused < pay) setFocused(f => Math.min(pay - 1, f + 1));
+      else if (focused < base) { const i = Math.min(P - 1, focused - 1); setPeriod(periods[i]); setFocused(2 + i); }
+      else if (focused >= base && focused < pay) setFocused(f => Math.min(pay - 1, f + 1));
       else if (focused === pay && off === 1) setFocused(tri);
     } else if (k === KEY.ENTER) {
       e.preventDefault();
       if (focused === 0) { setTab(0); }
       else if (focused === 1) { setTab(1); }
-      else if (focused >= 2 && focused < pay) { setSelIdx(focused - 2); setFocused(pay); }
+      else if (focused < base) { setPeriod(periods[focused - 2]); }
+      else if (focused < pay) { setSelIdx(focused - base); setFocused(pay); }
       else if (focused === pay) { const plan = plans[Math.min(st.current.selIdx, n - 1)]; if (plan) handleSubscribe(plan); }
       else if (off === 1 && focused === tri) { startTrial(); }
       else { logout(); }
@@ -221,6 +248,28 @@ export default function SubscriptionScreen() {
         })}
       </div>
 
+      {/* Período: 1 / 3 / 6 / 12 meses */}
+      {!loading && P > 1 && (
+        <div style={{ display: 'flex', gap: 16, marginBottom: 6 }}>
+          {periods.map((mo, i) => {
+            const on = mo === curPeriod; const foc = chipFocus === i; const sv = saving(mo);
+            return (
+              <div key={mo} onClick={() => { setPeriod(mo); setFocused(2 + i); }}
+                style={{ minWidth: 130, textAlign: 'center', padding: '10px 22px', borderRadius: 14, cursor: 'pointer', boxSizing: 'border-box',
+                  background: on ? '#E5E5E5' : '#141414', border: '3px solid ' + (foc ? '#fff' : on ? '#E5E5E5' : '#1F1F1F'),
+                  transform: foc ? 'scale(1.08)' : 'none', transition: 'transform 0.2s' }}>
+                <div style={{ fontSize: 34, fontWeight: 900, lineHeight: 1.1, color: on ? '#111' : '#fff' }}>{mo}</div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: on ? '#444' : '#888' }}>{mo === 1 ? 'mês' : 'meses'}</div>
+                <div style={{ fontSize: 14, fontWeight: 900, height: 18, color: on ? '#15803D' : '#4ADE80' }}>{sv >= 5 ? '-' + sv + '%' : ''}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {!loading && tab === 1 && iptvPlans.length > 0 && (
+        <div style={{ fontSize: 16, fontWeight: 700, color: '#86EFAC', marginTop: 8 }}>🎁 Inclui a assinatura do app (filmes e séries) pelo mesmo período</div>
+      )}
+
       {/* Plans */}
       {loading ? (
         <div style={{ color: '#555', fontSize: 17 }}>Carregando planos…</div>
@@ -231,22 +280,21 @@ export default function SubscriptionScreen() {
             : 'Nenhum plano disponível no momento.'}
         </div>
       ) : (
-        <div style={{ display: 'flex', gap: 30, justifyContent: 'center', flexWrap: 'nowrap', margin: '26px 0 22px', maxWidth: 1700 }}>
+        <div style={{ display: 'flex', gap: 30, justifyContent: 'center', flexWrap: 'nowrap', margin: '18px 0 18px', maxWidth: 1700 }}>
           {plans.map((plan, idx) => {
             const isFoc = planFocus === idx;
             const price = plan.promo_price != null ? plan.promo_price : plan.price;
             const gold = /custo|melhor/i.test(plan.badge || '');
-            const per = plan.duration_days ? (plan.duration_days <= 31 ? '/mês' : plan.duration_days <= 100 ? '/trimestre' : '/ano') : '/mês';
+            const mo = monthsOf(plan);
+            const per = mo === 1 ? 'por mês' : fmt(price / mo) + '/mês';
             const feats = [
               plan.max_streams ? plan.max_streams + (plan.max_streams > 1 ? ' telas simultâneas' : ' tela') : null,
-              plan.description || null,
-              plan.duration_days ? plan.duration_days + ' dias' : null,
-              tab === 1 ? 'Canais ao vivo' : (plan.max_streams >= 2 ? 'Assistir juntos' : null),
-            ].filter(Boolean).slice(0, 4);
+              tab === 1 ? 'Canais ao vivo + app' : (plan.max_streams >= 2 ? 'Assistir juntos' : 'Catálogo completo'),
+            ].filter(Boolean);
             return (
               <div
                 key={plan.id}
-                onClick={() => { setSelIdx(idx); setFocused(plans.length + 2); }}
+                onClick={() => { setSelIdx(idx); setFocused(plans.length + base); }}
                 style={{
                   width: 400, minHeight: 330, padding: '34px 30px 28px', borderRadius: 20, cursor: 'pointer', position: 'relative', boxSizing: 'border-box',
                   background: plan.highlight ? '#190f10' : '#141414',
@@ -261,7 +309,7 @@ export default function SubscriptionScreen() {
                     {plan.badge}
                   </div>
                 )}
-                <div style={{ fontSize: 30, fontWeight: 800, marginBottom: 14 }}>{plan.name}</div>
+                <div style={{ fontSize: 30, fontWeight: 800, marginBottom: 14 }}>{titleOf(plan)}</div>
                 {plan.promo_price != null && plan.promo_price < plan.price && (
                   <div style={{ fontSize: 20, color: '#777', textDecoration: 'line-through' }}>{fmt(plan.price)}</div>
                 )}
@@ -283,7 +331,7 @@ export default function SubscriptionScreen() {
       {/* Ação principal: pagar pelo celular (QR) */}
       {!loading && plans.length > 0 && (
         <div style={{ alignSelf: 'stretch', padding: '10px 70px 0', display: 'flex', alignItems: 'center', gap: 20 }}>
-          <div onClick={() => selPlan && handleSubscribe(selPlan)} style={{ background: ACCENT, padding: '18px 32px', borderRadius: 12, fontSize: 24, fontWeight: 800, cursor: 'pointer', border: '3px solid ' + (payFocus ? '#fff' : ACCENT), transform: payFocus ? 'scale(1.06)' : 'none', transition: 'transform 0.2s' }}>📱 Pagar pelo celular{selPlan ? ' · ' + selPlan.name : ''}</div>
+          <div onClick={() => selPlan && handleSubscribe(selPlan)} style={{ background: ACCENT, padding: '18px 32px', borderRadius: 12, fontSize: 24, fontWeight: 800, cursor: 'pointer', border: '3px solid ' + (payFocus ? '#fff' : ACCENT), transform: payFocus ? 'scale(1.06)' : 'none', transition: 'transform 0.2s' }}>📱 Pagar pelo celular{selPlan ? ' · ' + titleOf(selPlan) + ' · ' + (monthsOf(selPlan) === 1 ? '1 mês' : monthsOf(selPlan) + ' meses') : ''}</div>
           {off === 1 && <div onClick={startTrial} style={{ background: '#1F1F1F', padding: '18px 32px', borderRadius: 12, fontSize: 24, fontWeight: 800, cursor: 'pointer', border: '3px solid ' + (trialFocus ? '#fff' : 'transparent'), transform: trialFocus ? 'scale(1.06)' : 'none', transition: 'transform 0.2s' }}>Começar teste grátis · {trial.days} dias</div>}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 22, fontSize: 20, color: '#A3A3A3', alignItems: 'center' }}>
             <span><b style={{ border: '2px solid #666', borderRadius: 8, padding: '3px 10px', marginRight: 8, color: '#E5E5E5' }}>◀ ▶</b>Escolher</span>

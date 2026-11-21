@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import PlanCard, { brl, periodOf, periodName } from '../components/PlanCard';
+import PlanPicker, { brl, monthsOf, periodLabel, priceOf, titleOf } from '../components/PlanPicker';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../contexts/AuthContext';
@@ -133,13 +133,11 @@ export default function SubscriptionScreen() {
 
   const fmt = brl;
   const selPlan = plans.find(p => p.id === selected);
-  const selPrice = selPlan ? (selPlan.promo_price != null ? selPlan.promo_price : selPlan.price) : 0;
-  const featuresOf = (p) => [
-    'Catálogo completo',
-    p.max_streams ? `${p.max_streams} tela${p.max_streams > 1 ? 's' : ''} simultânea${p.max_streams > 1 ? 's' : ''}` : null,
-    p.description || null,
-    tab === 1 ? 'Canais ao vivo incluídos' : (p.max_streams >= 2 ? 'Assistir juntos com chat e voz' : null),
-  ].filter(Boolean);
+  const selPrice = selPlan ? priceOf(selPlan) : 0;
+  const subtitleOf = (p) => [
+    p.max_streams ? `${p.max_streams} tela${p.max_streams > 1 ? 's' : ''}` : null,
+    tab === 1 ? 'canais ao vivo + app' : (p.max_streams >= 2 ? 'assistir juntos' : 'catálogo completo'),
+  ].filter(Boolean).join(' · ');
 
   return (
     <View style={styles.container}>
@@ -155,8 +153,8 @@ export default function SubscriptionScreen() {
         <Text style={styles.lead}>Escolha o plano ideal para você e sua família.</Text>
 
         <View style={styles.chips}>
-          {['Sem anúncios', 'Até 5 perfis', 'Qualidade até 4K', 'Telas simultâneas'].map(t => (
-            <View key={t} style={styles.chip}><Ionicons name="checkmark" size={16} color="#22C55E" /><Text style={styles.chipTxt}>{t}</Text></View>
+          {['Sem anúncios', 'Até 5 perfis', 'Até 4K'].map(t => (
+            <View key={t} style={styles.chip}><Ionicons name="checkmark" size={14} color="#22C55E" /><Text style={styles.chipTxt}>{t}</Text></View>
           ))}
         </View>
 
@@ -202,19 +200,23 @@ export default function SubscriptionScreen() {
             <Text style={styles.errorMsg}>Entre em contato com o administrador.</Text>
           </View>
         ) : (
-          plans.map(plan => (
-            <PlanCard key={plan.id} plan={plan} selected={selected === plan.id} onPress={() => setSelected(plan.id)}
-              subtitle={[plan.max_streams ? `${plan.max_streams} tela${plan.max_streams > 1 ? 's' : ''}` : null, plan.duration_days ? `${plan.duration_days} dias` : null].filter(Boolean).join(' · ')}
-              features={featuresOf(plan)} />
-          ))
+          <View style={{ marginTop: 16 }}>
+            {tab === 1 && (
+              <View style={[styles.bundle, { marginTop: 0, marginBottom: 14 }]}>
+                <Ionicons name="gift-outline" size={20} color="#4ADE80" />
+                <Text style={styles.bundleTxt}>Inclui a assinatura do app (filmes e séries) pelo mesmo período, sem pagar a mais.</Text>
+              </View>
+            )}
+            <PlanPicker key={tab} plans={plans} selected={selected} onSelect={(p) => p && setSelected(p.id)} subtitleOf={subtitleOf} />
+          </View>
         )}
       </ScrollView>
 
       {!loading && !loadError && plans.length > 0 && (
         <View style={[styles.cta, { paddingBottom: insets.bottom + 12 }]}>
           <View style={styles.ctaRow}>
-            <Text style={styles.ctaLeft}>{selPlan ? `${selPlan.name} · ${periodName(selPlan)}` : ''}</Text>
-            <Text style={styles.ctaRight}>{selPlan ? `${brl(selPrice)}${periodOf(selPlan)}` : ''}</Text>
+            <Text style={styles.ctaLeft}>{selPlan ? `${titleOf(selPlan)} · ${periodLabel(monthsOf(selPlan))}` : ''}</Text>
+            <Text style={styles.ctaRight}>{selPlan ? brl(selPrice) : ''}</Text>
           </View>
           <TouchableOpacity style={[styles.ctaBtn, !selected && { opacity: 0.5 }]} disabled={!selected} onPress={goCheckout} activeOpacity={0.9}>
             <Text style={styles.ctaTxt}>Continuar para pagamento</Text>
@@ -230,11 +232,13 @@ const styles = StyleSheet.create({
   topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   circleBtn: { width: 44, height: 44, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center' },
   logo: { color: ACCENT, fontWeight: '900', letterSpacing: 6, fontSize: 17 },
-  h1: { color: '#fff', fontSize: 32, fontWeight: '900', textAlign: 'center', marginTop: 22, lineHeight: 38 },
+  h1: { color: '#fff', fontSize: 28, fontWeight: '900', textAlign: 'center', marginTop: 16, lineHeight: 34 },
   lead: { color: '#A3A3A3', fontSize: 15, textAlign: 'center', marginTop: 10 },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 20 },
-  chip: { flexBasis: '48.5%', flexGrow: 1, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 12, paddingHorizontal: 12, height: 44 },
-  chipTxt: { color: '#E5E5E5', fontWeight: '700', fontSize: 14 },
+  chips: { flexDirection: 'row', justifyContent: 'center', gap: 8, marginTop: 16 },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 999, paddingHorizontal: 11, height: 32 },
+  chipTxt: { color: '#E5E5E5', fontWeight: '700', fontSize: 12.5 },
+  bundle: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14, padding: 12, borderRadius: 14, backgroundColor: 'rgba(34,197,94,0.10)', borderWidth: 1, borderColor: 'rgba(34,197,94,0.35)' },
+  bundleTxt: { flex: 1, color: '#D1FAE5', fontSize: 13.5, lineHeight: 18, fontWeight: '600' },
   trialCard: { marginTop: 20, borderRadius: 18, padding: 14, backgroundColor: 'rgba(229,9,20,0.10)', borderWidth: 1.5, borderColor: 'rgba(229,9,20,0.45)', gap: 14 },
   trialRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   gift: { width: 48, height: 48, borderRadius: 14, backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center' },

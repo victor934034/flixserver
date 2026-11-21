@@ -77,12 +77,13 @@ router.get('/qr', async (req, res) => {
 const frontBase = () => process.env.FRONTEND_URL || 'https://flixhome.com.br';
 
 async function getSetting(key, fallback = null) {
-  const { data } = await supabase.from('system_settings').select('value').eq('key', key).maybeSingle();
+  const { data, error } = await supabase.from('system_settings').select('value').eq('key', key).maybeSingle();
+  if (error) throw new Error(`Erro ao ler configuração ${key}: ${error.message}`);
   return data?.value ?? fallback;
 }
 
 async function getPaymentProvider() {
-  const value = await getSetting('payment_provider', 'mercado_pago');
+  const value = String(await getSetting('payment_provider', 'mercado_pago')).trim().toLowerCase();
   return value === 'asaas' ? 'asaas' : 'mercado_pago';
 }
 
@@ -97,7 +98,12 @@ function gatewayError(provider, e) {
 // GET /api/payments/config - somente dados públicos usados para montar o checkout.
 router.get('/config', async (req, res) => {
   res.set('Cache-Control', 'no-store');
-  res.json({ provider: await getPaymentProvider() });
+  try {
+    res.json({ provider: await getPaymentProvider() });
+  } catch (e) {
+    console.error('[payments] GET /config error:', e.message);
+    res.status(503).json({ error: 'Não foi possível consultar o gateway de pagamento' });
+  }
 });
 
 function validCpfCnpj(v) {
@@ -135,6 +141,29 @@ async function resolveItem(kind, body) {
   throw Object.assign(new Error('Tipo de compra inválido'), { status: 400 });
 }
 
+// Quem assina o IPTV leva a assinatura do app (filmes e séries) junto, pelo mesmo
+// período. Escolhe o plano de app mais barato com telas suficientes; se a pessoa
+// já tem um plano melhor ativo, mantém o plano e só estende a validade.
+async function grantAppWithIptv(row) {
+  const { data: iptv } = await supabase.from('iptv_plans').select('duration_months, max_streams').eq('id', row.plan_id).maybeSingle();
+  const months = Number(iptv?.duration_months) || 1;
+  const streams = Number(iptv?.max_streams) || 1;
+
+  const appPlans = (await getPlansConfig()).filter(p => p.active).sort((a, b) => (a.max_streams || 1) - (b.max_streams || 1) || a.price - b.price);
+  const chosen = appPlans.find(p => (p.max_streams || 1) >= streams) || appPlans[appPlans.length - 1];
+
+  const { data: cur } = await supabase.from('users').select('plan, plan_expires_at').eq('id', row.user_id).single();
+  const stillValid = cur?.plan_expires_at && new Date(cur.plan_expires_at) > new Date();
+  const curPlan = stillValid ? appPlans.find(p => p.id === cur.plan) : null;
+  const planId = curPlan && (curPlan.max_streams || 1) >= (chosen?.max_streams || 1) ? curPlan.id : (chosen?.id || cur?.plan);
+  if (!planId) return;
+
+  const base = stillValid ? new Date(cur.plan_expires_at) : new Date();
+  base.setMonth(base.getMonth() + months);
+  await supabase.from('users').update({ plan: planId, plan_expires_at: base.toISOString() }).eq('id', row.user_id);
+  console.log(`[payments] app liberado junto do IPTV user=${row.user_id} plano=${planId} expira=${base.toISOString()}`);
+}
+
 // Aplica o benefício de um pagamento confirmado. Idempotente: só roda se
 // fulfilled_at ainda for nulo (o webhook pode chegar repetido ou junto do polling).
 async function fulfill(row) {
@@ -153,6 +182,7 @@ async function fulfill(row) {
     await supabase.from('users').update({ plan: row.plan_id, plan_expires_at: expiresAt }).eq('id', row.user_id);
     console.log(`[payments] plano ativado user=${row.user_id} plano=${row.plan_id} expira=${expiresAt}`);
   } else if (row.kind === 'iptv') {
+    try { await grantAppWithIptv(row); } catch (e) { console.error('[payments] app junto do IPTV:', e.message); }
     const { data: u } = await supabase.from('users').select('name, email').eq('id', row.user_id).single();
     const { data: order } = await supabase.from('iptv_orders').insert({
       user_id: row.user_id, user_name: u?.name || 'Usuário', user_email: u?.email || '',
@@ -526,7 +556,11 @@ router.post('/trial/start', authMiddleware, async (req, res) => {
 // GET/PUT /api/payments/admin/provider - alterna somente as próximas cobranças.
 router.get('/admin/provider', adminMiddleware, async (req, res) => {
   res.set('Cache-Control', 'no-store');
-  res.json({ provider: await getPaymentProvider() });
+  try {
+    res.json({ provider: await getPaymentProvider() });
+  } catch (e) {
+    res.status(503).json({ error: e.message });
+  }
 });
 
 router.put('/admin/provider', adminMiddleware, async (req, res) => {

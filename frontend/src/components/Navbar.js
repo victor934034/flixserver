@@ -91,6 +91,7 @@ export default function Navbar() {
         <Link href="/">Início</Link>
         <Link href="/filmes">Filmes</Link>
         <Link href="/series">Séries</Link>
+        {isLoggedIn && <Link href="/iptv">Ao vivo</Link>}
         <Link href="/cronologias">Cronologias</Link>
         {isLoggedIn && <Link href="/minha-lista">Minha Lista</Link>}
         {isLoggedIn && (

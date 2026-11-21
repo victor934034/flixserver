@@ -18,6 +18,15 @@ const TABS = [
   { key: 'iptv',      label: 'Com IPTV',        icon: 'tv-outline'   },
 ];
 
+const monthsOf = p => Number(p.duration_months) || Math.max(1, Math.round((Number(p.duration_days) || 30) / 30));
+const priceOf = p => (p.promo_price != null && Number(p.promo_price) < Number(p.price) ? Number(p.promo_price) : Number(p.price));
+const titleOf = p => {
+  const m = /(COM|SEM)\s+ADULTO/i.exec(p.name || '');
+  if (m) return m[1].toUpperCase() === 'COM' ? 'Com adulto 18+' : 'Sem adulto';
+  const parts = String(p.name || '').split('·');
+  return parts[parts.length - 1].trim();
+};
+
 function TVPressable({ children, style, onPress, onFocus, onBlur, hasTVPreferredFocus }) {
   return (
     <Pressable
@@ -30,6 +39,18 @@ function TVPressable({ children, style, onPress, onFocus, onBlur, hasTVPreferred
     >
       {children}
     </Pressable>
+  );
+}
+
+function PeriodChip({ months, saving, active, onPress, onFocus }) {
+  const [foc, setFoc] = useState(false);
+  return (
+    <TVPressable onFocus={() => { setFoc(true); onFocus?.(); }} onBlur={() => setFoc(false)} onPress={onPress}
+      style={[s.period, active && s.periodOn, foc && s.periodFoc]}>
+      <Text style={[s.periodNum, active && { color: '#111' }]}>{months}</Text>
+      <Text style={[s.periodUnit, active && { color: '#444' }]}>{months === 1 ? 'mês' : 'meses'}</Text>
+      {saving >= 5 ? <Text style={[s.periodSave, active && { color: '#15803D' }]}>-{saving}%</Text> : null}
+    </TVPressable>
   );
 }
 
@@ -56,13 +77,12 @@ function PlanCard({ plan, onFocus, onBlur, onPress, hasTVPreferredFocus, isIPTV,
   const price = plan.promo_price != null ? plan.promo_price : plan.price;
   const fmt = v => `R$ ${Number(v).toFixed(2).replace('.', ',')}`;
   const gold = /custo|melhor/i.test(plan.badge || '');
-  const per = plan.duration_days ? (plan.duration_days <= 31 ? '/mês' : plan.duration_days <= 100 ? '/trimestre' : '/ano') : '/mês';
+  const m = monthsOf(plan);
+  const per = m === 1 ? 'por mês' : `${fmt(price / m)}/mês`;
   const feats = [
     plan.max_streams ? `${plan.max_streams} tela${plan.max_streams > 1 ? 's' : ''} simultânea${plan.max_streams > 1 ? 's' : ''}` : null,
-    plan.description || null,
-    plan.duration_days ? `${plan.duration_days} dias` : null,
-    isIPTV ? 'Canais ao vivo' : (plan.max_streams >= 2 ? 'Assistir juntos' : null),
-  ].filter(Boolean).slice(0, 4);
+    isIPTV ? 'Canais ao vivo + app' : (plan.max_streams >= 2 ? 'Assistir juntos' : 'Catálogo completo'),
+  ].filter(Boolean);
 
   return (
     <TVPressable
@@ -77,7 +97,7 @@ function PlanCard({ plan, onFocus, onBlur, onPress, hasTVPreferredFocus, isIPTV,
           <Text style={[s.pillTxt, gold && { color: '#1a1200' }]}>{plan.badge}</Text>
         </View>
       ) : null}
-      <Text style={s.planName}>{plan.name}</Text>
+      <Text style={s.planName}>{titleOf(plan)}</Text>
       {plan.promo_price != null && plan.promo_price < plan.price ? <Text style={s.priceOld}>{fmt(plan.price)}</Text> : null}
       <View style={s.priceRow}>
         <Text style={s.price}>{fmt(price)}</Text>
@@ -109,6 +129,7 @@ export default function SubscriptionScreen({ navigation, route }) {
   const [trial,       setTrial]       = useState(null);
   const [trialBusy,   setTrialBusy]   = useState(false);
   const [trialFoc,    setTrialFoc]    = useState(false);
+  const [sel,         setSel]         = useState({ tab: initialTab, period: null });
 
   useEffect(() => {
     Promise.all([
@@ -133,7 +154,14 @@ export default function SubscriptionScreen({ navigation, route }) {
     return () => clearInterval(t);
   }, [qrUrl]);
 
-  const plans = tab === 0 ? basicPlans : iptvPlans;
+  const allPlans = tab === 0 ? basicPlans : iptvPlans;
+  const periods = [...new Set(allPlans.map(monthsOf))].sort((a, b) => a - b);
+  const period = periods.includes(sel.period) && sel.tab === tab ? sel.period : periods[0];
+  const plans = allPlans.filter(p => monthsOf(p) === period)
+    .sort((a, b) => (a.is_adult ? 1 : 0) - (b.is_adult ? 1 : 0) || (a.max_streams || 1) - (b.max_streams || 1));
+  const bestMonthly = mo => Math.min(...allPlans.filter(p => monthsOf(p) === mo).map(p => priceOf(p) / mo));
+  const saving = mo => (periods.length && mo !== periods[0] ? Math.round((1 - bestMonthly(mo) / bestMonthly(periods[0])) * 100) : 0);
+  const pickPeriod = mo => setSel({ tab, period: mo });
 
   async function startTrial() {
     if (trialBusy) return;
@@ -226,7 +254,7 @@ export default function SubscriptionScreen({ navigation, route }) {
             active={tab === i}
             isIPTV={i === 1}
             hasTVPreferredFocus={i === initialTab && i === 0}
-            onPress={() => setTab(i)}
+            onPress={() => { setTab(i); setSel({ tab: i, period: null }); }}
           />
         ))}
       </View>
@@ -244,13 +272,23 @@ export default function SubscriptionScreen({ navigation, route }) {
         </TVPressable>
       )}
 
+      {!loading && tab === 1 && iptvPlans.length > 0 && (
+        <Text style={s.bundle}>🎁 Inclui a assinatura do app (filmes e séries) pelo mesmo período</Text>
+      )}
+
+      {!loading && periods.length > 1 && (
+        <View style={s.periodBar}>
+          {periods.map(mo => <PeriodChip key={mo} months={mo} saving={saving(mo)} active={mo === period} onPress={() => pickPeriod(mo)} onFocus={() => pickPeriod(mo)} />)}
+        </View>
+      )}
+
       {loading ? (
         <ActivityIndicator color={ACCENT} size="large" style={{ marginTop: r(64) }} />
       ) : (
         <ScrollView
           contentContainerStyle={s.planRow}
           showsVerticalScrollIndicator={false}
-          horizontal={plans.length <= 4}
+          horizontal
           showsHorizontalScrollIndicator={false}
         >
           {plans.length === 0 ? (
@@ -268,7 +306,7 @@ export default function SubscriptionScreen({ navigation, route }) {
                 plan={plan}
                 isIPTV={tab === 1}
                 busy={busyId === plan.id}
-                hasTVPreferredFocus={idx === 0 && !loading}
+                hasTVPreferredFocus={idx === 0 && !loading && periods.length <= 1}
                 onPress={() => handleSubscribe(plan)}
               />
             ))
@@ -310,6 +348,14 @@ const s = StyleSheet.create({
   title:        { fontSize: r(26), fontWeight: '800', color: '#fff', marginBottom: r(6) },
   sub:          { fontSize: r(15), color: '#555', textAlign: 'center', maxWidth: r(700) },
 
+  periodBar:    { flexDirection: 'row', justifyContent: 'center', gap: r(14), marginBottom: r(30) },
+  period:       { minWidth: r(130), alignItems: 'center', paddingVertical: r(10), paddingHorizontal: r(20), borderRadius: r(14), backgroundColor: '#141414', borderWidth: 3, borderColor: '#1F1F1F' },
+  periodOn:     { backgroundColor: '#E5E5E5', borderColor: '#E5E5E5' },
+  periodFoc:    { borderColor: '#fff', transform: [{ scale: 1.08 }] },
+  periodNum:    { color: '#fff', fontSize: r(34), fontWeight: '900' },
+  periodUnit:   { color: '#888', fontSize: r(15), fontWeight: '700' },
+  periodSave:   { color: '#4ADE80', fontSize: r(14), fontWeight: '900', marginTop: r(2) },
+  bundle:       { alignSelf: 'center', color: '#86EFAC', fontSize: r(16), fontWeight: '700', marginTop: -r(14), marginBottom: r(18) },
   tabBar:       { flexDirection: 'row', justifyContent: 'center', gap: r(8), marginBottom: r(32) },
   tab:          { flexDirection: 'row', paddingHorizontal: r(40), paddingVertical: r(12), borderRadius: r(10), backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.07)' },
   tabActive:    { backgroundColor: '#fff', borderColor: '#fff' },

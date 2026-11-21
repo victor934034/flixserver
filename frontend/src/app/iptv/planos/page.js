@@ -4,9 +4,8 @@ import { useRouter } from 'next/navigation';
 import Navbar from '../../../components/Navbar';
 import api from '../../../lib/api';
 import { getToken } from '../../../lib/auth';
+import PlanPicker, { brl, titleOf, periodLabel, monthsOf, priceOf } from '../../../components/PlanPicker';
 import styles from '../../subscription/page.module.css';
-
-const brl = v => `R$ ${Number(v).toFixed(2).replace('.', ',')}`;
 
 // Planos IPTV (design): mesmo card de plano da assinatura; o servidor cobra sempre o preço do plano IPTV
 export default function IptvPlanosPage() {
@@ -35,31 +34,22 @@ export default function IptvPlanosPage() {
         <h1 className={styles.hero}>TV ao vivo no FlixHome</h1>
         <ul className={styles.perks}>{['Canais ao vivo 24h', 'Filmes e séries do servidor', 'Até 2 telas ao mesmo tempo'].map(t => <li key={t}><i>✓</i>{t}</li>)}</ul>
 
+        <p className={styles.bundle} style={{ margin: '0 0 24px' }}>🎁 Inclui a assinatura do app (filmes e séries) pelo mesmo período, sem pagar a mais.</p>
+
         {loading ? <p className={styles.disabled}>Carregando…</p> : plans.length === 0 ? (
           <p className={styles.disabled}>Nenhum plano disponível no momento.</p>
-        ) : (
-          <div className={styles.plans}>
-            {plans.map(plan => {
-              const on = sel === plan.id;
-              const months = plan.duration_months || 1;
-              const gold = /custo|melhor/i.test(plan.badge || '');
-              return (
-                <div key={plan.id} className={`${styles.plan} ${on ? styles.planHL : ''}`} onClick={() => setSel(plan.id)} style={{ cursor: 'pointer' }}>
-                  {plan.badge && <span className={`${styles.badge} ${gold ? styles.badgeGold : ''}`}>{plan.badge}</span>}
-                  <div className={styles.planHead}><h2>{plan.name}</h2><span className={`${styles.radio} ${on ? styles.radioOn : ''}`} /></div>
-                  <div className={styles.priceRow}><span className={styles.price}>{brl(plan.price)}</span><span className={styles.per}>/{months === 1 ? 'mês' : `${months} meses`}</span></div>
-                  <div className={styles.sub}>{[plan.max_streams ? `${plan.max_streams} tela${plan.max_streams > 1 ? 's' : ''}` : null, 'canais ao vivo', `${months * 30} dias`].filter(Boolean).join(' · ')}</div>
-                  <ul className={styles.feats}>
-                    <li><i>✓</i>Canais ao vivo 24h</li>
-                    {plan.description && <li><i>✓</i>{plan.description}</li>}
-                    <li><i>✓</i>Ativação em até 30 min</li>
-                  </ul>
-                  <button className={on ? styles.ctaRed : styles.ctaGhost} onClick={(e) => { e.stopPropagation(); go(plan); }}>Assinar agora</button>
-                </div>
-              );
-            })}
-          </div>
-        )}
+        ) : (() => {
+          const cur = plans.find(p => p.id === sel) || plans[0];
+          return (
+            <>
+              <PlanPicker plans={plans} selected={cur.id} onSelect={p => p && setSel(p.id)}
+                subtitleOf={p => [p.max_streams ? `${p.max_streams} tela${p.max_streams > 1 ? 's' : ''}` : null, 'canais ao vivo + app'].filter(Boolean).join(' · ')} />
+              <button className={styles.ctaMain} onClick={() => go(cur)}>
+                Assinar agora · {titleOf(cur)} · {periodLabel(monthsOf(cur))} · {brl(priceOf(cur))}
+              </button>
+            </>
+          );
+        })()}
         <p style={{ position: 'relative', color: '#777', fontSize: 13, marginTop: 28, textAlign: 'center', maxWidth: 520 }}>Ativação manual pelo admin após o pagamento (geralmente em até 30 min). Você acompanha o status na página IPTV.</p>
       </main>
     </>
