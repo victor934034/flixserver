@@ -47,7 +47,15 @@ router.get('/stats', async (req, res) => {
       .is('file_color', null)
       .is('file_bw', null);
 
+    const withCinema = await supabase
+      .from('movies')
+      .select('id', { count: 'exact', head: true })
+      .eq('is_active', true)
+      .not('file_cinema', 'is', null)
+      .neq('file_cinema', '');
+
     res.json({
+      movies_with_cinema: withCinema.count,
       movies: movies.count,
       series: series.count,
       episodes: episodes.count,

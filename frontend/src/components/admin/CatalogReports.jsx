@@ -1,5 +1,5 @@
 'use client';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import api from '../../lib/api';
 
 // Relatórios de catálogo: versão Cinema, continuações/temporadas/episódios
@@ -91,6 +91,9 @@ export default function CatalogReports() {
     }
     setCinemaLoading(false);
   }
+
+  // A lista já abre carregada (antes só aparecia depois de clicar em "Ver lista")
+  useEffect(() => { loadCinema(); }, []);
 
   async function runSequels() {
     setSeqRunning(true);

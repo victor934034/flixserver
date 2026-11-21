@@ -16,6 +16,7 @@ export default function AdminDashboard() {
     { label: 'Séries', value: stats.series, color: '#0071eb' },
     { label: 'Episódios', value: stats.episodes, color: '#46d369' },
     { label: 'Usuários', value: stats.users, color: '#ffa500' },
+    { label: 'Com versão Cinema', value: stats.movies_with_cinema, color: '#a78bfa' },
     { label: 'Filmes sem vídeo', value: stats.movies_missing_video, color: '#ff6b35', alert: stats.movies_missing_video > 0 },
   ] : [];
 
