@@ -1298,8 +1298,9 @@ export default function PlayerScreen() {
           >
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
-          <Ionicons name="alert-circle-outline" size={44} color="#E50914" />
-          <Text style={styles.errorTitle}>Não foi possível reproduzir o vídeo</Text>
+          <View style={styles.errorTile}><Ionicons name="alert-circle-outline" size={30} color="#F87171" /></View>
+          <Text style={styles.errorTitle}>Não foi possível reproduzir</Text>
+          <Text style={styles.errorMsg}>Esta versão do vídeo falhou. Tente de novo ou escolha outra versão{availVer.length > 1 ? ' (ex.: Legendado)' : ''}.</Text>
           {!!playerError?.message && <Text style={styles.errorMsg} numberOfLines={2}>{playerError.message}</Text>}
           {retrying ? (
             <View style={{ alignItems: 'center', gap: 8, marginTop: 14 }}>
@@ -1584,7 +1585,7 @@ export default function PlayerScreen() {
         </TouchableOpacity>
       )}
 
-      {tg.active && <TogetherOverlay tg={tg} visible={ctrlVisible} />}
+      {tg.active && <TogetherOverlay tg={tg} visible={ctrlVisible} onLeave={() => router.back()} />}
     </View>
   );
 }
@@ -1595,16 +1596,17 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center',
     backgroundColor: '#000', gap: 10, paddingHorizontal: 40,
   },
-  errorTitle: { color: '#fff', fontSize: 16, fontWeight: '700', textAlign: 'center' },
-  errorMsg: { color: '#888', fontSize: 12, textAlign: 'center' },
+  errorTile: { width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(239,68,68,0.14)', alignItems: 'center', justifyContent: 'center' },
+  errorTitle: { color: '#fff', fontSize: 22, fontWeight: '900', textAlign: 'center' },
+  errorMsg: { color: '#A3A3A3', fontSize: 13, textAlign: 'center', lineHeight: 19 },
   errorBtnRow: { flexDirection: 'row', gap: 12, marginTop: 14 },
-  errorBtn: { backgroundColor: '#E50914', paddingHorizontal: 18, paddingVertical: 10, borderRadius: 8 },
+  errorBtn: { backgroundColor: '#E50914', paddingHorizontal: 22, paddingVertical: 12, borderRadius: 12 },
   errorBtnOutline: { backgroundColor: 'transparent', borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)' },
   errorBtnText: { color: '#fff', fontSize: 13, fontWeight: '700' },
 
   topBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingBottom: 8 },
   iconPad: { padding: 10 },
-  titleText: { flex: 1, color: '#fff', fontSize: 16, fontWeight: '700', textAlign: 'center', paddingHorizontal: 6 },
+  titleText: { flex: 1, color: '#fff', fontSize: 17, fontWeight: '800', textAlign: 'left', paddingHorizontal: 6 },
   timerBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 7 },
   timerBtnText: { color: '#fff', fontSize: 13 },
   castHeaderBtn: { width: 24, height: 24, marginHorizontal: 6 },
@@ -1646,35 +1648,35 @@ const styles = StyleSheet.create({
   seekBtn: { padding: 10 },
   seekWrap: { width: 52, height: 52, justifyContent: 'center', alignItems: 'center' },
   seekNum: { position: 'absolute', color: '#fff', fontSize: 12, fontWeight: '800' },
-  playPauseBtn: { padding: 10 },
+  playPauseBtn: { width: 76, height: 76, borderRadius: 38, backgroundColor: 'rgba(255,255,255,0.16)', alignItems: 'center', justifyContent: 'center' },
 
   skipIntroBtn: {
     position: 'absolute', right: 20, bottom: 90,
     flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.35)',
-    paddingHorizontal: 18, paddingVertical: 9, borderRadius: 4,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.7)',
+    paddingHorizontal: 20, paddingVertical: 11, borderRadius: 10,
   },
-  skipIntroText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  skipIntroText: { color: '#fff', fontSize: 14, fontWeight: '800' },
 
   bottomArea: { paddingHorizontal: 16, paddingTop: 4 },
   progressOuter: { height: 38, justifyContent: 'center', position: 'relative' },
   progressTrack: {
-    position: 'absolute', left: 0, right: 0, height: 3,
-    backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 2,
+    position: 'absolute', left: 0, right: 0, height: 4,
+    backgroundColor: 'rgba(255,255,255,0.28)', borderRadius: 2,
   },
-  progressFill: { position: 'absolute', left: 0, height: 3, backgroundColor: '#E50914', borderRadius: 2 },
+  progressFill: { position: 'absolute', left: 0, height: 4, backgroundColor: '#E50914', borderRadius: 2 },
   progressDot: {
     position: 'absolute', top: '50%', marginTop: -9, marginLeft: -9,
     width: 18, height: 18, borderRadius: 9, backgroundColor: '#E50914',
     elevation: 4, shadowColor: '#E50914', shadowOpacity: 0.5, shadowRadius: 6,
   },
   timeRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 2, marginBottom: 6 },
-  timeText: { color: 'rgba(255,255,255,0.6)', fontSize: 11 },
+  timeText: { color: '#fff', fontSize: 13, fontWeight: '700' },
 
   actionBar: { flexDirection: 'row', alignItems: 'center', paddingVertical: 4 },
   actionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 8 },
-  actionBtnText: { color: '#fff', fontSize: 11, fontWeight: '500' },
+  actionBtnText: { color: '#fff', fontSize: 12, fontWeight: '700' },
   actionDiv: { width: 1, height: 16, backgroundColor: 'rgba(255,255,255,0.15)' },
 
   lockScreen: { ...StyleSheet.absoluteFillObject, justifyContent: 'flex-end', alignItems: 'flex-start', paddingBottom: 28, paddingLeft: 20 },

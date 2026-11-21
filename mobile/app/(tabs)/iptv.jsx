@@ -7,7 +7,9 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'react-native';
 import api from '../../lib/api';
+import { setQueue, loadFavs, saveFavs, streamUrl } from '../../lib/iptvStore';
 
 const CACHE_KEY = 'iptv_categories_cache';
 let _memCache = null;
@@ -158,6 +160,48 @@ export default function IptvScreen() {
     setLoadKey(k => k + 1);
   }, []);
 
+  // Ao vivo: canais por categoria, favoritos e busca
+  const [catId, setCatId] = useState(null);
+  const [chans, setChans] = useState([]);
+  const [chLoading, setChLoading] = useState(false);
+  const [favs, setFavs] = useState([]);
+  const [playing, setPlaying] = useState(null);
+  const chCache = useRef({});
+
+  useEffect(() => { loadFavs().then(setFavs); }, []);
+  useEffect(() => { if (!catId && categories.length) setCatId(categories[0].category_id); }, [categories]);
+  useEffect(() => {
+    if (!catId || catId === '__fav') return;
+    if (chCache.current[catId]) { setChans(chCache.current[catId]); return; }
+    let alive = true;
+    setChLoading(true);
+    api.get('/iptv/streams', { params: { category_id: catId } })
+      .then(r => { const l = Array.isArray(r.data) ? r.data : []; chCache.current[catId] = l; if (alive) setChans(l); })
+      .catch(() => { if (alive) setChans([]); })
+      .finally(() => { if (alive) setChLoading(false); });
+    return () => { alive = false; };
+  }, [catId]);
+
+  const toggleFav = (ch) => {
+    setFavs(prev => {
+      const next = prev.some(f => f.stream_id === ch.stream_id) ? prev.filter(f => f.stream_id !== ch.stream_id) : [...prev, { stream_id: ch.stream_id, name: ch.name, stream_icon: ch.stream_icon }];
+      saveFavs(next); return next;
+    });
+  };
+  const base = catId === '__fav' ? favs : chans;
+  const shown = search.trim() ? base.filter(c => c.name?.toLowerCase().includes(search.toLowerCase())) : base;
+  const curCat = categories.find(c => c.category_id === catId);
+
+  const openChannel = async (item, index) => {
+    setPlaying(item.stream_id);
+    try {
+      const url = await streamUrl(item.stream_id, 'm3u8');
+      setQueue(shown, index);
+      router.push({ pathname: '/iptv-player', params: { url, urlTs: url.replace('.m3u8', '.ts'), name: item.name, logo: item.stream_icon || '', id: String(item.stream_id), cat: curCat?.category_name || '' } });
+    } catch {}
+    setPlaying(null);
+  };
+
   const filtered = search.trim()
     ? categories.filter(c => c.category_name?.toLowerCase().includes(search.toLowerCase()))
     : categories;
@@ -204,54 +248,100 @@ export default function IptvScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>📺 IPTV</Text>
-        <Text style={styles.headerSub}>{categories.length} categorias</Text>
+      <View style={styles.liveHead}>
+        <Text style={styles.liveH1}>Ao vivo</Text>
+        <View style={styles.activeBadge}><Text style={styles.activeTxt}>IPTV ativo</Text></View>
       </View>
 
-      <TextInput
-        style={styles.search}
-        placeholder="Buscar categoria..."
-        placeholderTextColor="#444"
-        value={search}
-        onChangeText={setSearch}
-      />
+      <View style={styles.searchBox}>
+        <Ionicons name="search" size={18} color="#888" />
+        <TextInput style={styles.searchInput} placeholder="Buscar canal" placeholderTextColor="#666" value={search} onChangeText={setSearch} />
+        {search ? <TouchableOpacity onPress={() => setSearch('')}><Ionicons name="close-circle" size={18} color="#888" /></TouchableOpacity> : null}
+      </View>
 
-      <FlatList
-        data={filtered}
-        keyExtractor={item => String(item.category_id)}
-        numColumns={2}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => fetchCategories(true)}
-            tintColor="#E50914"
-            colors={['#E50914']}
-          />
-        }
-        contentContainerStyle={styles.grid}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={styles.card}
-            activeOpacity={0.7}
-            onPress={() => router.push({
-              pathname: '/iptv-channels',
-              params: { category_id: item.category_id, category_name: item.category_name },
-            })}
-          >
-            <Text style={styles.cardName} numberOfLines={2}>{item.category_name}</Text>
-            <Text style={styles.cardArrow}>›</Text>
-          </TouchableOpacity>
-        )}
-        ListEmptyComponent={
-          <Text style={styles.empty}>Nenhuma categoria encontrada</Text>
-        }
-      />
+      <View>
+        <FlatList
+          horizontal showsHorizontalScrollIndicator={false} data={[{ category_id: '__fav', category_name: 'Favoritos' }, ...categories]}
+          keyExtractor={c => String(c.category_id)} contentContainerStyle={styles.chipsRow} style={{ flexGrow: 0 }}
+          renderItem={({ item }) => {
+            const fav = item.category_id === '__fav';
+            const on = catId === item.category_id;
+            return (
+              <TouchableOpacity activeOpacity={0.8} onPress={() => setCatId(item.category_id)}
+                style={[styles.catChip, fav && styles.catFav, on && styles.catOn]}>
+                {fav && <Ionicons name="star" size={15} color={on ? '#111' : '#FBBF24'} />}
+                <Text style={[styles.catTxt, fav && !on && { color: '#FBBF24' }, on && { color: '#111' }]} numberOfLines={1}>{item.category_name}</Text>
+              </TouchableOpacity>
+            );
+          }}
+        />
+      </View>
+
+      <Text style={styles.count}>
+        {chLoading ? 'Carregando canais…' : `${shown.length} canai${shown.length === 1 ? 'l' : 's'}${curCat ? ` em ${curCat.category_name}` : ''}`}
+      </Text>
+
+      {chLoading ? (
+        <View style={styles.grid2}>
+          {[0, 1, 2, 3, 4, 5].map(i => <View key={i} style={[styles.chCard, { height: 128, opacity: 0.5 }]} />)}
+        </View>
+      ) : shown.length === 0 ? (
+        <View style={styles.emptyBox}>
+          <View style={styles.tile}><Ionicons name={catId === '__fav' ? 'star-outline' : 'search'} size={30} color="#888" /></View>
+          <Text style={styles.stateTitle}>{catId === '__fav' ? 'Nenhum favorito ainda' : 'Nenhum canal encontrado'}</Text>
+          <Text style={styles.sub}>{catId === '__fav' ? 'Toque na ★ de um canal para ele aparecer aqui.' : 'Tente outro nome ou procure em todas as categorias.'}</Text>
+          {search ? <TouchableOpacity style={styles.ghostBtn2} onPress={() => setSearch('')}><Text style={styles.ghostTxt}>Limpar busca</Text></TouchableOpacity> : null}
+        </View>
+      ) : (
+        <FlatList
+          data={shown} numColumns={2} keyExtractor={c => String(c.stream_id)}
+          columnWrapperStyle={{ gap: 12 }} contentContainerStyle={{ padding: 16, paddingBottom: 24, gap: 12 }}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => fetchCategories(true)} tintColor="#E50914" colors={['#E50914']} />}
+          renderItem={({ item, index }) => {
+            const isFav = favs.some(f => f.stream_id === item.stream_id);
+            return (
+              <TouchableOpacity style={[styles.chCard, playing === item.stream_id && { borderColor: '#E50914' }]} activeOpacity={0.85} onPress={() => openChannel(item, index)}>
+                <View style={styles.chTop}>
+                  <View style={styles.logoBox}>
+                    {item.stream_icon ? <Image source={{ uri: item.stream_icon }} style={{ width: 44, height: 30 }} resizeMode="contain" /> : <Text style={styles.logoTxt}>{(item.name || '?').slice(0, 5).toUpperCase()}</Text>}
+                  </View>
+                  <TouchableOpacity hitSlop={10} onPress={() => toggleFav(item)}><Ionicons name={isFav ? 'star' : 'star-outline'} size={22} color={isFav ? '#FBBF24' : '#888'} /></TouchableOpacity>
+                </View>
+                <Text style={styles.chName} numberOfLines={2}>{item.name}</Text>
+                <View style={styles.chLive}><View style={styles.liveDot} /><Text style={styles.chLiveTxt} numberOfLines={1}>{playing === item.stream_id ? 'Abrindo…' : 'Ao vivo'}</Text></View>
+              </TouchableOpacity>
+            );
+          }}
+        />
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  liveHead:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12 },
+  liveH1:      { color: '#fff', fontSize: 30, fontWeight: '900' },
+  activeBadge: { backgroundColor: 'rgba(34,197,94,0.16)', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 },
+  activeTxt:   { color: '#22C55E', fontWeight: '900', fontSize: 13 },
+  searchBox:   { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 16, height: 50, borderRadius: 14, backgroundColor: '#141414', borderWidth: 1, borderColor: '#262626', paddingHorizontal: 14 },
+  searchInput: { flex: 1, color: '#fff', fontSize: 16, padding: 0 },
+  chipsRow:    { paddingHorizontal: 16, paddingVertical: 14, gap: 8 },
+  catChip:     { flexDirection: 'row', alignItems: 'center', gap: 6, height: 42, paddingHorizontal: 18, borderRadius: 999, borderWidth: 1, borderColor: '#333', backgroundColor: 'transparent' },
+  catFav:      { borderColor: 'rgba(251,191,36,0.5)', backgroundColor: 'rgba(251,191,36,0.08)' },
+  catOn:       { backgroundColor: '#E5E5E5', borderColor: '#E5E5E5' },
+  catTxt:      { color: '#E5E5E5', fontWeight: '700', fontSize: 15, maxWidth: 160 },
+  count:       { color: '#A3A3A3', fontSize: 14, paddingHorizontal: 16, marginBottom: 2 },
+  grid2:       { flexDirection: 'row', flexWrap: 'wrap', gap: 12, padding: 16 },
+  chCard:      { flex: 1, minWidth: '45%', backgroundColor: '#141414', borderRadius: 16, padding: 14, gap: 10, borderWidth: 2, borderColor: '#1F1F1F' },
+  chTop:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  logoBox:     { minWidth: 56, height: 40, borderRadius: 8, backgroundColor: '#1F3A2A', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 },
+  logoTxt:     { color: '#fff', fontWeight: '900', fontSize: 12 },
+  chName:      { color: '#fff', fontSize: 17, fontWeight: '800', minHeight: 44 },
+  chLive:      { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  liveDot:     { width: 7, height: 7, borderRadius: 4, backgroundColor: '#F87171' },
+  chLiveTxt:   { color: '#A3A3A3', fontSize: 13, flex: 1 },
+  emptyBox:    { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, paddingHorizontal: 32, paddingBottom: 60 },
+  ghostBtn2:   { height: 46, paddingHorizontal: 24, borderRadius: 12, borderWidth: 1, borderColor: '#333', alignItems: 'center', justifyContent: 'center', marginTop: 4 },
   stateRoot:   { flex: 1, backgroundColor: '#0A0A0A', paddingHorizontal: 16 },
   stateKicker: { color: '#888', fontSize: 12, fontWeight: '800', letterSpacing: 2 },
   stateH1:     { color: '#fff', fontSize: 30, fontWeight: '900', marginTop: 4 },

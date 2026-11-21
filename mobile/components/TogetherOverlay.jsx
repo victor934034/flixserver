@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, TextInput, FlatList, StyleSheet, Share, KeyboardAvoidingView, Platform } from 'react-native';
+import { Alert, View, Text, TouchableOpacity, TextInput, FlatList, StyleSheet, Share, KeyboardAvoidingView, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../lib/api';
+import Avatar from './Avatar';
 
 const COLORS = ['#7c3aed', '#0ea5e9', '#f97316', '#e11d48', '#14b8a6', '#eab308', '#6366f1', '#84cc16'];
 const colorOf = (id) => COLORS[[...String(id)].reduce((a, c) => a + c.charCodeAt(0), 0) % COLORS.length];
 const initials = (n) => String(n || '?').trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase();
 
 // Botão flutuante + chip de sincronia + toasts + gaveta (membros, convite, chat)
-export default function TogetherOverlay({ tg, visible = true }) {
+export default function TogetherOverlay({ tg, visible = true, onLeave }) {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState('chat');
   const [text, setText] = useState('');
@@ -33,21 +34,56 @@ export default function TogetherOverlay({ tg, visible = true }) {
 
   return (
     <>
+      {/* chip de sincronia + avatares (topo direito) */}
       {visible && (
-        <View pointerEvents="box-none" style={s.topWrap}>
+        <View pointerEvents="box-none" style={s.topRight}>
           <View style={[s.chip, ok ? s.chipOk : s.chipWarn]}>
             <View style={[s.dot, { backgroundColor: ok ? '#22C55E' : '#FBBF24' }]} />
             <Text style={[s.chipTxt, { color: ok ? '#22C55E' : '#FBBF24' }]}>{ok ? `Sincronizado · ${tg.members.length} assistindo` : 'Ressincronizando…'}</Text>
           </View>
-          {tg.toasts.map(t => <View key={t.id} style={s.toast}><Text style={s.toastTxt}>{t.text}</Text></View>)}
+          <View style={s.avRow}>
+            {tg.members.slice(0, 4).map((m, i) => (
+              <View key={m.id} style={{ marginLeft: i ? -8 : 0 }}><Avatar name={m.name} userId={m.userId} photo={m.avatar} size={30} speaking={!!m.voice} muted={false} /></View>
+            ))}
+          </View>
         </View>
       )}
 
+      {/* toasts de sincronia (entram de cima) */}
+      <View pointerEvents="none" style={s.topWrap}>
+        {tg.toasts.map(t => <View key={t.id} style={s.toast}><Ionicons name="swap-vertical" size={13} color="#E5E5E5" /><Text style={s.toastTxt}>{t.text}</Text></View>)}
+      </View>
+
+      {/* últimas mensagens (embaixo à esquerda) */}
+      {visible && tg.messages.length > 0 && (
+        <View pointerEvents="none" style={s.recent}>
+          {tg.messages.slice(-2).map(m => (
+            <View key={m.id} style={s.recentMsg}><Text style={s.recentTxt}><Text style={{ color: colorOf(m.userId), fontWeight: '800' }}>{String(m.name).split(' ')[0]}</Text>  {m.text}</Text></View>
+          ))}
+        </View>
+      )}
+
+      {/* ações (embaixo à direita): mic, chat, sair da sessão */}
       {visible && (
-        <TouchableOpacity style={s.fab} onPress={() => setOpen(true)} activeOpacity={0.8}>
-          <Ionicons name="chatbubbles" size={22} color="#fff" />
-          {tg.unread > 0 && <View style={s.badge}><Text style={s.badgeTxt}>{tg.unread}</Text></View>}
-        </TouchableOpacity>
+        <View style={s.actions} pointerEvents="box-none">
+          {tg.voice?.supported && (
+            <TouchableOpacity style={[s.micBtn, tg.voice.on && !tg.voice.muted && { backgroundColor: '#22C55E' }]} onPress={() => (tg.voice.on ? tg.voice.toggleMute() : tg.voice.join())} activeOpacity={0.85}>
+              <Ionicons name={tg.voice.on && !tg.voice.muted ? 'mic' : 'mic-off'} size={16} color={tg.voice.on && !tg.voice.muted ? '#04150A' : '#fff'} />
+              <Text style={[s.micTxt, tg.voice.on && !tg.voice.muted && { color: '#04150A' }]}>{tg.voice.on ? (tg.voice.muted ? 'Mudo' : 'Mic') : 'Mic'}</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity style={s.round} onPress={() => setOpen(true)} activeOpacity={0.8}>
+            <Ionicons name="chatbubble-outline" size={20} color="#fff" />
+            {tg.unread > 0 && <View style={s.badge}><Text style={s.badgeTxt}>{tg.unread}</Text></View>}
+          </TouchableOpacity>
+          <TouchableOpacity style={s.leave} onPress={() => (tg.isHost ? Alert.alert('Sair da sessão', 'Encerrar para todos ou só sair?', [
+            { text: 'Cancelar', style: 'cancel' },
+            { text: 'Só sair', onPress: () => onLeave?.() },
+            { text: 'Encerrar para todos', style: 'destructive', onPress: () => { tg.endRoom(); onLeave?.(); } },
+          ]) : onLeave?.())} activeOpacity={0.85}>
+            <Text style={s.leaveTxt}>Sair da sessão</Text>
+          </TouchableOpacity>
+        </View>
       )}
 
       {open && (
@@ -126,6 +162,18 @@ export default function TogetherOverlay({ tg, visible = true }) {
 }
 
 const s = StyleSheet.create({
+  topRight: { position: 'absolute', top: 12, right: 14, flexDirection: 'row', alignItems: 'center', gap: 10, zIndex: 50 },
+  avRow: { flexDirection: 'row', alignItems: 'center' },
+  toast: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(31,31,31,0.95)', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: '#2A2A2A' },
+  recent: { position: 'absolute', left: 16, bottom: 78, gap: 6, zIndex: 40 },
+  recentMsg: { alignSelf: 'flex-start', backgroundColor: 'rgba(31,31,31,0.9)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999 },
+  recentTxt: { color: '#E5E5E5', fontSize: 13 },
+  actions: { position: 'absolute', right: 14, bottom: 14, flexDirection: 'row', alignItems: 'center', gap: 10, zIndex: 50 },
+  micBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 42, paddingHorizontal: 16, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.16)' },
+  micTxt: { color: '#fff', fontWeight: '800', fontSize: 13 },
+  round: { width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(255,255,255,0.16)', alignItems: 'center', justifyContent: 'center' },
+  leave: { height: 42, paddingHorizontal: 18, borderRadius: 999, borderWidth: 1, borderColor: 'rgba(255,255,255,0.4)', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.4)' },
+  leaveTxt: { color: '#fff', fontWeight: '800', fontSize: 13 },
   topWrap: { position: 'absolute', top: 12, left: 0, right: 0, alignItems: 'center', gap: 6, zIndex: 50 },
   chip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 999 },
   chipOk: { backgroundColor: 'rgba(34,197,94,0.16)' }, chipWarn: { backgroundColor: 'rgba(251,191,36,0.16)' },

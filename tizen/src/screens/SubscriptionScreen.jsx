@@ -136,12 +136,12 @@ export default function SubscriptionScreen() {
       color: '#fff', display: 'flex', flexDirection: 'column',
       alignItems: 'center', overflow: 'hidden',
     }}>
-      {/* Logo */}
-      <div style={{ textAlign: 'center', paddingTop: 52, paddingBottom: 36 }}>
-        <div style={{ fontSize: 36, fontWeight: 900, color: ACCENT, letterSpacing: 8, marginBottom: 10 }}>FLIXHOME</div>
-        <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 6 }}>Escolha seu plano</div>
-        <div style={{ fontSize: 15, color: '#666' }}>
-          {tab === 0 ? 'Acesso ilimitado a filmes e séries' : 'Filmes, séries e canais ao vivo IPTV'}
+      {/* Cabeçalho (design TV): marca + título + benefícios à esquerda */}
+      <div style={{ alignSelf: 'stretch', padding: '48px 70px 0', textAlign: 'left' }}>
+        <div style={{ fontSize: 18, fontWeight: 900, color: '#E50914', letterSpacing: 8, marginBottom: 8 }}>FLIXHOME</div>
+        <div style={{ fontSize: 48, fontWeight: 900, letterSpacing: -1 }}>Escolha seu plano</div>
+        <div style={{ fontSize: 22, color: '#A3A3A3', marginTop: 8, display: 'flex', gap: 24 }}>
+          {(tab === 0 ? ['Sem anúncios', 'Vários perfis', 'Até 4K', 'Telas simultâneas'] : ['Canais ao vivo 24h', 'Filmes e séries do servidor', 'Até 2 telas']).map(t => <span key={t}>{t}</span>)}
         </div>
       </div>
 
@@ -173,26 +173,6 @@ export default function SubscriptionScreen() {
         })}
       </div>
 
-      {/* Teste grátis */}
-      {off === 1 && (
-        <div
-          onClick={() => { setFocused(2); startTrial(); }}
-          style={{
-            width: 640, maxWidth: '90%', boxSizing: 'border-box', padding: '16px 24px', borderRadius: 14, marginBottom: 28, cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 20,
-            background: trialFocus ? 'rgba(229,9,20,0.22)' : 'rgba(229,9,20,0.10)',
-            border: '3px solid ' + (trialFocus ? '#fff' : 'rgba(229,9,20,0.5)'),
-            transform: trialFocus ? 'scale(1.04)' : 'none', transition: 'transform 0.15s, background 0.15s',
-          }}
-        >
-          <div>
-            <div style={{ fontSize: 20, fontWeight: 800 }}>Teste grátis por {trial.days} dias</div>
-            <div style={{ fontSize: 14, color: '#A3A3A3' }}>Sem cartão. Cancele quando quiser.</div>
-          </div>
-          <div style={{ padding: '12px 24px', borderRadius: 10, background: '#E50914', fontWeight: 800, fontSize: 15 }}>{trialBusy ? 'Aguarde…' : 'Começar'}</div>
-        </div>
-      )}
-
       {/* Plans */}
       {loading ? (
         <div style={{ color: '#555', fontSize: 17 }}>Carregando planos…</div>
@@ -203,67 +183,65 @@ export default function SubscriptionScreen() {
             : 'Nenhum plano disponível no momento.'}
         </div>
       ) : (
-        <div style={{ display: 'flex', gap: 20, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 24, maxWidth: 1500 }}>
+        <div style={{ display: 'flex', gap: 30, justifyContent: 'center', flexWrap: 'nowrap', margin: '26px 0 22px', maxWidth: 1700 }}>
           {plans.map((plan, idx) => {
             const isFoc = planFocus === idx;
             const price = plan.promo_price != null ? plan.promo_price : plan.price;
+            const gold = /custo|melhor/i.test(plan.badge || '');
+            const per = plan.duration_days ? (plan.duration_days <= 31 ? '/mês' : plan.duration_days <= 100 ? '/trimestre' : '/ano') : '/mês';
+            const feats = [
+              plan.max_streams ? plan.max_streams + (plan.max_streams > 1 ? ' telas simultâneas' : ' tela') : null,
+              plan.description || null,
+              plan.duration_days ? plan.duration_days + ' dias' : null,
+              tab === 1 ? 'Canais ao vivo' : (plan.max_streams >= 2 ? 'Assistir juntos' : null),
+            ].filter(Boolean).slice(0, 4);
             return (
               <div
                 key={plan.id}
                 onClick={() => { setFocused(idx + 2 + off); handleSubscribe(plan); }}
                 style={{
-                  width: 300, padding: '32px 28px', borderRadius: 18, cursor: 'pointer',
-                  background: isFoc ? 'rgba(255,255,255,0.06)' : '#111',
-                  border: '3px solid ' + (isFoc ? '#fff' : plan.highlight ? ACCENT : '#1e1e1e'),
-                  transform: isFoc ? 'scale(1.06)' : 'none',
-                  transition: 'background 0.15s, border-color 0.15s, transform 0.15s',
+                  width: 400, minHeight: 330, padding: '34px 30px 28px', borderRadius: 20, cursor: 'pointer', position: 'relative', boxSizing: 'border-box',
+                  background: plan.highlight ? '#190f10' : '#141414',
+                  border: '3px solid ' + (isFoc ? '#fff' : plan.highlight ? ACCENT : '#1F1F1F'),
+                  boxShadow: plan.highlight ? '0 0 40px rgba(229,9,20,0.35)' : 'none',
+                  transform: isFoc ? 'scale(1.06)' : 'none', transition: 'transform 0.2s ease-out, border-color 0.2s',
                   opacity: subscribing ? 0.7 : 1,
-                  position: 'relative',
                 }}
               >
                 {plan.badge && (
-                  <div style={{
-                    position: 'absolute', top: -1, left: 24,
-                    background: ACCENT, color: '#fff',
-                    fontSize: 10, fontWeight: 800, letterSpacing: 1.5,
-                    padding: '4px 12px', borderRadius: '0 0 8px 8px',
-                  }}>
+                  <div style={{ position: 'absolute', top: -16, left: 28, background: gold ? '#FBBF24' : ACCENT, color: gold ? '#1a1200' : '#fff', fontSize: 15, fontWeight: 900, padding: '6px 16px', borderRadius: 999 }}>
                     {plan.badge}
                   </div>
                 )}
-                <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8, marginTop: plan.badge ? 10 : 0 }}>
-                  {plan.name}
-                </div>
-                <div style={{ fontSize: 34, fontWeight: 900, color: isFoc ? '#fff' : ACCENT, marginBottom: 4 }}>
-                  {fmt(price)}
-                </div>
-                {plan.promo_price != null && (
-                  <div style={{ fontSize: 13, color: '#444', textDecoration: 'line-through', marginBottom: 4 }}>
-                    {fmt(plan.price)}
-                  </div>
+                <div style={{ fontSize: 30, fontWeight: 800, marginBottom: 14 }}>{plan.name}</div>
+                {plan.promo_price != null && plan.promo_price < plan.price && (
+                  <div style={{ fontSize: 20, color: '#777', textDecoration: 'line-through' }}>{fmt(plan.price)}</div>
                 )}
-                {plan.description && (
-                  <div style={{ fontSize: 13, color: '#555', lineHeight: 1.5, marginBottom: 16 }}>
-                    {plan.description}
-                  </div>
-                )}
-                {plan.max_streams && (
-                  <div style={{ fontSize: 12, color: '#444', marginBottom: 16 }}>
-                    {plan.max_streams} tela{plan.max_streams > 1 ? 's' : ''} simultânea{plan.max_streams > 1 ? 's' : ''}
-                  </div>
-                )}
-                <div style={{
-                  padding: '13px 0', borderRadius: 10, textAlign: 'center',
-                  background: isFoc ? '#fff' : (plan.highlight ? ACCENT : '#1e1e1e'),
-                  color: isFoc ? '#0a0a0a' : '#fff',
-                  fontWeight: 700, fontSize: 15,
-                  transition: 'background 0.15s, color 0.15s',
-                }}>
-                  {subscribing && planFocus === idx ? 'Aguarde…' : 'Assinar'}
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, marginBottom: 18 }}>
+                  <span style={{ fontSize: 52, fontWeight: 900, lineHeight: 1 }}>{fmt(price)}</span>
+                  <span style={{ fontSize: 22, color: '#A3A3A3', paddingBottom: 6 }}>{per}</span>
                 </div>
+                {feats.map(f => (
+                  <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 24, color: '#E5E5E5', marginBottom: 8 }}>
+                    <span style={{ color: '#22C55E', fontWeight: 900 }}>✓</span>{f}
+                  </div>
+                ))}
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Ação principal: pagar pelo celular (QR) */}
+      {!loading && plans.length > 0 && (
+        <div style={{ alignSelf: 'stretch', padding: '10px 70px 0', display: 'flex', alignItems: 'center', gap: 20 }}>
+          <div style={{ background: ACCENT, padding: '18px 32px', borderRadius: 12, fontSize: 24, fontWeight: 800 }}>📱 Pagar pelo celular</div>
+          {off === 1 && <div style={{ background: '#1F1F1F', padding: '18px 32px', borderRadius: 12, fontSize: 24, fontWeight: 800, border: '3px solid ' + (trialFocus ? '#fff' : 'transparent') }}>Começar teste grátis · {trial.days} dias</div>}
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 22, fontSize: 20, color: '#A3A3A3', alignItems: 'center' }}>
+            <span><b style={{ border: '2px solid #666', borderRadius: 8, padding: '3px 10px', marginRight: 8, color: '#E5E5E5' }}>◀ ▶</b>Escolher</span>
+            <span><b style={{ border: '2px solid #666', borderRadius: 8, padding: '3px 10px', marginRight: 8, color: '#E5E5E5' }}>OK</b>Selecionar</span>
+            <span><b style={{ border: '2px solid #666', borderRadius: 8, padding: '3px 10px', marginRight: 8, color: '#E5E5E5' }}>Voltar</b>Sair</span>
+          </div>
         </div>
       )}
 
@@ -298,10 +276,6 @@ export default function SubscriptionScreen() {
         Conectado como {user && user.email}
       </div>
 
-      {/* D-pad hint */}
-      <div style={{ position: 'absolute', bottom: 40, color: '#333', fontSize: 12 }}>
-        ↑↓ navegar • ← → trocar aba/plano • ENTER confirmar
-      </div>
     </div>
   );
 }

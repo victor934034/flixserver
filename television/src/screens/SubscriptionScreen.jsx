@@ -54,6 +54,15 @@ function TabBtn({ label, icon, active, isIPTV, onFocus, onBlur, onPress, hasTVPr
 function PlanCard({ plan, onFocus, onBlur, onPress, hasTVPreferredFocus, isIPTV, busy }) {
   const [foc, setFoc] = useState(false);
   const price = plan.promo_price != null ? plan.promo_price : plan.price;
+  const fmt = v => `R$ ${Number(v).toFixed(2).replace('.', ',')}`;
+  const gold = /custo|melhor/i.test(plan.badge || '');
+  const per = plan.duration_days ? (plan.duration_days <= 31 ? '/mês' : plan.duration_days <= 100 ? '/trimestre' : '/ano') : '/mês';
+  const feats = [
+    plan.max_streams ? `${plan.max_streams} tela${plan.max_streams > 1 ? 's' : ''} simultânea${plan.max_streams > 1 ? 's' : ''}` : null,
+    plan.description || null,
+    plan.duration_days ? `${plan.duration_days} dias` : null,
+    isIPTV ? 'Canais ao vivo' : (plan.max_streams >= 2 ? 'Assistir juntos' : null),
+  ].filter(Boolean).slice(0, 4);
 
   return (
     <TVPressable
@@ -61,53 +70,26 @@ function PlanCard({ plan, onFocus, onBlur, onPress, hasTVPreferredFocus, isIPTV,
       onFocus={() => { setFoc(true); onFocus?.(); }}
       onBlur={() => { setFoc(false); onBlur?.(); }}
       onPress={onPress}
-      style={[s.card, foc && s.cardFoc, plan.highlight && s.cardHL]}
+      style={[s.card, plan.highlight && s.cardHL, foc && s.cardFoc]}
     >
       {plan.badge ? (
-        <View style={s.badgeWrap}>
-          <Text style={s.badge}>{plan.badge}</Text>
+        <View style={[s.pill, gold && { backgroundColor: '#FBBF24' }]}>
+          <Text style={[s.pillTxt, gold && { color: '#1a1200' }]}>{plan.badge}</Text>
         </View>
       ) : null}
-
-      <Text style={[s.planName, foc && s.planNameFoc]}>{plan.name}</Text>
-
+      <Text style={s.planName}>{plan.name}</Text>
+      {plan.promo_price != null && plan.promo_price < plan.price ? <Text style={s.priceOld}>{fmt(plan.price)}</Text> : null}
       <View style={s.priceRow}>
-        <Text style={[s.price, foc && s.priceFoc]}>
-          R$ {Number(price).toFixed(2).replace('.', ',')}
-        </Text>
-        {plan.promo_price != null && (
-          <Text style={s.priceOld}>
-            R$ {Number(plan.price).toFixed(2).replace('.', ',')}
-          </Text>
-        )}
+        <Text style={s.price}>{fmt(price)}</Text>
+        <Text style={s.per}>{per}</Text>
       </View>
-
-      {plan.description ? (
-        <Text style={[s.planDesc, foc && s.planDescFoc]}>{plan.description}</Text>
-      ) : null}
-
-      {plan.max_streams ? (
-        <View style={s.feat}>
-          <Ionicons name="people-outline" size={r(14)} color={foc ? '#aaa' : '#444'} />
-          <Text style={[s.featTxt, foc && s.featTxtFoc]}>
-            {plan.max_streams} tela{plan.max_streams > 1 ? 's' : ''} simultânea{plan.max_streams > 1 ? 's' : ''}
-          </Text>
+      {feats.map(f => (
+        <View key={f} style={s.feat}>
+          <Ionicons name="checkmark" size={r(22)} color="#22C55E" />
+          <Text style={s.featTxt}>{f}</Text>
         </View>
-      ) : null}
-
-      {isIPTV && (
-        <View style={s.feat}>
-          <Ionicons name="tv-outline" size={r(14)} color={foc ? '#aaa' : '#444'} />
-          <Text style={[s.featTxt, foc && s.featTxtFoc]}>Canais ao vivo incluídos</Text>
-        </View>
-      )}
-
-      <View style={[s.btn, foc ? (isIPTV ? s.btnIPTV : s.btnFoc) : (plan.highlight ? s.btnHL : s.btnDef)]}>
-        {busy
-          ? <ActivityIndicator color="#fff" size="small" />
-          : <Text style={[s.btnTxt, !foc && !plan.highlight && s.btnTxtDef]}>Assinar</Text>
-        }
-      </View>
+      ))}
+      {busy ? <ActivityIndicator color="#fff" style={{ marginTop: r(12) }} /> : null}
     </TVPressable>
   );
 }
@@ -294,17 +276,22 @@ const s = StyleSheet.create({
   tabTxtActive: { color: '#fff' },
 
   planRow:      { flexDirection: 'row', justifyContent: 'center', paddingHorizontal: r(40), gap: r(20), flexWrap: 'wrap', paddingBottom: r(16) },
-  card:         { width: r(300), padding: r(32), borderRadius: r(18), backgroundColor: '#111', borderWidth: 1.5, borderColor: '#1e1e1e' },
-  cardFoc:      { backgroundColor: 'rgba(255,255,255,0.07)', borderColor: '#fff', borderWidth: 3, transform: [{ scale: 1.06 }] },
-  cardHL:       { borderColor: ACCENT },
+  card:         { width: r(400), minHeight: r(330), padding: r(30), paddingTop: r(34), borderRadius: r(20), backgroundColor: '#141414', borderWidth: 3, borderColor: '#1F1F1F' },
+  pill:         { position: 'absolute', top: -r(16), left: r(28), backgroundColor: ACCENT, borderRadius: 999, paddingHorizontal: r(16), paddingVertical: r(6) },
+  pillTxt:      { color: '#fff', fontSize: r(15), fontWeight: '900' },
+  per:          { color: '#A3A3A3', fontSize: r(22), paddingBottom: r(6) },
+  feat:         { flexDirection: 'row', alignItems: 'center', gap: r(12), marginBottom: r(8) },
+  featTxt:      { color: '#E5E5E5', fontSize: r(24) },
+  cardFoc:      { borderColor: '#fff', transform: [{ scale: 1.06 }] },
+  cardHL:       { borderColor: ACCENT, backgroundColor: '#190f10', shadowColor: ACCENT, shadowOpacity: 0.5, shadowRadius: 20, elevation: 12 },
   badgeWrap:    { marginBottom: r(8) },
   badge:        { color: ACCENT, fontSize: r(10), fontWeight: '800', letterSpacing: 1.5 },
-  planName:     { fontSize: r(18), fontWeight: '800', color: '#ccc', marginBottom: r(8) },
+  planName:     { fontSize: r(30), fontWeight: '800', color: '#fff', marginBottom: r(12) },
   planNameFoc:  { color: '#fff' },
-  priceRow:     { flexDirection: 'row', alignItems: 'baseline', gap: r(8), marginBottom: r(6) },
-  price:        { fontSize: r(34), fontWeight: '900', color: ACCENT },
+  priceRow:     { flexDirection: 'row', alignItems: 'flex-end', gap: r(10), marginBottom: r(16) },
+  price:        { fontSize: r(52), fontWeight: '900', color: '#fff' },
   priceFoc:     { color: '#fff' },
-  priceOld:     { fontSize: r(14), color: '#333', textDecorationLine: 'line-through' },
+  priceOld:     { fontSize: r(20), color: '#777', textDecorationLine: 'line-through' },
   planDesc:     { fontSize: r(13), color: '#444', lineHeight: r(18), marginBottom: r(12) },
   planDescFoc:  { color: '#666' },
   feat:         { flexDirection: 'row', alignItems: 'center', gap: r(8), marginBottom: r(8) },

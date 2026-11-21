@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet,
-  ActivityIndicator, StatusBar, Image, Animated,
+  View, Text, TouchableOpacity, StyleSheet, StatusBar, Image, Animated, PanResponder,
+  ScrollView, ActivityIndicator, Dimensions,
 } from 'react-native';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { useEvent } from 'expo';
@@ -10,42 +10,36 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import * as KeepAwake from 'expo-keep-awake';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { iptvQueue, streamUrl } from '../lib/iptvStore';
 
+const ACCENT = '#E50914';
+
+// Player de canal ao vivo (design): barra superior com AO VIVO, troca de canal por swipe ↑↓,
+// gaveta de canais e tela de erro com "Tentar outro servidor"
 export default function IptvPlayerScreen() {
-  const { url, urlTs, name, logo } = useLocalSearchParams();
-  const router  = useRouter();
-  const insets  = useSafeAreaInsets();
-  const [activeUrl, setActiveUrl] = useState(url);
-  const [triedTs, setTriedTs]     = useState(false);
+  const { url, urlTs, name, logo, cat } = useLocalSearchParams();
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
 
-  const player = useVideoPlayer({ uri: activeUrl }, p => { p.play(); });
+  const [cur, setCur] = useState({ name: String(name || ''), logo: String(logo || ''), url: String(url || ''), urlTs: String(urlTs || ''), index: iptvQueue.index });
+  const [attempt, setAttempt] = useState(0); // 0 m3u8, 1 ts
+  const [failed, setFailed] = useState(false);
+  const [drawer, setDrawer] = useState(false);
+  const [hint, setHint] = useState(null); // { name, num, dir }
 
+  const player = useVideoPlayer({ uri: cur.url }, p => { p.play(); });
   const { isPlaying = false } = useEvent(player, 'playingChange', { isPlaying: false });
-  const { status = 'idle' }   = useEvent(player, 'statusChange',  { status: 'idle' });
+  const { status = 'idle' } = useEvent(player, 'statusChange', { status: 'idle' });
+  const isBuffering = status === 'idle' || status === 'loading';
+  const isError = status === 'error';
 
-  const isBuffering = (status === 'idle' || status === 'loading');
-  const isError     = status === 'error';
+  const ctrl = useRef(new Animated.Value(1)).current;
+  const [ctrlOn, setCtrlOn] = useState(true);
+  const hideT = useRef(null);
+  const hintT = useRef(null);
 
-  // Se m3u8 falhar, tenta ts automaticamente
-  useEffect(() => {
-    if (isError && !triedTs && urlTs && urlTs !== activeUrl) {
-      setTriedTs(true);
-      setActiveUrl(urlTs);
-      player.replace({ uri: urlTs });
-      player.play();
-    }
-  }, [isError]);
-
-  const ctrlOpacity  = useRef(new Animated.Value(1)).current;
-  const [ctrlVisible, setCtrlVisible] = useState(true);
-  const hideTimerRef = useRef(null);
-  const schedHideRef = useRef(null);
-
-  const schedHide = useCallback(() => {
-    clearTimeout(hideTimerRef.current);
-    hideTimerRef.current = setTimeout(() => fadeCtrl(false), 4000);
-  }, []);
-  schedHideRef.current = schedHide;
+  const fade = (show) => { setCtrlOn(show); Animated.timing(ctrl, { toValue: show ? 1 : 0, duration: 220, useNativeDriver: true }).start(); };
+  const schedHide = useCallback(() => { clearTimeout(hideT.current); hideT.current = setTimeout(() => fade(false), 4000); }, []);
 
   useEffect(() => {
     StatusBar.setHidden(true, 'fade');
@@ -56,176 +50,182 @@ export default function IptvPlayerScreen() {
       StatusBar.setHidden(false, 'fade');
       ScreenOrientation.unlockAsync();
       KeepAwake.deactivateKeepAwake('iptv-player');
-      clearTimeout(hideTimerRef.current);
+      clearTimeout(hideT.current); clearTimeout(hintT.current);
     };
   }, []);
 
-  const fadeCtrl = (show) => {
-    setCtrlVisible(show);
-    Animated.timing(ctrlOpacity, { toValue: show ? 1 : 0, duration: 220, useNativeDriver: true }).start();
-  };
+  // m3u8 falhou -> tenta .ts automaticamente; depois mostra o erro
+  useEffect(() => {
+    if (!isError) return;
+    if (attempt === 0 && cur.urlTs && cur.urlTs !== cur.url) { setAttempt(1); player.replace({ uri: cur.urlTs }); player.play(); }
+    else setFailed(true);
+  }, [isError]);
+  useEffect(() => { if (status === 'readyToPlay') setFailed(false); }, [status]);
 
-  const onTap = () => {
-    const next = !ctrlVisible;
-    fadeCtrl(next);
-    if (next) schedHideRef.current?.();
+  const load = async (item, index) => {
+    setFailed(false); setAttempt(0);
+    try {
+      const u = await streamUrl(item.stream_id, 'm3u8');
+      setCur({ name: item.name, logo: item.stream_icon || '', url: u, urlTs: u.replace('.m3u8', '.ts'), index });
+      iptvQueue.index = index;
+      player.replace({ uri: u }); player.play();
+    } catch { setFailed(true); }
   };
+  const go = (delta) => {
+    const list = iptvQueue.list; if (!list.length) return;
+    const i = (cur.index + delta + list.length) % list.length;
+    const item = list[i];
+    setHint({ name: item.name, num: 100 + i + 1, dir: delta > 0 ? '↓' : '↑', logo: item.stream_icon });
+    clearTimeout(hintT.current); hintT.current = setTimeout(() => setHint(null), 1400);
+    load(item, i);
+  };
+  const retryAnother = () => { // "outro servidor": alterna o formato do stream (m3u8 <-> ts)
+    setFailed(false);
+    const next = attempt === 0 ? cur.urlTs : cur.url;
+    setAttempt(a => (a === 0 ? 1 : 0));
+    player.replace({ uri: next || cur.url }); player.play();
+  };
+  const retry = () => { setFailed(false); player.replace({ uri: attempt === 0 ? cur.url : cur.urlTs }); player.play(); };
 
-  const togglePlay = () => {
-    if (isPlaying) player.pause();
-    else player.play();
-    schedHideRef.current?.();
-  };
+  // swipe vertical troca de canal
+  const goRef = useRef(go); goRef.current = go;
+  const pan = useRef(PanResponder.create({
+    onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dy) > 28 && Math.abs(g.dy) > Math.abs(g.dx) * 1.5,
+    onPanResponderRelease: (_, g) => { if (g.dy < -50) goRef.current(1); else if (g.dy > 50) goRef.current(-1); },
+  })).current;
 
-  const retry = () => {
-    player.replace({ uri: url });
-    player.play();
-  };
+  const onTap = () => { if (drawer) { setDrawer(false); return; } const n = !ctrlOn; fade(n); if (n) schedHide(); };
+  const togglePlay = () => { if (isPlaying) player.pause(); else player.play(); schedHide(); };
+
+  const q = iptvQueue.list;
+  const next = q.length ? q[(cur.index + 1) % q.length] : null;
+  const W = Dimensions.get('window');
 
   return (
-    <View style={styles.container}>
+    <View style={s.root} {...pan.panHandlers}>
       <StatusBar hidden />
+      <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="contain" nativeControls={false} surfaceType="textureView" />
 
-      <VideoView
-        player={player}
-        style={StyleSheet.absoluteFill}
-        contentFit="contain"
-        nativeControls={false}
-        surfaceType="textureView"
-      />
-
-      {isBuffering && !isError && (
-        <View style={styles.overlay}>
-          <ActivityIndicator size="large" color="#E50914" />
-          <Text style={styles.bufText}>Carregando canal…</Text>
-        </View>
+      {isBuffering && !failed && (
+        <View style={s.overlay} pointerEvents="none"><ActivityIndicator size="large" color={ACCENT} /><Text style={s.bufText}>Carregando canal…</Text></View>
       )}
 
-      {isError && (
-        <View style={styles.overlay}>
-          <Text style={styles.errIcon}>⚠️</Text>
-          <Text style={styles.errTitle}>Canal indisponível</Text>
-          <Text style={styles.errSub} selectable>{activeUrl}</Text>
-          <TouchableOpacity style={styles.retryBtn} onPress={retry} activeOpacity={0.8}>
-            <Text style={styles.retryText}>Tentar novamente</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.backLink} onPress={() => router.back()}>
-            <Text style={styles.backLinkText}>Voltar</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* Tap area */}
-      <TouchableOpacity style={StyleSheet.absoluteFill} onPress={onTap} activeOpacity={1} />
-
-      {/* Controls */}
-      <Animated.View
-        style={[StyleSheet.absoluteFill, { opacity: ctrlOpacity }]}
-        pointerEvents={ctrlVisible ? 'box-none' : 'none'}
-      >
-        {/* Dark gradient top */}
-        <View style={styles.gradTop} pointerEvents="none" />
-        {/* Dark gradient bottom */}
-        <View style={styles.gradBottom} pointerEvents="none" />
-
-        {/* Top bar */}
-        <View style={[styles.topBar, { paddingTop: Math.max(insets.top, 12) }]}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.8}>
-            <Ionicons name="arrow-back" size={22} color="#fff" />
-          </TouchableOpacity>
-          {!!logo && (
-            <Image source={{ uri: logo }} style={styles.channelLogo} resizeMode="contain" />
-          )}
-          <Text style={styles.channelName} numberOfLines={1}>{name}</Text>
-          <View style={styles.liveBadge}>
-            <View style={styles.liveDot} />
-            <Text style={styles.liveText}>AO VIVO</Text>
+      {failed && (
+        <View style={s.errRoot}>
+          <View style={[s.errTop, { paddingTop: Math.max(insets.top, 12) }]}>
+            <TouchableOpacity style={s.back} onPress={() => router.back()}><Ionicons name="chevron-back" size={22} color="#fff" /></TouchableOpacity>
+            <Text style={s.errName}>{cur.name}</Text>
+            <View style={s.weak}><Ionicons name="cellular" size={14} color="#FBBF24" /><Text style={s.weakTxt}>Rede fraca</Text></View>
+          </View>
+          <View style={s.errBody}>
+            <View style={s.errIcon}><Ionicons name="tv-outline" size={30} color="#F87171" /></View>
+            <Text style={s.errTitle}>Este canal não abriu</Text>
+            <Text style={s.errSub}>O servidor atual não respondeu. Outro servidor costuma resolver.</Text>
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 6 }}>
+              <TouchableOpacity style={s.redBtn} onPress={retryAnother}><Text style={s.btnTxt}>Tentar outro servidor</Text></TouchableOpacity>
+              <TouchableOpacity style={s.ghost} onPress={retry}><Text style={s.btnTxt}>Tentar de novo</Text></TouchableOpacity>
+              <TouchableOpacity style={s.ghost} onPress={() => router.back()}><Text style={s.btnTxt}>Ver canais</Text></TouchableOpacity>
+            </View>
+            <Text style={s.errCode}>Servidor {attempt + 1} de 2 · código ERR_STREAM_TIMEOUT</Text>
           </View>
         </View>
+      )}
 
-        {/* Center play/pause */}
-        <View style={styles.center} pointerEvents="box-none">
-          <TouchableOpacity style={styles.playBtn} onPress={togglePlay} activeOpacity={0.7}>
-            <Ionicons
-              name={isPlaying ? 'pause' : 'play'}
-              size={52}
-              color="#fff"
-              style={!isPlaying ? { marginLeft: 6 } : undefined}
-            />
-          </TouchableOpacity>
-        </View>
+      {!failed && <TouchableOpacity style={StyleSheet.absoluteFill} onPress={onTap} activeOpacity={1} />}
 
-        {/* Bottom bar */}
-        <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-          <Text style={styles.liveLabel}>📡 Transmissão ao vivo</Text>
+      {/* próximo/anterior canal */}
+      {hint && (
+        <View style={s.hint} pointerEvents="none">
+          {hint.logo ? <Image source={{ uri: hint.logo }} style={s.hintLogo} resizeMode="contain" /> : <View style={[s.hintLogo, { backgroundColor: '#1F3A2A' }]} />}
+          <View><Text style={s.hintK}>Canal {hint.dir} · {hint.num}</Text><Text style={s.hintN}>{hint.name}</Text></View>
         </View>
-      </Animated.View>
+      )}
+
+      {!failed && (
+        <Animated.View style={[StyleSheet.absoluteFill, { opacity: ctrl }]} pointerEvents={ctrlOn ? 'box-none' : 'none'}>
+          <View style={[s.top, { paddingTop: Math.max(insets.top, 10) }]}>
+            <TouchableOpacity style={s.back} onPress={() => router.back()}><Ionicons name="chevron-back" size={24} color="#fff" /></TouchableOpacity>
+            {cur.logo ? <Image source={{ uri: cur.logo }} style={s.logo} resizeMode="contain" /> : null}
+            <View style={{ flex: 1 }}>
+              <Text style={s.name} numberOfLines={1}>{cur.name}</Text>
+              {cat ? <Text style={s.cat} numberOfLines={1}>{cat}</Text> : null}
+            </View>
+            <View style={s.liveBadge}><View style={s.liveDot} /><Text style={s.liveTxt}>AO VIVO</Text></View>
+            {q.length > 1 && <TouchableOpacity style={s.listBtn} onPress={() => { setDrawer(true); }}><Ionicons name="list" size={22} color="#fff" /></TouchableOpacity>}
+          </View>
+
+          <View style={[s.bottom, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+            <TouchableOpacity onPress={togglePlay} style={s.pp}><Ionicons name={isPlaying ? 'pause' : 'play'} size={26} color="#fff" /></TouchableOpacity>
+            <View style={s.quality}><Ionicons name="cellular" size={14} color="#22C55E" /><Text style={s.qTxt}>Ao vivo · {attempt === 0 ? 'HLS' : 'TS'}</Text></View>
+            <View style={{ flex: 1 }} />
+            {q.length > 1 && <Text style={s.swipe}>Deslize ↑↓ para trocar</Text>}
+          </View>
+        </Animated.View>
+      )}
+
+      {/* gaveta de canais */}
+      {drawer && (
+        <View style={[s.drawer, { width: Math.min(340, W.width * 0.5), paddingTop: Math.max(insets.top, 12) }]}>
+          <View style={s.dHead}>
+            <Text style={s.dTitle} numberOfLines={1}>{cat || 'Canais'}</Text>
+            <TouchableOpacity style={s.dClose} onPress={() => setDrawer(false)}><Ionicons name="close" size={20} color="#fff" /></TouchableOpacity>
+          </View>
+          <ScrollView contentContainerStyle={{ gap: 8, paddingBottom: 20 }}>
+            {q.map((c, i) => (
+              <TouchableOpacity key={c.stream_id} style={[s.dRow, i === cur.index && s.dRowOn]} onPress={() => { setDrawer(false); if (i !== cur.index) load(c, i); }} activeOpacity={0.8}>
+                <Text style={s.dNum}>{100 + i + 1}</Text>
+                {c.stream_icon ? <Image source={{ uri: c.stream_icon }} style={s.dLogo} resizeMode="contain" /> : <View style={[s.dLogo, { backgroundColor: '#1F3A2A' }]} />}
+                <Text style={s.dName} numberOfLines={1}>{c.name}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
-
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.82)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-  },
-  bufText:      { color: 'rgba(255,255,255,0.55)', fontSize: 14 },
-  errIcon:      { fontSize: 44 },
-  errTitle:     { color: '#fff', fontSize: 18, fontWeight: '700' },
-  errSub:       { color: '#555', fontSize: 13, textAlign: 'center', paddingHorizontal: 32 },
-  retryBtn:     { backgroundColor: '#E50914', paddingHorizontal: 28, paddingVertical: 12, borderRadius: 9, marginTop: 8 },
-  retryText:    { color: '#fff', fontWeight: '700', fontSize: 14 },
-  backLink:     { paddingVertical: 10 },
-  backLinkText: { color: '#666', fontSize: 13 },
-
-  gradTop: {
-    position: 'absolute', top: 0, left: 0, right: 0, height: 130,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-  },
-  gradBottom: {
-    position: 'absolute', bottom: 0, left: 0, right: 0, height: 80,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-  },
-
-  topBar: {
-    position: 'absolute',
-    top: 0, left: 0, right: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingBottom: 14,
-    gap: 12,
-  },
-  backBtn:     { padding: 7, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.12)' },
-  channelLogo: { width: 44, height: 32, borderRadius: 4 },
-  channelName: { flex: 1, color: '#fff', fontSize: 16, fontWeight: '700' },
-  liveBadge:   { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#E50914', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5 },
-  liveDot:     { width: 7, height: 7, borderRadius: 4, backgroundColor: '#fff' },
-  liveText:    { color: '#fff', fontWeight: '800', fontSize: 11, letterSpacing: 1 },
-
-  center: {
-    position: 'absolute',
-    top: 0, left: 0, right: 0, bottom: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  playBtn: {
-    width: 80, height: 80, borderRadius: 40,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    borderWidth: 2, borderColor: 'rgba(255,255,255,0.3)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-
-  bottomBar: {
-    position: 'absolute',
-    bottom: 0, left: 0, right: 0,
-    paddingHorizontal: 20,
-    alignItems: 'flex-start',
-  },
-  liveLabel: { color: 'rgba(255,255,255,0.45)', fontSize: 12 },
+const s = StyleSheet.create({
+  root: { flex: 1, backgroundColor: '#000' },
+  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', gap: 10 },
+  bufText: { color: 'rgba(255,255,255,0.7)', fontSize: 14 },
+  top: { position: 'absolute', top: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingBottom: 30, backgroundColor: 'rgba(0,0,0,0.5)' },
+  back: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  logo: { width: 48, height: 34, borderRadius: 6 },
+  name: { color: '#fff', fontSize: 18, fontWeight: '800' },
+  cat: { color: '#A3A3A3', fontSize: 13 },
+  liveBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: ACCENT, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
+  liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#fff' },
+  liveTxt: { color: '#fff', fontWeight: '900', fontSize: 12, letterSpacing: 1 },
+  listBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center' },
+  bottom: { position: 'absolute', bottom: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 20, paddingTop: 30, backgroundColor: 'rgba(0,0,0,0.5)' },
+  pp: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  quality: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 999, paddingHorizontal: 14, height: 36 },
+  qTxt: { color: '#fff', fontWeight: '800', fontSize: 13 },
+  swipe: { color: '#A3A3A3', fontSize: 13 },
+  hint: { position: 'absolute', alignSelf: 'center', top: '30%', flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: 'rgba(20,20,20,0.92)', borderRadius: 14, padding: 12, borderWidth: 1, borderColor: '#2A2A2A' },
+  hintLogo: { width: 48, height: 34, borderRadius: 6 },
+  hintK: { color: '#A3A3A3', fontSize: 12 }, hintN: { color: '#fff', fontWeight: '800', fontSize: 16 },
+  drawer: { position: 'absolute', top: 0, bottom: 0, right: 0, backgroundColor: 'rgba(14,14,14,0.97)', paddingHorizontal: 14, borderLeftWidth: 1, borderLeftColor: '#222' },
+  dHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  dTitle: { color: '#fff', fontSize: 18, fontWeight: '800', flex: 1 },
+  dClose: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#1F1F1F', alignItems: 'center', justifyContent: 'center' },
+  dRow: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, borderRadius: 12, borderWidth: 1.5, borderColor: 'transparent' },
+  dRowOn: { borderColor: ACCENT, backgroundColor: 'rgba(229,9,20,0.08)' },
+  dNum: { color: '#888', width: 34, fontWeight: '700' },
+  dLogo: { width: 40, height: 28, borderRadius: 6 },
+  dName: { flex: 1, color: '#fff', fontWeight: '700', fontSize: 14 },
+  errRoot: { ...StyleSheet.absoluteFillObject, backgroundColor: '#000' },
+  errTop: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16 },
+  errName: { flex: 1, color: '#fff', fontWeight: '800', fontSize: 16 },
+  weak: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(251,191,36,0.16)', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
+  weakTxt: { color: '#FBBF24', fontWeight: '800', fontSize: 12 },
+  errBody: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 24 },
+  errIcon: { width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(239,68,68,0.14)', alignItems: 'center', justifyContent: 'center' },
+  errTitle: { color: '#fff', fontSize: 24, fontWeight: '900' },
+  errSub: { color: '#A3A3A3', fontSize: 14, textAlign: 'center' },
+  redBtn: { height: 46, paddingHorizontal: 20, borderRadius: 12, backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center' },
+  ghost: { height: 46, paddingHorizontal: 20, borderRadius: 12, borderWidth: 1, borderColor: '#333', alignItems: 'center', justifyContent: 'center' },
+  btnTxt: { color: '#fff', fontWeight: '800', fontSize: 14 },
+  errCode: { color: '#666', fontSize: 12, marginTop: 4 },
 });
