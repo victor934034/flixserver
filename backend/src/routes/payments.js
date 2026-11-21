@@ -133,14 +133,16 @@ async function fulfill(row) {
     console.log(`[asaas] plano ativado user=${row.user_id} plano=${row.plan_id} expira=${expiresAt}`);
   } else if (row.kind === 'iptv') {
     const { data: u } = await supabase.from('users').select('name, email').eq('id', row.user_id).single();
-    await supabase.from('iptv_orders').insert({
+    const { data: order } = await supabase.from('iptv_orders').insert({
       user_id: row.user_id, user_name: u?.name || 'Usuário', user_email: u?.email || '',
       plan_id: row.plan_id, plan_name: row.plan_name, amount: row.amount,
       asaas_payment_id: row.asaas_payment_id, status: 'pending',
-    });
+    }).select().single();
     try {
-      const { notifyAdminIptvOrder } = require('../services/whatsapp');
-      await notifyAdminIptvOrder({ userName: u?.name || 'Usuário', userEmail: u?.email || '', planName: row.plan_name, amount: row.amount, paymentId: row.asaas_payment_id });
+      const { onIptvPaid } = require('../services/iptvProvision');
+      await onIptvPaid(order || { user_id: row.user_id, plan_id: row.plan_id, plan_name: row.plan_name }, {
+        userName: u?.name || 'Usuário', userEmail: u?.email || '', planName: row.plan_name, amount: row.amount, paymentId: row.asaas_payment_id,
+      });
     } catch (e) { console.error('[asaas] notify iptv:', e.message); }
   } else {
     console.log(`[asaas] apoio recebido user=${row.user_id} valor=${row.amount}`);

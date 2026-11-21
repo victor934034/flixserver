@@ -39,7 +39,7 @@ async function notifyAdminIptvOrder({ userName, userEmail, planName, amount, pay
     `💰 Valor: ${price}\n` +
     `📅 Data: ${date}\n` +
     `🔖 ID: ${paymentId}\n\n` +
-    `➡️ Crie o acesso no MEGGAULTRA e vincule em /admin/iptv`;
+    `➡️ Crie o usuário no painel ONE X (painel.onexx.sbs) com esse pacote e depois ative em /admin/pagamentos → IPTV (use a busca para achar a pessoa).`;
 
   await sendTelegram(message);
 }

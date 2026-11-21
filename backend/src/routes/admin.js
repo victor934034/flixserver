@@ -1544,14 +1544,14 @@ router.get('/iptv/plans', async (req, res) => {
 });
 
 router.post('/iptv/plans', async (req, res) => {
-  const { name, description, price, duration_months, is_active, order_index } = req.body;
+  const { name, description, price, duration_months, is_active, order_index, is_adult, max_streams, sigma_package_id, sigma_server_id } = req.body;
   if (!name || price == null || !duration_months) {
     return res.status(400).json({ error: 'name, price e duration_months são obrigatórios' });
   }
   try {
     const { data, error } = await supabase
       .from('iptv_plans')
-      .insert({ name, description: description || null, price: Number(price), duration_months: Number(duration_months), is_active: is_active !== false, order_index: order_index || 0 })
+      .insert({ name, description: description || null, price: Number(price), duration_months: Number(duration_months), is_active: is_active !== false, order_index: order_index || 0, is_adult: !!is_adult, max_streams: Number(max_streams) || 1, sigma_package_id: sigma_package_id || null, sigma_server_id: sigma_server_id || null })
       .select()
       .single();
     if (error) throw error;
@@ -1562,8 +1562,8 @@ router.post('/iptv/plans', async (req, res) => {
 });
 
 router.put('/iptv/plans/:id', async (req, res) => {
-  const allowed = ['name', 'description', 'price', 'duration_months', 'is_active', 'order_index'];
-  const update = Object.fromEntries(Object.entries(req.body).filter(([k]) => allowed.includes(k)));
+  const allowed = ['name', 'description', 'price', 'duration_months', 'is_active', 'order_index', 'is_adult', 'max_streams', 'sigma_package_id', 'sigma_server_id'];
+  const update = Object.fromEntries(Object.entries(req.body).filter(([k]) => allowed.includes(k)).map(([k, v]) => [k, (k.startsWith('sigma_') && v === '') ? null : v]));
   try {
     const { data, error } = await supabase
       .from('iptv_plans')
@@ -1755,14 +1755,15 @@ router.post('/seed-plans', async (req, res) => {
   ];
 
   const IPTV_PRICES = [
-    { name: '1 MÊS S/ADULTO',    price: 24.90,  duration_months: 1,  order_index: 0 },
-    { name: '1 MÊS C/ADULTO',    price: 27.90,  duration_months: 1,  order_index: 1 },
-    { name: '3 MESES S/ADULTO',  price: 54.90,  duration_months: 3,  order_index: 2 },
-    { name: '3 MESES C/ADULTO',  price: 57.90,  duration_months: 3,  order_index: 3 },
-    { name: '6 MESES S/ADULTO',  price: 109.90, duration_months: 6,  order_index: 4 },
-    { name: '6 MESES C/ADULTO',  price: 114.90, duration_months: 6,  order_index: 5 },
-    { name: '12 MESES S/ADULTO', price: 159.90, duration_months: 12, order_index: 6 },
-    { name: '12 MESES C/ADULTO', price: 164.90, duration_months: 12, order_index: 7 },
+    { name: '[ONE X] PACOTE 1 MÊS SEM ADULTO',         price: 24.90,  duration_months: 1,  order_index: 0 },
+    { name: '[ONE X] PACOTE 1 MÊS SEM ADULTO 2 TELAS', price: 39.90,  duration_months: 1,  order_index: 1 },
+    { name: '[ONE X] PACOTE 1 MÊS COM ADULTO',         price: 27.90,  duration_months: 1,  order_index: 2 },
+    { name: '[ONE X] PACOTE 3 MESES SEM ADULTO',       price: 54.90,  duration_months: 3,  order_index: 3 },
+    { name: '[ONE X] PACOTE 3 MESES COM ADULTO',       price: 57.90,  duration_months: 3,  order_index: 4 },
+    { name: '[ONE X] PACOTE 6 MESES SEM ADULTO',       price: 109.90, duration_months: 6,  order_index: 5 },
+    { name: '[ONE X] PACOTE 6 MESES COM ADULTO',       price: 114.90, duration_months: 6,  order_index: 6 },
+    { name: '[ONE X] PACOTE 12 MESES SEM ADULTO',      price: 159.90, duration_months: 12, order_index: 7 },
+    { name: '[ONE X] PACOTE 12 MESES COM ADULTO',      price: 164.90, duration_months: 12, order_index: 8 },
   ];
 
   try {
@@ -2577,6 +2578,44 @@ router.post('/iptv/orders/:id/activate-with-credentials', async (req, res) => {
     req.method = 'PATCH';
     return router.handle(req, res, () => res.status(500).json({ error: 'falha ao ativar' }));
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ---- busca de usuário (vincular IPTV sem rolar a lista inteira) ----
+router.get('/users-search', async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim().replace(/[%_,()]/g, ' ');
+    if (q.length < 2) return res.json([]);
+    const { data, error } = await supabase.from('users').select('id, name, email, plan, plan_expires_at')
+      .or(`name.ilike.%${q}%,email.ilike.%${q}%`).order('created_at', { ascending: false }).limit(12);
+    if (error) throw error;
+    res.json(data || []);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ---- integração com o painel IPTV (Sigma) ----
+router.get('/sigma/status', async (req, res) => {
+  const sigma = require('../services/sigma');
+  const out = { configured: sigma.configured(), auto: sigma.autoEnabled() };
+  if (!out.configured) return res.json({ ...out, message: 'Defina SIGMA_API_TOKEN no servidor.' });
+  try { const me = await sigma.me(); res.json({ ...out, ok: true, username: me.username, credits: me.creditsBalance, integration: me.integrationStatus }); }
+  catch (e) { res.json({ ...out, ok: false, message: e.message }); }
+});
+router.get('/sigma/packages', async (req, res) => {
+  try {
+    const sigma = require('../services/sigma');
+    const [pk, sv] = await Promise.all([sigma.listPackages(), sigma.listServers()]);
+    res.json({ packages: pk.filter(p => p.is_trial !== 'YES'), servers: sv });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+// tenta (ou refaz) a criação automática de um pedido já pago
+router.post('/iptv/orders/:id/provision', async (req, res) => {
+  try {
+    const { provisionOrder } = require('../services/iptvProvision');
+    const { data: order } = await supabase.from('iptv_orders').select('*').eq('id', req.params.id).single();
+    if (!order) return res.status(404).json({ error: 'Pedido não encontrado' });
+    const c = await provisionOrder(order);
+    res.json({ ok: true, username: c.username });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
 module.exports = router;

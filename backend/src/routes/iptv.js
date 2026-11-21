@@ -45,7 +45,7 @@ router.get('/plans', async (req, res) => {
       .order('order_index')
       .order('created_at');
     if (error) throw error;
-    res.json(data || []);
+    res.json((data || []).map(({ sigma_package_id, sigma_server_id, ...pub }) => pub));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

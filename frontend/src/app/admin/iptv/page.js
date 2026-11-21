@@ -2,10 +2,10 @@
 import { useEffect, useState } from 'react';
 import api from '../../../lib/api';
 
-const TABS = ['Planos', 'Pedidos', 'Credenciais'];
+const TABS = ['Pedidos', 'Credenciais', 'Planos'];
 
 export default function AdminIptv() {
-  const [tab, setTab] = useState('Planos');
+  const [tab, setTab] = useState('Pedidos');
 
   return (
     <div style={{ padding: 24, maxWidth: 960 }}>
@@ -32,7 +32,10 @@ export default function AdminIptv() {
 function PlansTab() {
   const [plans,  setPlans]  = useState([]);
   const [loading, setLoading] = useState(true);
-  const [form,   setForm]   = useState({ name: '', description: '', price: '', duration_months: 1, order_index: 0 });
+  const EMPTY = { name: '', description: '', price: '', duration_months: 1, order_index: 0, is_adult: false, max_streams: 1, sigma_package_id: '', sigma_server_id: '' };
+  const [form,   setForm]   = useState(EMPTY);
+  const [sigma, setSigma] = useState(null);
+  const [pk, setPk] = useState({ packages: [], servers: [] });
   const [editing, setEditing] = useState(null);
   const [saving,  setSaving]  = useState('');
   const [msg,     setMsg]     = useState('');
@@ -43,13 +46,20 @@ function PlansTab() {
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
+  useEffect(() => {
+    api.get('/admin/sigma/status').then(r => {
+      setSigma(r.data);
+      if (r.data.ok) api.get('/admin/sigma/packages').then(x => setPk(x.data)).catch(() => {});
+    }).catch(() => {});
+  }, []);
 
   function openEdit(p) {
     setEditing(p.id);
-    setForm({ name: p.name, description: p.description || '', price: p.price, duration_months: p.duration_months, order_index: p.order_index || 0 });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setForm({ name: p.name, description: p.description || '', price: p.price, duration_months: p.duration_months, order_index: p.order_index || 0, is_adult: !!p.is_adult, max_streams: p.max_streams || 1, sigma_package_id: p.sigma_package_id || '', sigma_server_id: p.sigma_server_id || '' });
     setMsg('');
   }
-  function resetForm() { setEditing(null); setForm({ name: '', description: '', price: '', duration_months: 1, order_index: 0 }); setMsg(''); }
+  function resetForm() { setEditing(null); setForm(EMPTY); setMsg(''); }
 
   async function save() {
     if (!form.name || !form.price) return setMsg('Nome e preço são obrigatórios.');
@@ -80,6 +90,14 @@ function PlansTab() {
 
   return (
     <div>
+      <div style={{ ...s.card, borderLeft: '3px solid ' + (sigma?.ok ? '#4caf50' : '#555') }}>
+        <h2 style={s.h2}>Painel IPTV (ONE X)</h2>
+        {!sigma ? <p style={{ color: '#666', fontSize: 13 }}>Verificando…</p>
+          : !sigma.configured ? <p style={{ color: '#aaa', fontSize: 13, margin: 0 }}>API <b>não conectada</b>. Quando o token estiver liberado, defina <code>SIGMA_API_TOKEN</code> no servidor — enquanto isso os pedidos chegam aqui e você cria o usuário no painel manualmente.</p>
+          : sigma.ok ? <p style={{ color: '#4caf50', fontSize: 13, margin: 0 }}>Conectado como <b>{sigma.username}</b> · créditos: <b>{sigma.credits}</b> · ativação automática: <b>{sigma.auto ? 'LIGADA' : 'desligada (SIGMA_AUTO)'}</b></p>
+          : <p style={{ color: '#f44336', fontSize: 13, margin: 0 }}>Falha ao conectar: {sigma.message}</p>}
+      </div>
+
       <div style={s.card}>
         <h2 style={s.h2}>{editing ? 'Editar plano' : 'Novo plano IPTV'}</h2>
         <div style={s.row}>
@@ -100,6 +118,27 @@ function PlansTab() {
             <input style={s.input} type="number" min="0" value={form.order_index} onChange={e => setForm(p => ({ ...p, order_index: e.target.value }))} />
           </div>
         </div>
+        <div style={s.row}>
+          <div style={{ flex: 1 }}>
+            <label style={s.label}>Telas (conexões)</label>
+            <input style={s.input} type="number" min="1" value={form.max_streams} onChange={e => setForm(p => ({ ...p, max_streams: e.target.value }))} />
+          </div>
+          <label style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, color: '#ccc', marginTop: 30, fontSize: 14 }}>
+            <input type="checkbox" checked={form.is_adult} onChange={e => setForm(p => ({ ...p, is_adult: e.target.checked }))} /> Inclui conteúdo adulto (18+)
+          </label>
+        </div>
+        <label style={s.label}>Pacote no painel (para ativação automática)</label>
+        {pk.packages.length > 0 ? (
+          <select style={s.input} value={form.sigma_package_id ? form.sigma_package_id : ''} onChange={e => {
+            const sel = pk.packages.find(x => String(x.id) === e.target.value);
+            setForm(p => ({ ...p, sigma_package_id: e.target.value, sigma_server_id: sel ? sel.server_id : '', max_streams: sel ? sel.connections : p.max_streams }));
+          }}>
+            <option value="">— sem vínculo (ativação manual) —</option>
+            {pk.packages.map(x => <option key={x.id} value={x.id}>{x.name} · {x.connections} conexão(ões) · {x.credits} crédito(s)</option>)}
+          </select>
+        ) : (
+          <input style={s.input} placeholder="Disponível quando a API do painel estiver conectada" disabled value={form.sigma_package_id} />
+        )}
         <label style={s.label}>Descrição</label>
         <input style={s.input} placeholder="Ex: Acesso completo, sem conteúdo adulto" value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} />
         {msg && <p style={{ color: msg.startsWith('Erro') ? '#f44336' : '#4caf50', marginTop: 8, fontSize: 13 }}>{msg}</p>}
@@ -119,7 +158,8 @@ function PlansTab() {
                   <span style={p.is_active ? s.badgeGreen : s.badgeRed}>{p.is_active ? 'ATIVO' : 'INATIVO'}</span>
                 </div>
                 <span style={{ color: '#c91c2c', fontWeight: 700, marginRight: 14 }}>R$ {Number(p.price).toFixed(2).replace('.', ',')}</span>
-                <span style={{ color: '#555', fontSize: 13 }}>{p.duration_months} {p.duration_months === 1 ? 'mês' : 'meses'}</span>
+                <span style={{ color: '#555', fontSize: 13 }}>{p.duration_months} {p.duration_months === 1 ? 'mês' : 'meses'} · {p.max_streams || 1} tela(s){p.is_adult ? ' · 18+' : ''}</span>
+                <span style={{ marginLeft: 10, fontSize: 11, color: p.sigma_package_id ? '#4caf50' : '#777' }}>{p.sigma_package_id ? '● ligado ao painel' : '○ ativação manual'}</span>
                 {p.description && <span style={{ color: '#444', fontSize: 12, marginLeft: 10 }}>— {p.description}</span>}
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
@@ -140,15 +180,35 @@ function PlansTab() {
 function OrdersTab() {
   const [orders,  setOrders]  = useState([]);
   const [loading, setLoading] = useState(true);
+  const [forms, setForms] = useState({});
+  const [busy, setBusy] = useState('');
+  const [err, setErr] = useState('');
 
   async function load() {
     setLoading(true);
     try { const { data } = await api.get('/admin/iptv/orders'); setOrders(data || []); } catch {}
     setLoading(false);
   }
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, []);
 
-  async function activate(id) {
+  const setF = (id, k, v) => setForms(f => ({ ...f, [id]: { ...f[id], [k]: v } }));
+
+  async function activateWith(o) {
+    const f = forms[o.id] || {};
+    if (!f.u || !f.p) return setErr('Informe o usuário e a senha criados no painel.');
+    setBusy(o.id); setErr('');
+    try { await api.post(`/admin/iptv/orders/${o.id}/activate-with-credentials`, { xc_username: f.u, xc_password: f.p }); await load(); }
+    catch (e) { setErr(e.response?.data?.error || 'Erro ao ativar'); }
+    setBusy('');
+  }
+  async function viaApi(o) {
+    setBusy(o.id + 'api'); setErr('');
+    try { await api.post(`/admin/iptv/orders/${o.id}/provision`); await load(); }
+    catch (e) { setErr(e.response?.data?.error || 'Erro ao criar no painel'); }
+    setBusy('');
+  }
+  async function justMark(id) {
+    if (!confirm('Marcar como ativado sem vincular usuário/senha?')) return;
     await api.patch(`/admin/iptv/orders/${id}/activate`);
     setOrders(prev => prev.map(o => o.id === id ? { ...o, status: 'activated' } : o));
   }
@@ -159,35 +219,41 @@ function OrdersTab() {
   return (
     <div>
       <h2 style={{ ...s.h2, marginBottom: 16 }}>Pedidos pendentes <span style={{ color: '#c91c2c' }}>({pending.length})</span></h2>
-      {loading ? <p style={{ color: '#555' }}>Carregando...</p> : (
+      {err && <p style={{ color: '#f44336', fontSize: 13 }}>{err}</p>}
+      {loading && orders.length === 0 ? <p style={{ color: '#555' }}>Carregando...</p> : (
         <>
           {pending.length === 0 && <p style={{ color: '#555', marginBottom: 24 }}>Nenhum pedido pendente.</p>}
           {pending.map(o => (
-            <div key={o.id} style={{ ...s.card, borderLeft: '3px solid #c91c2c', display: 'flex', alignItems: 'center', gap: 16 }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 6 }}>
-                  <span style={{ color: '#fff', fontWeight: 700 }}>{o.user_name}</span>
-                  <span style={{ color: '#555', fontSize: 13 }}>{o.user_email}</span>
-                </div>
-                <div>
-                  <span style={{ color: '#c91c2c', fontWeight: 700, marginRight: 12 }}>{o.plan_name}</span>
-                  <span style={{ color: '#4caf50', fontWeight: 700, marginRight: 12 }}>R$ {Number(o.amount).toFixed(2).replace('.', ',')}</span>
-                  <span style={{ color: '#444', fontSize: 12 }}>{new Date(o.created_at).toLocaleString('pt-BR')}</span>
-                </div>
+            <div key={o.id} style={{ ...s.card, borderLeft: '3px solid #c91c2c' }}>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 6, flexWrap: 'wrap' }}>
+                <span style={{ color: '#fff', fontWeight: 700 }}>{o.user_name}</span>
+                <span style={{ color: '#888', fontSize: 13 }}>{o.user_email}</span>
+                <span style={{ color: '#444', fontSize: 12, marginLeft: 'auto' }}>{new Date(o.created_at).toLocaleString('pt-BR')}</span>
               </div>
-              <button
-                style={{ ...s.btnSmall, backgroundColor: '#1b3a1b', color: '#4caf50', padding: '8px 18px' }}
-                onClick={() => activate(o.id)}
-              >
-                Marcar ativado
-              </button>
+              <div style={{ marginBottom: 12 }}>
+                <span style={{ color: '#c91c2c', fontWeight: 700, marginRight: 12 }}>{o.plan_name}</span>
+                <span style={{ color: '#4caf50', fontWeight: 700 }}>R$ {Number(o.amount).toFixed(2).replace('.', ',')}</span>
+              </div>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                <div style={{ flex: 1, minWidth: 140 }}>
+                  <label style={{ ...s.label, marginTop: 0 }}>Usuário criado no painel</label>
+                  <input style={s.input} value={forms[o.id]?.u || ''} onChange={e => setF(o.id, 'u', e.target.value)} />
+                </div>
+                <div style={{ flex: 1, minWidth: 140 }}>
+                  <label style={{ ...s.label, marginTop: 0 }}>Senha</label>
+                  <input style={s.input} value={forms[o.id]?.p || ''} onChange={e => setF(o.id, 'p', e.target.value)} />
+                </div>
+                <button style={{ ...s.btnSmall, backgroundColor: '#1b3a1b', color: '#4caf50', padding: '11px 18px' }} disabled={busy === o.id} onClick={() => activateWith(o)}>{busy === o.id ? 'Ativando…' : 'Ativar e vincular'}</button>
+                <button style={{ ...s.btnSmall, backgroundColor: '#1a1a2e', color: '#7986cb', padding: '11px 18px' }} disabled={busy === o.id + 'api'} onClick={() => viaApi(o)} title="Cria o usuário no painel pela API (precisa do token e do plano ligado a um pacote)">{busy === o.id + 'api' ? 'Criando…' : 'Criar no painel (API)'}</button>
+                <button style={{ ...s.btnSmall, backgroundColor: '#1a1a1a', color: '#888', padding: '11px 14px' }} onClick={() => justMark(o.id)}>Só marcar</button>
+              </div>
             </div>
           ))}
 
           {activated.length > 0 && (
             <>
               <h3 style={{ color: '#555', fontSize: 14, margin: '24px 0 12px', textTransform: 'uppercase', letterSpacing: 0.5 }}>Ativados ({activated.length})</h3>
-              {activated.map(o => (
+              {activated.slice(0, 40).map(o => (
                 <div key={o.id} style={{ ...s.card, opacity: 0.6, display: 'flex', alignItems: 'center', gap: 16 }}>
                   <div style={{ flex: 1 }}>
                     <span style={{ color: '#fff', fontWeight: 600, marginRight: 10 }}>{o.user_name}</span>
@@ -208,7 +274,9 @@ function OrdersTab() {
 /* ───────────────────────────── CREDENCIAIS ───────────────────────────── */
 function CredsTab() {
   const [creds, setCreds]   = useState([]);
-  const [users, setUsers]   = useState([]);
+  const [pick, setPick]   = useState(null);
+  const [q, setQ] = useState('');
+  const [found, setFound] = useState([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm]     = useState({ user_id: '', xc_username: '', xc_password: '', notes: '' });
   const [saving, setSaving] = useState('');
@@ -218,20 +286,25 @@ function CredsTab() {
   async function load() {
     setLoading(true);
     try {
-      const [c, u] = await Promise.all([api.get('/admin/iptv'), api.get('/admin/users')]);
+      const c = await api.get('/admin/iptv');
       setCreds(c.data || []);
-      setUsers(u.data || []);
     } catch {}
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
+  useEffect(() => {
+    if (q.trim().length < 2) { setFound([]); return undefined; }
+    const t = setTimeout(() => api.get('/admin/users-search', { params: { q } }).then(r => setFound(r.data || [])).catch(() => {}), 250);
+    return () => clearTimeout(t);
+  }, [q]);
 
   function openEdit(cred) {
+    setPick(cred.user ? { id: cred.user_id, name: cred.user.name, email: cred.user.email } : { id: cred.user_id, name: '', email: '' });
     setEditing(cred.user_id);
     setForm({ user_id: cred.user_id, xc_username: cred.xc_username, xc_password: cred.xc_password, notes: cred.notes || '' });
     setMsg('');
   }
-  function resetForm() { setEditing(null); setForm({ user_id: '', xc_username: '', xc_password: '', notes: '' }); setMsg(''); }
+  function resetForm() { setEditing(null); setPick(null); setQ(''); setFound([]); setForm({ user_id: '', xc_username: '', xc_password: '', notes: '' }); setMsg(''); }
 
   async function save() {
     if (!form.user_id || !form.xc_username || !form.xc_password) return setMsg('Preencha todos os campos obrigatórios.');
@@ -256,18 +329,36 @@ function CredsTab() {
     setCreds(prev => prev.filter(c => c.user_id !== userId));
   }
 
-  const linkedIds = new Set(creds.map(c => c.user_id));
-  const availUsers = users.filter(u => !linkedIds.has(u.id) || u.id === editing);
 
   return (
     <div>
       <div style={s.card}>
         <h2 style={s.h2}>{editing ? 'Editar credenciais' : 'Vincular acesso IPTV ao usuário'}</h2>
-        <label style={s.label}>Usuário *</label>
-        <select style={s.input} value={form.user_id} onChange={e => setForm(p => ({ ...p, user_id: e.target.value }))} disabled={!!editing}>
-          <option value="">— Selecione —</option>
-          {availUsers.map(u => <option key={u.id} value={u.id}>{u.name} ({u.email})</option>)}
-        </select>
+        <label style={s.label}>Pessoa (busque por nome ou e-mail) *</label>
+        {pick ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '10px 14px' }}>
+            <div style={{ flex: 1 }}><b style={{ color: '#fff' }}>{pick.name || 'Usuário'}</b> <span style={{ color: '#888', fontSize: 13 }}>{pick.email}</span></div>
+            {!editing && <button style={s.btnSmall} onClick={() => { setPick(null); setForm(p => ({ ...p, user_id: '' })); }}>Trocar</button>}
+          </div>
+        ) : (
+          <div style={{ position: 'relative' }}>
+            <input style={s.input} placeholder="Digite pelo menos 2 letras…" value={q} onChange={e => setQ(e.target.value)} autoFocus />
+            {found.length > 0 && (
+              <div style={{ position: 'absolute', zIndex: 10, left: 0, right: 0, top: '100%', marginTop: 4, background: '#161616', border: '1px solid #2a2a2a', borderRadius: 8, overflow: 'hidden', boxShadow: '0 10px 30px rgba(0,0,0,.6)' }}>
+                {found.map(u => {
+                  const has = creds.some(c => c.user_id === u.id);
+                  return (
+                    <button key={u.id} onClick={() => { setPick(u); setForm(p => ({ ...p, user_id: u.id })); setQ(''); setFound([]); }}
+                      style={{ display: 'flex', width: '100%', justifyContent: 'space-between', gap: 12, textAlign: 'left', padding: '10px 14px', background: 'transparent', border: 0, borderBottom: '1px solid #1f1f1f', color: '#ddd', cursor: 'pointer' }}>
+                      <span><b>{u.name || 'Sem nome'}</b> <span style={{ color: '#777', fontSize: 13 }}>{u.email}</span></span>
+                      {has && <span style={s.badgeGreen}>JÁ TEM IPTV</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
         <div style={s.row}>
           <div style={{ flex: 1 }}>
             <label style={s.label}>Usuário XC *</label>
