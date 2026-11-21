@@ -4,6 +4,17 @@
 // mais novas que a última vista (guardado no AsyncStorage).
 export const CHANGELOG = [
   {
+    version: '1.1.0',
+    items: [
+      'Nova área de IPTV: canais ao vivo por categoria, favoritos e troca rápida de canal no player.',
+      'Assistir juntos ganhou convite, sala de espera, avatares e chat para combinar a sessão com os amigos.',
+      'Novas telas de planos, teste grátis, pagamento e Minha Assinatura.',
+      'Agora você pode apoiar o FlixHome diretamente pelo app.',
+      'Filtros de filmes e séries ficaram mais completos para encontrar exatamente o que assistir.',
+      'Player de TV ao vivo mais estável, sem voltar para a tela de carregamento a cada oscilação.',
+    ],
+  },
+  {
     version: '1.0.9',
     items: [
       'Novo chat ao vivo com o suporte (Perfil → Falar com o suporte): mande mensagens, fotos, vídeos e arquivos.',

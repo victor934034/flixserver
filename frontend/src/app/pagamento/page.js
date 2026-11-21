@@ -117,17 +117,25 @@ function Checkout() {
 
   async function submit() {
     setError('');
-    if (provider === 'asaas' && method === 'CREDIT_CARD') {
-      const [mm, yy] = card.exp.split('/');
-      if (digits(card.number).length < 13 || !card.holderName.trim() || !mm || !yy || digits(card.ccv).length < 3 || digits(card.cep).length !== 8) {
-        return setError('Confira os dados do cartão.');
-      }
-    }
     setBusy(true);
     try {
+      // Confirma o gateway no instante da compra, pois ele pode ter sido
+      // alterado no admin depois que esta tela foi aberta.
+      const { data: paymentConfig } = await api.get('/payments/config', { params: { _t: Date.now() } });
+      const activeProvider = paymentConfig.provider === 'asaas' ? 'asaas' : 'mercado_pago';
+      setProvider(activeProvider);
+
+      if (activeProvider === 'asaas' && method === 'CREDIT_CARD') {
+        const [mm, yy] = card.exp.split('/');
+        if (digits(card.number).length < 13 || !card.holderName.trim() || !mm || !yy || digits(card.ccv).length < 3 || digits(card.cep).length !== 8) {
+          setError('Confira os dados do cartão.');
+          return;
+        }
+      }
+
       const body = { kind, plan_id: planId, amount: donateAmount };
-      if (provider === 'asaas') Object.assign(body, { method, cpf: digits(cpf), phone: digits(phone) });
-      if (provider === 'asaas' && method === 'CREDIT_CARD') {
+      if (activeProvider === 'asaas') Object.assign(body, { method, cpf: digits(cpf), phone: digits(phone) });
+      if (activeProvider === 'asaas' && method === 'CREDIT_CARD') {
         const [mm, yy] = card.exp.split('/');
         body.card = { holderName: card.holderName.trim(), number: digits(card.number), expiryMonth: mm, expiryYear: yy, ccv: digits(card.ccv) };
         body.holder = { postalCode: digits(card.cep), addressNumber: card.num || 'S/N' };

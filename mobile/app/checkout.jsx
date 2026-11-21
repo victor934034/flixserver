@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   View, Text, TouchableOpacity, TextInput, ScrollView, StyleSheet, ActivityIndicator,
-  Animated, Easing, Image, Linking, KeyboardAvoidingView, Platform,
+  Animated, Easing, Image, Linking, KeyboardAvoidingView, Platform, AppState,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -102,6 +102,18 @@ export default function Checkout() {
     return () => { clearInterval(timer.current); loop.stop(); };
   }, [kind, planId]);
 
+  // A configuração pode mudar no admin enquanto o checkout está aberto.
+  // Atualiza ao voltar para o app; o submit confirma novamente antes de cobrar.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', nextState => {
+      if (nextState !== 'active') return;
+      api.get('/payments/config', { params: { _t: Date.now() } })
+        .then(({ data }) => setProvider(data.provider || 'mercado_pago'))
+        .catch(() => {});
+    });
+    return () => sub.remove();
+  }, []);
+
   const show = () => { fade.setValue(0); Animated.timing(fade, { toValue: 1, duration: 260, easing: Easing.out(Easing.quad), useNativeDriver: true }).start(); };
 
   // polling do PIX/boleto a cada 3s
@@ -137,18 +149,29 @@ export default function Checkout() {
 
   async function submit() {
     setError('');
-    if (provider === 'asaas' && !docOk) return setError('Informe um CPF ou CNPJ válido.');
-    if (provider === 'asaas' && method === 'CREDIT_CARD') {
-      const [mm, yy] = card.exp.split('/');
-      if (digits(card.number).length < 13 || !card.holderName.trim() || !mm || !yy || digits(card.ccv).length < 3 || digits(card.cep).length !== 8) {
-        return setError('Confira os dados do cartão.');
-      }
-    }
     setBusy(true);
     try {
+      // Não confia no valor carregado ao abrir a tela: o admin pode ter
+      // trocado o gateway desde então.
+      const { data: paymentConfig } = await api.get('/payments/config', { params: { _t: Date.now() } });
+      const activeProvider = paymentConfig.provider === 'asaas' ? 'asaas' : 'mercado_pago';
+      setProvider(activeProvider);
+
+      if (activeProvider === 'asaas' && !docOk) {
+        setError('Informe um CPF ou CNPJ válido.');
+        return;
+      }
+      if (activeProvider === 'asaas' && method === 'CREDIT_CARD') {
+        const [mm, yy] = card.exp.split('/');
+        if (digits(card.number).length < 13 || !card.holderName.trim() || !mm || !yy || digits(card.ccv).length < 3 || digits(card.cep).length !== 8) {
+          setError('Confira os dados do cartão.');
+          return;
+        }
+      }
+
       const body = { kind, plan_id: planId, amount: Number(donateAmt) || undefined };
-      if (provider === 'asaas') Object.assign(body, { method, cpf: digits(cpf), phone: digits(phone) });
-      if (provider === 'asaas' && method === 'CREDIT_CARD') {
+      if (activeProvider === 'asaas') Object.assign(body, { method, cpf: digits(cpf), phone: digits(phone) });
+      if (activeProvider === 'asaas' && method === 'CREDIT_CARD') {
         const [mm, yy] = card.exp.split('/');
         body.card = { holderName: card.holderName.trim(), number: digits(card.number), expiryMonth: mm, expiryYear: yy, ccv: digits(card.ccv) };
         body.holder = { postalCode: digits(card.cep), addressNumber: card.num || 'S/N' };
