@@ -137,7 +137,7 @@ function DirectLogin({ onSuccess }) {
 }
 
 // ── Remote login (code) ───────────────────────────────────────────────────────
-function RemoteLogin({ onSuccess }) {
+function RemoteLogin({ onSuccess, onSwitch }) {
   const { loginWithToken } = useAuth();
   const [code, setCode] = useState('');
   const [status, setStatus] = useState('loading'); // loading | waiting | error
@@ -185,6 +185,9 @@ function RemoteLogin({ onSuccess }) {
     }, 3000);
   }
 
+  const origin = String(api.defaults.baseURL || '').replace(/\/api\/?$/, '');
+  const site = origin.replace(/^https?:\/\//, '');
+  const qrUri = origin + '/api/payments/qr?text=' + encodeURIComponent(origin + '/autorizar-tv?code=' + code);
   // Format code as pairs: "AB 1C 2D"
   const formatted = code
     ? code.replace(/(.{2})/g, '$1 ').trim()
@@ -211,45 +214,39 @@ function RemoteLogin({ onSuccess }) {
       )}
 
       {status === 'waiting' && (
-        <>
-          <Text style={styles.codeLabel}>Seu código de acesso</Text>
-          <Text style={styles.code}>{formatted}</Text>
-
-          <View style={styles.codeSteps}>
-            <View style={styles.codeStep}>
-              <View style={styles.codeStepNum}><Text style={styles.codeStepNumText}>1</Text></View>
-              <Text style={styles.codeStepText}>
-                No celular ou computador, acesse o app e faça login
-              </Text>
+        <View style={styles.dWrap}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.dLogo}>FLIXHOME</Text>
+            <Text style={styles.dTitle}>Entre com o celular</Text>
+            {[['Escaneie o QR code ou acesse ', site + '/autorizar-tv'], ['Entre com seu e-mail e o código que enviamos', ''], ['Confirme o código da TV abaixo', '']].map(([t, b2], i) => (
+              <View key={i} style={styles.dStep}>
+                <View style={styles.dNum}><Text style={styles.dNumTxt}>{i + 1}</Text></View>
+                <Text style={styles.dStepTxt}>{t}<Text style={{ color: '#fff', fontWeight: '800' }}>{b2}</Text></Text>
+              </View>
+            ))}
+            <View style={styles.dBoxes}>
+              {code.split('').map((c, i) => <View key={i} style={styles.dBox}><Text style={styles.dBoxTxt}>{c}</Text></View>)}
             </View>
-            <View style={styles.codeStep}>
-              <View style={styles.codeStepNum}><Text style={styles.codeStepNumText}>2</Text></View>
-              <Text style={styles.codeStepText}>
-                Vá em <Text style={{ color: '#E50914' }}>Perfil → Autorizar TV</Text> e insira o código acima
-              </Text>
+            <View style={styles.dCallout}>
+              <Ionicons name="mail-outline" size={28} color="#FBBF24" />
+              <Text style={styles.dCalloutTxt}>O código do e-mail não chegou? Olhe também a caixa de <Text style={{ color: '#FBBF24', fontWeight: '900' }}>spam / lixo eletrônico</Text> no celular.</Text>
             </View>
-            <View style={styles.codeStep}>
-              <View style={styles.codeStepNum}><Text style={styles.codeStepNumText}>3</Text></View>
-              <Text style={styles.codeStepText}>
-                A TV entrará automaticamente
-              </Text>
+            <View style={{ flexDirection: 'row', gap: 20, marginTop: 28 }}>
+              <TouchableHighlight onPress={requestCode} underlayColor="rgba(255,255,255,0.1)" style={styles.dBtn} hasTVPreferredFocus>
+                <Text style={styles.dBtnTxt}>Gerar novo código</Text>
+              </TouchableHighlight>
+              <TouchableHighlight onPress={onSwitch} underlayColor="rgba(255,255,255,0.1)" style={styles.dBtn}>
+                <Text style={styles.dBtnTxt}>E-mail e senha</Text>
+              </TouchableHighlight>
             </View>
           </View>
-
-          <View style={styles.codeExpiry}>
-            <ActivityIndicator color="#E50914" size="small" style={{ marginRight: 8 }} />
-            <Text style={styles.codeExpiryText}>Aguardando confirmação… (expira em 10 min)</Text>
+          <View style={styles.dQrCol}>
+            <View style={styles.dQr}>
+              <Image source={{ uri: qrUri }} style={{ width: 360, height: 360 }} />
+            </View>
+            <Text style={styles.dExpire}>Código expira em 10 min</Text>
           </View>
-
-          <TouchableHighlight
-            onPress={requestCode}
-            underlayColor="rgba(255,255,255,0.1)"
-            style={styles.btnOutline}
-            hasTVPreferredFocus
-          >
-            <Text style={styles.btnOutlineText}>Gerar novo código</Text>
-          </TouchableHighlight>
-        </>
+        </View>
       )}
     </View>
   );
@@ -263,6 +260,15 @@ export default function LoginScreen({ navigation }) {
 
   function onSuccess() {
     navigation.replace('Home');
+  }
+
+  if (tab === 'remote') {
+    return (
+      <View style={[styles.container, { alignItems: 'stretch', justifyContent: 'center', padding: 70 }]}>
+        <LinearGradient colors={['#1a0606', '#0A0A0A', '#0A0A0A']} style={StyleSheet.absoluteFill} start={{ x: 1, y: 0.4 }} end={{ x: 0, y: 0.6 }} />
+        <RemoteLogin onSuccess={onSuccess} onSwitch={() => setTab('direct')} />
+      </View>
+    );
   }
 
   return (
@@ -302,6 +308,23 @@ export default function LoginScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
+  dWrap: { flexDirection: 'row', gap: 60, alignItems: 'center' },
+  dLogo: { color: '#E50914', fontSize: 22, fontWeight: '900', letterSpacing: 10, marginBottom: 26 },
+  dTitle: { color: '#fff', fontSize: 62, fontWeight: '900', marginBottom: 24 },
+  dStep: { flexDirection: 'row', alignItems: 'center', gap: 18, marginBottom: 14 },
+  dNum: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#2A2A2A', alignItems: 'center', justifyContent: 'center' },
+  dNumTxt: { color: '#fff', fontWeight: '800', fontSize: 22 },
+  dStepTxt: { color: '#CFCFCF', fontSize: 28 },
+  dBoxes: { flexDirection: 'row', gap: 14, marginVertical: 24 },
+  dBox: { width: 84, height: 94, borderRadius: 14, backgroundColor: '#1F1F1F', borderWidth: 1, borderColor: '#2A2A2A', alignItems: 'center', justifyContent: 'center' },
+  dBoxTxt: { color: '#fff', fontSize: 54, fontWeight: '900' },
+  dCallout: { flexDirection: 'row', alignItems: 'center', gap: 16, padding: 22, borderRadius: 16, backgroundColor: 'rgba(251,191,36,0.08)', borderWidth: 1, borderColor: 'rgba(251,191,36,0.35)' },
+  dCalloutTxt: { flex: 1, color: '#FDE68A', fontSize: 26 },
+  dBtn: { paddingHorizontal: 34, paddingVertical: 18, borderRadius: 12, backgroundColor: '#1F1F1F', borderWidth: 3, borderColor: '#2A2A2A' },
+  dBtnTxt: { color: '#fff', fontSize: 26, fontWeight: '800' },
+  dQrCol: { alignItems: 'center', gap: 20 },
+  dQr: { width: 400, height: 400, borderRadius: 24, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
+  dExpire: { color: '#A3A3A3', fontSize: 24 },
   container: {
     flex: 1,
     justifyContent: 'center',

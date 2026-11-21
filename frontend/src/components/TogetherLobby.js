@@ -31,6 +31,8 @@ export default function TogetherLobby({ tg, code, onLeave }) {
     return () => clearTimeout(t);
   }, [q]);
 
+  const whats = () => window.open('https://wa.me/?text=' + encodeURIComponent('Vem assistir "' + (tg.room?.title || '') + '" comigo no FlixHome! ' + link), '_blank');
+  const share = () => { if (navigator.share) navigator.share({ title: 'Assistir juntos', text: tg.room?.title, url: link }).catch(() => {}); else copy(); };
   const copy = () => { navigator.clipboard?.writeText(link).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); }); };
   const send = (e) => { e.preventDefault(); if (!text.trim()) return; tg.sendChat(text); setText(''); };
   const invite = async (u) => { try { await api.post(`/together/rooms/${code}/invite`, { user_id: u.id }); setSent(x => ({ ...x, [u.id]: true })); } catch {} };
@@ -67,7 +69,7 @@ export default function TogetherLobby({ tg, code, onLeave }) {
           <div className={s.card}>
             {room.poster_url ? <img className={s.poster} src={room.poster_url} alt="" /> : <div className={s.poster} />}
             <div>
-              <span className={s.kicker}>VOCÊS VÃO ASSISTIR</span>
+              <span className={s.kicker}>ASSISTIR JUNTOS</span>
               <h2>{room.title}</h2>
               <p className={s.muted}>Código <b className={s.code}>{code}</b></p>
             </div>
@@ -77,9 +79,23 @@ export default function TogetherLobby({ tg, code, onLeave }) {
             <span className={s.label}>CONVIDE PELO LINK</span>
             <div className={s.linkRow}>
               <span className={s.link}>{link}</span>
-              <button className={`${s.copy} ${copied ? s.copied : ''}`} onClick={copy}>{copied ? '✓ Copiado!' : 'Copiar'}</button>
+              <button className={`${s.copy} ${copied ? s.copied : ''}`} onClick={copy}>{copied ? '✓ Copiado!' : 'Copiar link'}</button>
+            </div>
+            <div className={s.shareRow}>
+              <button className={s.wa} onClick={whats}>WhatsApp</button>
+              <button className={s.ghost} onClick={share}>Mais opções</button>
             </div>
           </div>
+
+          {host && (
+            <div className={s.card2}>
+              <span className={s.label}>QUEM CONTROLA PLAY/PAUSE</span>
+              <div className={s.seg}>
+                <button className={tg.control === 'host' ? '' : s.segOn} onClick={() => tg.setControl('all')}>Todos controlam</button>
+                <button className={tg.control === 'host' ? s.segOn : ''} onClick={() => tg.setControl('host')}>Só eu controlo</button>
+              </div>
+            </div>
+          )}
 
           <div className={s.card2}>
             <span className={s.label}>NA SALA · {tg.members.length}</span>
@@ -141,7 +157,7 @@ export default function TogetherLobby({ tg, code, onLeave }) {
             <button className={s.send} type="submit" disabled={!text.trim()}>Enviar</button>
           </form>
           {host
-            ? <button className={s.start} onClick={() => tg.startRoom()}>▶ Iniciar para todos</button>
+            ? <button className={s.start} onClick={() => tg.startRoom()}>▶ Iniciar sessão</button>
             : <div className={s.waiting}><i />Aguardando o anfitrião iniciar…</div>}
         </aside>
       </div>

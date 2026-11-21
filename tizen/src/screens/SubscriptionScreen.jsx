@@ -30,6 +30,7 @@ export default function SubscriptionScreen() {
   const [trial, setTrial] = useState(null);
   const [trialBusy, setTrialBusy] = useState(false);
   const off = trial && trial.available ? 1 : 0;
+  const [selIdx, setSelIdx] = useState(0);
   const st = useRef({});
 
   useEffect(() => {
@@ -56,13 +57,16 @@ export default function SubscriptionScreen() {
   }, [qrUrl]);
 
   const plans    = tab === 0 ? basicPlans : iptvPlans;
+  useEffect(() => { const l = tab === 0 ? basicPlans : iptvPlans; const h = l.findIndex(p => p.highlight); setSelIdx(h >= 0 ? h : 0); }, [tab, basicPlans, iptvPlans]);
   const total    = plans.length + 2; // plans + tabs + logout
   const tabFocus = focused < 2 ? focused : -1;
-  const planFocus = focused >= 2 + off && focused < plans.length + 2 + off ? focused - 2 - off : -1;
-  const trialFocus = off === 1 && focused === 2;
-  const logoutFocused = focused === plans.length + 2 + off;
+  const planFocus = focused >= 2 && focused < plans.length + 2 ? focused - 2 : -1;
+  const payFocus = focused === plans.length + 2;
+  const trialFocus = off === 1 && focused === plans.length + 3;
+  const logoutFocused = focused === plans.length + 3 + off;
+  const selPlan = plans[Math.min(selIdx, Math.max(0, plans.length - 1))];
 
-  st.current = { tab, plans, focused, total, subscribing, loading, off, qrUrl };
+  st.current = { tab, plans, focused, total, subscribing, loading, off, qrUrl, selIdx };
 
   useKeyDown(e => {
     const { tab, plans, focused, total, subscribing, loading, off, qrUrl: qr0 } = st.current;
@@ -70,38 +74,38 @@ export default function SubscriptionScreen() {
     const k = e.keyCode;
     if (qr0) { if (k === KEY.ENTER || k === KEY.BACK || k === KEY.BACKSPACE || k === 461) { e.preventDefault(); setQrUrl(''); setStatus(''); } return; }
 
+    const n = plans.length;
+    const pay = n + 2, tri = n + 3, out = n + 3 + off;
     if (k === KEY.UP) {
       e.preventDefault();
-      setFocused(f => Math.max(0, f - 1));
+      if (focused === pay) setFocused(2 + Math.min(st.current.selIdx, n - 1));
+      else if (focused === tri) setFocused(2 + Math.min(st.current.selIdx, n - 1));
+      else if (focused === out) setFocused(pay);
+      else if (focused >= 2 && focused < pay) setFocused(tab === 0 ? 0 : 1);
+      else setFocused(0);
     } else if (k === KEY.DOWN) {
       e.preventDefault();
-      setFocused(f => Math.min(plans.length + 2 + off, f + 1));
+      if (focused < 2) setFocused(n > 0 ? 2 + Math.min(st.current.selIdx, n - 1) : out);
+      else if (focused < pay) setFocused(pay);
+      else if (focused === pay || focused === tri) setFocused(out);
     } else if (k === KEY.LEFT) {
       e.preventDefault();
-      if (focused < 2) {
-        // navigate tabs
-        if (tab > 0) { setTab(t => t - 1); setFocused(0); }
-      } else if (focused >= 2 + off && focused <= plans.length + 1 + off) {
-        setFocused(f => Math.max(2 + off, f - 1));
-      }
+      if (focused < 2) { if (tab > 0) { setTab(t => t - 1); setFocused(0); } }
+      else if (focused >= 2 && focused < pay) setFocused(f => Math.max(2, f - 1));
+      else if (focused === tri) setFocused(pay);
     } else if (k === KEY.RIGHT) {
       e.preventDefault();
-      if (focused < 2) {
-        if (tab < TABS.length - 1) { setTab(t => t + 1); setFocused(1); }
-      } else if (focused >= 2 + off && focused <= plans.length + 1 + off) {
-        setFocused(f => Math.min(plans.length + 1 + off, f + 1));
-      }
+      if (focused < 2) { if (tab < TABS.length - 1) { setTab(t => t + 1); setFocused(1); } }
+      else if (focused >= 2 && focused < pay) setFocused(f => Math.min(pay - 1, f + 1));
+      else if (focused === pay && off === 1) setFocused(tri);
     } else if (k === KEY.ENTER) {
       e.preventDefault();
       if (focused === 0) { setTab(0); }
       else if (focused === 1) { setTab(1); }
-      else if (off === 1 && focused === 2) { startTrial(); }
-      else if (focused >= 2 + off && focused <= plans.length + 1 + off) {
-        const plan = plans[focused - 2 - off];
-        if (plan) handleSubscribe(plan);
-      } else {
-        logout();
-      }
+      else if (focused >= 2 && focused < pay) { setSelIdx(focused - 2); setFocused(pay); }
+      else if (focused === pay) { const plan = plans[Math.min(st.current.selIdx, n - 1)]; if (plan) handleSubscribe(plan); }
+      else if (off === 1 && focused === tri) { startTrial(); }
+      else { logout(); }
     } else if (k === KEY.BACK) {
       e.preventDefault();
       logout();
@@ -242,11 +246,11 @@ export default function SubscriptionScreen() {
             return (
               <div
                 key={plan.id}
-                onClick={() => { setFocused(idx + 2 + off); handleSubscribe(plan); }}
+                onClick={() => { setSelIdx(idx); setFocused(plans.length + 2); }}
                 style={{
                   width: 400, minHeight: 330, padding: '34px 30px 28px', borderRadius: 20, cursor: 'pointer', position: 'relative', boxSizing: 'border-box',
                   background: plan.highlight ? '#190f10' : '#141414',
-                  border: '3px solid ' + (isFoc ? '#fff' : plan.highlight ? ACCENT : '#1F1F1F'),
+                  border: '3px solid ' + (isFoc ? '#fff' : (selIdx === idx || plan.highlight) ? ACCENT : '#1F1F1F'),
                   boxShadow: plan.highlight ? '0 0 40px rgba(229,9,20,0.35)' : 'none',
                   transform: isFoc ? 'scale(1.06)' : 'none', transition: 'transform 0.2s ease-out, border-color 0.2s',
                   opacity: subscribing ? 0.7 : 1,
@@ -279,8 +283,8 @@ export default function SubscriptionScreen() {
       {/* Ação principal: pagar pelo celular (QR) */}
       {!loading && plans.length > 0 && (
         <div style={{ alignSelf: 'stretch', padding: '10px 70px 0', display: 'flex', alignItems: 'center', gap: 20 }}>
-          <div style={{ background: ACCENT, padding: '18px 32px', borderRadius: 12, fontSize: 24, fontWeight: 800 }}>📱 Pagar pelo celular</div>
-          {off === 1 && <div style={{ background: '#1F1F1F', padding: '18px 32px', borderRadius: 12, fontSize: 24, fontWeight: 800, border: '3px solid ' + (trialFocus ? '#fff' : 'transparent') }}>Começar teste grátis · {trial.days} dias</div>}
+          <div onClick={() => selPlan && handleSubscribe(selPlan)} style={{ background: ACCENT, padding: '18px 32px', borderRadius: 12, fontSize: 24, fontWeight: 800, cursor: 'pointer', border: '3px solid ' + (payFocus ? '#fff' : ACCENT), transform: payFocus ? 'scale(1.06)' : 'none', transition: 'transform 0.2s' }}>📱 Pagar pelo celular{selPlan ? ' · ' + selPlan.name : ''}</div>
+          {off === 1 && <div onClick={startTrial} style={{ background: '#1F1F1F', padding: '18px 32px', borderRadius: 12, fontSize: 24, fontWeight: 800, cursor: 'pointer', border: '3px solid ' + (trialFocus ? '#fff' : 'transparent'), transform: trialFocus ? 'scale(1.06)' : 'none', transition: 'transform 0.2s' }}>Começar teste grátis · {trial.days} dias</div>}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 22, fontSize: 20, color: '#A3A3A3', alignItems: 'center' }}>
             <span><b style={{ border: '2px solid #666', borderRadius: 8, padding: '3px 10px', marginRight: 8, color: '#E5E5E5' }}>◀ ▶</b>Escolher</span>
             <span><b style={{ border: '2px solid #666', borderRadius: 8, padding: '3px 10px', marginRight: 8, color: '#E5E5E5' }}>OK</b>Selecionar</span>

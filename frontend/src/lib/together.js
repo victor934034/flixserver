@@ -18,6 +18,7 @@ export function useTogether(code) {
   const [initialState, setInitialState] = useState(null);
   const [resyncing, setResyncing] = useState(false);
   const [started, setStarted] = useState(false);
+  const [control, setControlState] = useState('all');
   const [voiceOn, setVoiceOn] = useState(false);
   const [muted, setMuted] = useState(false);
   const [speaking, setSpeaking] = useState({});   // socketId -> true
@@ -63,7 +64,7 @@ export function useTogether(code) {
       await syncClock(sock);
       sock.emit('room:join', { code }, (res) => {
         if (!res?.ok) { setStatus('error'); setError(res?.error || 'Não foi possível entrar.'); return; }
-        setRoom(res.room); setStarted(!!res.room?.started); setYou(res.you); youRef.current = res.you;
+        setRoom(res.room); setStarted(!!res.room?.started); setControlState(res.room?.control || 'all'); setYou(res.you); youRef.current = res.you;
         setMembers(res.members); setMessages(res.messages || []);
         setInitialState(res.state && res.state.t && (res.state.time > 0 || res.state.playing) ? res.state : null);
         setStatus('ready'); setResyncing(false);
@@ -77,6 +78,7 @@ export function useTogether(code) {
     sock.on('toast', (t) => toast(t.text));
     sock.on('chat', (m) => setMessages(list => [...list.slice(-199), m]));
     sock.on('room:started', () => setStarted(true));
+    sock.on('room:control', (c) => setControlState(c.control));
     sock.on('room:ended', () => { setStatus('ended'); });
     sock.on('room:kicked', () => { setStatus('error'); setError('Você entrou nesta sala em outra aba.'); });
     sock.on('state', (ev) => {
@@ -214,7 +216,8 @@ export function useTogether(code) {
   }
 
   return {
-    status, error, room, you, members, messages, toasts, resyncing, sync, started,
+    status, error, room, you, members, messages, toasts, resyncing, sync, started, control,
+    setControl: (c) => sockRef.current?.emit('room:control', { control: c }),
     startRoom: () => sockRef.current?.emit('room:start'),
     updateAvatar: (url) => sockRef.current?.emit('member:update', { avatar: url }),
     sendChat, endRoom, toast,

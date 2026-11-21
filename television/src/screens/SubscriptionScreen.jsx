@@ -105,6 +105,7 @@ export default function SubscriptionScreen({ navigation, route }) {
   const [statusMsg,   setStatusMsg]   = useState('');
   const [qrUrl,       setQrUrl]       = useState('');
   const [busyId,      setBusyId]      = useState('');
+  const [payPlan,     setPayPlan]     = useState(null);
   const [trial,       setTrial]       = useState(null);
   const [trialBusy,   setTrialBusy]   = useState(false);
   const [trialFoc,    setTrialFoc]    = useState(false);
@@ -120,6 +121,17 @@ export default function SubscriptionScreen({ navigation, route }) {
       setIptvPlans(iptv.length > 0 ? iptv : basic.filter(p => p.includes_iptv));
     }).finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!qrUrl) return undefined;
+    const t = setInterval(async () => {
+      try {
+        const { data } = await api.get('/auth/me');
+        if (data?.plan_expires_at && new Date(data.plan_expires_at).getTime() > Date.now()) { await refreshUser?.(); navigation.replace('Home'); }
+      } catch {}
+    }, 4000);
+    return () => clearInterval(t);
+  }, [qrUrl]);
 
   const plans = tab === 0 ? basicPlans : iptvPlans;
 
@@ -137,6 +149,7 @@ export default function SubscriptionScreen({ navigation, route }) {
   }
 
   async function handleSubscribe(plan) {
+    setPayPlan(plan);
     setBusyId(plan.id);
     setStatusMsg('');
     try {
@@ -153,6 +166,36 @@ export default function SubscriptionScreen({ navigation, route }) {
     } finally {
       setBusyId('');
     }
+  }
+
+  if (qrUrl) {
+    const fmtP = v => `R$ ${Number(v).toFixed(2).replace('.', ',')}`;
+    return (
+      <View style={[s.root, { padding: r(60), backgroundColor: '#0A0A0A' }]}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text style={{ color: ACCENT, fontSize: r(22), fontWeight: '900', letterSpacing: 10 }}>FLIXHOME</Text>
+          <Text style={{ color: '#4ADE80', fontSize: r(24), fontWeight: '700' }}>Pagamento seguro</Text>
+        </View>
+        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: r(70) }}>
+          <View style={{ width: r(420), height: r(420), borderRadius: r(26), backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' }}>
+            <Image source={{ uri: qrUrl }} style={{ width: r(396), height: r(396) }} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: '#fff', fontSize: r(60), fontWeight: '900' }}>Escaneie com o celular para pagar</Text>
+            <Text style={{ color: '#A3A3A3', fontSize: r(28), marginVertical: r(22) }}>PIX, cartão ou boleto — a página abre direto no seu celular.</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: r(40), padding: r(26), borderRadius: r(18), backgroundColor: '#141414', borderWidth: 1, borderColor: '#1F1F1F' }}>
+              <View><Text style={{ color: '#A3A3A3', fontSize: r(22) }}>Plano</Text><Text style={{ color: '#fff', fontSize: r(34), fontWeight: '800' }}>{payPlan?.name}</Text></View>
+              <View><Text style={{ color: '#A3A3A3', fontSize: r(22) }}>Total</Text><Text style={{ color: '#fff', fontSize: r(34), fontWeight: '800' }}>{payPlan ? fmtP(payPlan.promo_price != null ? payPlan.promo_price : payPlan.price) : ''}</Text></View>
+              <Text style={{ color: '#4ADE80', fontSize: r(26), fontWeight: '800' }}>● Aguardando pagamento…</Text>
+            </View>
+            <Text style={{ color: '#A3A3A3', fontSize: r(24), marginTop: r(22) }}>A TV atualiza sozinha assim que o pagamento for confirmado.</Text>
+          </View>
+        </View>
+        <TVPressable hasTVPreferredFocus onPress={() => { setQrUrl(''); setStatusMsg(''); }} style={({ focused }) => [{ alignSelf: 'flex-start', paddingHorizontal: r(34), paddingVertical: r(18), borderRadius: r(12), backgroundColor: '#1F1F1F', borderWidth: 3, borderColor: focused ? '#fff' : '#2A2A2A' }]}>
+          <Text style={{ color: '#fff', fontSize: r(26), fontWeight: '800' }}>Voltar aos planos</Text>
+        </TVPressable>
+      </View>
+    );
   }
 
   return (
