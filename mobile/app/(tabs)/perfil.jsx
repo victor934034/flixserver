@@ -10,6 +10,7 @@ import { useDownloads, fmtBytes } from '../../contexts/DownloadContext';
 import { useParental } from '../../contexts/ParentalContext';
 import CachedImage from '../../components/CachedImage';
 import { usePrefs, setPref } from '../../lib/prefs';
+import SupportBanner from '../../components/SupportBanner';
 import api from '../../lib/api';
 
 const APP_VERSION = Constants.expoConfig?.version ?? '1.0.5';
@@ -135,6 +136,8 @@ export default function PerfilScreen() {
           </View>
         </View>
       )}
+
+      <View style={{ marginTop: 14 }}><SupportBanner /></View>
 
       <View style={styles.section}>
         <Text style={styles.sectionLabel}>Minha Conta</Text>

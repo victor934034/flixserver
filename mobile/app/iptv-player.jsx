@@ -27,10 +27,18 @@ export default function IptvPlayerScreen() {
   const [drawer, setDrawer] = useState(false);
   const [hint, setHint] = useState(null); // { name, num, dir }
 
-  const player = useVideoPlayer({ uri: cur.url }, p => { p.play(); });
+  const player = useVideoPlayer({ uri: cur.url }, p => {
+    // buffer maior pra ao vivo: evita "carregando" a cada micro-travada da rede
+    try { p.bufferOptions = { preferredForwardBufferDuration: 20, minBufferForPlayback: 2, waitsToMinimizeStalling: true }; } catch {}
+    p.play();
+  });
+  const playedOnce = useRef(false);
   const { isPlaying = false } = useEvent(player, 'playingChange', { isPlaying: false });
   const { status = 'idle' } = useEvent(player, 'statusChange', { status: 'idle' });
-  const isBuffering = status === 'idle' || status === 'loading';
+  useEffect(() => { if (status === 'readyToPlay') playedOnce.current = true; }, [status]);
+  // 1ª abertura: tela de carregando. Depois de já ter tocado, travadas viram só um aviso discreto.
+  const isBuffering = (status === 'idle' || status === 'loading') && !playedOnce.current;
+  const rebuffering = (status === 'loading') && playedOnce.current;
   const isError = status === 'error';
 
   const ctrl = useRef(new Animated.Value(1)).current;
@@ -63,7 +71,7 @@ export default function IptvPlayerScreen() {
   useEffect(() => { if (status === 'readyToPlay') setFailed(false); }, [status]);
 
   const load = async (item, index) => {
-    setFailed(false); setAttempt(0);
+    setFailed(false); setAttempt(0); playedOnce.current = false;
     try {
       const u = await streamUrl(item.stream_id, 'm3u8');
       setCur({ name: item.name, logo: item.stream_icon || '', url: u, urlTs: u.replace('.m3u8', '.ts'), index });
@@ -108,6 +116,10 @@ export default function IptvPlayerScreen() {
 
       {isBuffering && !failed && (
         <View style={s.overlay} pointerEvents="none"><ActivityIndicator size="large" color={ACCENT} /><Text style={s.bufText}>Carregando canal…</Text></View>
+      )}
+
+      {rebuffering && !failed && (
+        <View style={s.rebuf} pointerEvents="none"><ActivityIndicator size="small" color="#fff" /><Text style={s.rebufTxt}>Ajustando a conexão…</Text></View>
       )}
 
       {failed && (
@@ -188,6 +200,8 @@ export default function IptvPlayerScreen() {
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#000' },
   overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', gap: 10 },
+  rebuf: { position: 'absolute', top: 70, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(20,20,20,0.85)', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999 },
+  rebufTxt: { color: '#E5E5E5', fontSize: 12, fontWeight: '700' },
   bufText: { color: 'rgba(255,255,255,0.7)', fontSize: 14 },
   top: { position: 'absolute', top: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingBottom: 30, backgroundColor: 'rgba(0,0,0,0.5)' },
   back: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },

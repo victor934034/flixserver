@@ -50,7 +50,7 @@ const fmtDate = (d) => new Date(d).toLocaleDateString('pt-BR', { day: '2-digit',
 
 // Checkout nativo (design): Pagamento → PIX / Boleto / Recusado → Plano ativado
 export default function Checkout() {
-  const { kind = 'plan', plan_id: planId } = useLocalSearchParams();
+  const { kind = 'plan', plan_id: planId, amount: donateAmt } = useLocalSearchParams();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user, refreshUser } = useAuth();
@@ -78,7 +78,9 @@ export default function Checkout() {
   useEffect(() => {
     (async () => {
       try {
-        if (kind === 'iptv') {
+        if (kind === 'donate') {
+          setItem({ name: 'Apoio ao FlixHome', price: Number(donateAmt) || 10, old: null, days: null, sub: 'Contribuição única' });
+        } else if (kind === 'iptv') {
           const { data } = await api.get('/iptv/plans');
           const p = (data || []).find(x => x.id === planId);
           if (!p) throw new Error();
@@ -141,7 +143,7 @@ export default function Checkout() {
     }
     setBusy(true);
     try {
-      const body = { kind, plan_id: planId, method, cpf: digits(cpf), phone: digits(phone) };
+      const body = { kind, plan_id: planId, amount: Number(donateAmt) || undefined, method, cpf: digits(cpf), phone: digits(phone) };
       if (method === 'CREDIT_CARD') {
         const [mm, yy] = card.exp.split('/');
         body.card = { holderName: card.holderName.trim(), number: digits(card.number), expiryMonth: mm, expiryYear: yy, ccv: digits(card.ccv) };
@@ -184,8 +186,8 @@ export default function Checkout() {
         <Animated.View style={{ flex: 1, opacity: fade, alignItems: 'center', paddingHorizontal: 20 }}>
           <Confetti />
           <View style={s.okOuter}><View style={s.okIcon}><Ionicons name="checkmark" size={44} color="#0a0a0a" /></View></View>
-          <Text style={s.bigTitle}>{kind === 'iptv' ? 'Pedido recebido!' : 'Plano ativado!'}</Text>
-          <Text style={s.mutedC}>{kind === 'iptv' ? 'Pagamento confirmado. Vamos ativar seu IPTV em até 30 minutos.' : 'Pagamento confirmado. Aproveite o FlixHome sem limites.'}</Text>
+          <Text style={s.bigTitle}>{kind === 'donate' ? 'Obrigado pelo apoio!' : kind === 'iptv' ? 'Pedido recebido!' : 'Plano ativado!'}</Text>
+          <Text style={s.mutedC}>{kind === 'donate' ? 'Seu apoio ajuda a manter o FlixHome no ar. Muito obrigado! 💛' : kind === 'iptv' ? 'Pagamento confirmado. Vamos ativar seu IPTV em até 30 minutos.' : 'Pagamento confirmado. Aproveite o FlixHome sem limites.'}</Text>
           <View style={[s.card, { alignSelf: 'stretch', marginTop: 24 }]}>
             <Row k="Plano" v={item.name} />
             {until && kind !== 'iptv' ? <Row k="Válido até" v={fmtDate(until)} /> : null}
@@ -312,7 +314,7 @@ export default function Checkout() {
           <View style={s.sumHead}>
             <View style={{ flex: 1 }}>
               <Text style={s.kicker}>RESUMO DO PEDIDO</Text>
-              <Text style={s.sName}>{kind === 'iptv' ? item.name : `Plano ${item.name}`}{item.days ? ` · ${item.days} dias` : ''}</Text>
+              <Text style={s.sName}>{kind === 'iptv' || kind === 'donate' ? item.name : `Plano ${item.name}`}{item.days ? ` · ${item.days} dias` : ''}</Text>
             </View>
             <TouchableOpacity onPress={() => router.back()}><Text style={s.alterar}>Alterar</Text></TouchableOpacity>
           </View>

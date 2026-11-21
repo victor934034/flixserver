@@ -282,6 +282,7 @@ export default function HomeScreen() {
 
         <ContentRow title="Filmes" items={movies} type="movie" />
         <ContentRow title="Séries" items={series} type="series" />
+        <SupportBanner />
 
         {recentEpisodes.length > 0 && (
           <View style={styles.continueSection}>
@@ -356,7 +357,6 @@ export default function HomeScreen() {
           </View>
         )}
 
-        <SupportBanner />
       </View>
     </ScrollView>
   );

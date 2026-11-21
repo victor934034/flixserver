@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
-  ActivityIndicator, TextInput, RefreshControl, AppState,
+  ActivityIndicator, TextInput, RefreshControl, AppState, Modal,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -162,6 +162,7 @@ export default function IptvScreen() {
 
   // Ao vivo: canais por categoria, favoritos e busca
   const [catId, setCatId] = useState(null);
+  const [catModal, setCatModal] = useState(false);
   const [chans, setChans] = useState([]);
   const [chLoading, setChLoading] = useState(false);
   const [favs, setFavs] = useState([]);
@@ -259,6 +260,44 @@ export default function IptvScreen() {
         {search ? <TouchableOpacity onPress={() => setSearch('')}><Ionicons name="close-circle" size={18} color="#888" /></TouchableOpacity> : null}
       </View>
 
+      <TouchableOpacity style={styles.catPick} activeOpacity={0.85} onPress={() => setCatModal(true)}>
+        <View style={styles.catPickIcon}><Ionicons name="grid-outline" size={20} color="#fff" /></View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.catPickK}>CATEGORIA</Text>
+          <Text style={styles.catPickV} numberOfLines={1}>{catId === '__fav' ? '★ Favoritos' : (categories.find(c => c.category_id === catId)?.category_name || 'Escolher categoria')}</Text>
+        </View>
+        <Text style={styles.catPickN}>{categories.length} categorias</Text>
+        <Ionicons name="chevron-down" size={18} color="#A3A3A3" />
+      </TouchableOpacity>
+
+      <Modal visible={catModal} animationType="slide" transparent onRequestClose={() => setCatModal(false)}>
+        <View style={styles.cmOverlay}>
+          <View style={styles.cmSheet}>
+            <View style={styles.cmHead}>
+              <Text style={styles.cmTitle}>Escolha a categoria</Text>
+              <TouchableOpacity onPress={() => setCatModal(false)} style={styles.cmClose}><Ionicons name="close" size={22} color="#fff" /></TouchableOpacity>
+            </View>
+            <FlatList
+              data={[{ category_id: '__fav', category_name: 'Favoritos' }, ...categories]}
+              keyExtractor={c => String(c.category_id)} numColumns={2}
+              columnWrapperStyle={{ gap: 10 }} contentContainerStyle={{ padding: 16, gap: 10, paddingBottom: 40 }}
+              renderItem={({ item }) => {
+                const fav = item.category_id === '__fav';
+                const on = catId === item.category_id;
+                return (
+                  <TouchableOpacity style={[styles.cmCard, on && styles.cmCardOn, fav && { borderColor: 'rgba(251,191,36,0.5)' }]} activeOpacity={0.85}
+                    onPress={() => { setCatId(item.category_id); setCatModal(false); }}>
+                    {fav ? <Ionicons name="star" size={18} color="#FBBF24" /> : <Ionicons name="tv-outline" size={18} color={on ? '#E50914' : '#888'} />}
+                    <Text style={[styles.cmTxt, on && { color: '#fff' }]} numberOfLines={2}>{item.category_name}</Text>
+                    {fav ? <Text style={styles.cmCount}>{favs.length}</Text> : null}
+                  </TouchableOpacity>
+                );
+              }}
+            />
+          </View>
+        </View>
+      </Modal>
+
       <View>
         <FlatList
           horizontal showsHorizontalScrollIndicator={false} data={[{ category_id: '__fav', category_name: 'Favoritos' }, ...categories]}
@@ -319,6 +358,20 @@ export default function IptvScreen() {
 }
 
 const styles = StyleSheet.create({
+  catPick:     { flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: 16, marginTop: 12, padding: 12, borderRadius: 14, backgroundColor: '#141414', borderWidth: 1, borderColor: '#262626' },
+  catPickIcon: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#E50914', alignItems: 'center', justifyContent: 'center' },
+  catPickK:    { color: '#888', fontSize: 11, fontWeight: '800', letterSpacing: 1.5 },
+  catPickV:    { color: '#fff', fontSize: 17, fontWeight: '800', marginTop: 1 },
+  catPickN:    { color: '#777', fontSize: 12 },
+  cmOverlay:   { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
+  cmSheet:     { maxHeight: '85%', backgroundColor: '#101010', borderTopLeftRadius: 22, borderTopRightRadius: 22 },
+  cmHead:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 18, paddingBottom: 6 },
+  cmTitle:     { color: '#fff', fontSize: 22, fontWeight: '900' },
+  cmClose:     { width: 40, height: 40, borderRadius: 12, backgroundColor: '#1F1F1F', alignItems: 'center', justifyContent: 'center' },
+  cmCard:      { flex: 1, minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14, borderRadius: 14, backgroundColor: '#161616', borderWidth: 1.5, borderColor: '#222' },
+  cmCardOn:    { borderColor: '#E50914', backgroundColor: 'rgba(229,9,20,0.10)' },
+  cmTxt:       { flex: 1, color: '#CFCFCF', fontSize: 15, fontWeight: '700' },
+  cmCount:     { color: '#FBBF24', fontWeight: '800' },
   liveHead:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12 },
   liveH1:      { color: '#fff', fontSize: 30, fontWeight: '900' },
   activeBadge: { backgroundColor: 'rgba(34,197,94,0.16)', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 },

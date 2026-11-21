@@ -19,7 +19,8 @@
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.RECEIVE_BOOT_COMPLETED",
         "android.permission.VIBRATE"
-      ]
+      ],
+      "versionCode": 1
     },
     "plugins": [
       "expo-video",
@@ -29,7 +30,8 @@
           "icon": "./assets/icon.png",
           "color": "#E50914"
         }
-      ]
+      ],
+      "./plugins/withAndroidTV"
     ],
     "extra": {
       "eas": {

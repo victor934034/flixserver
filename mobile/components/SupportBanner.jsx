@@ -2,83 +2,62 @@ import { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Modal, TextInput, Linking, Alert, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import api from '../lib/api';
+import { useRouter } from 'expo-router';
+
+const PRESETS = [5, 10, 20, 50];
 
 export default function SupportBanner() {
+  const router = useRouter();
   const [modalOpen, setModalOpen] = useState(false);
-  const [amount, setAmount] = useState('');
-  const [sending, setSending] = useState(false);
+  const [amount, setAmount] = useState('10');
 
-  async function handleDonate() {
-    const value = Number(amount.replace(',', '.'));
-    if (!value || value <= 0) {
-      Alert.alert('Valor inválido', 'Digite um valor maior que zero.');
+  function handleDonate() {
+    const value = Number(String(amount).replace(',', '.'));
+    if (!value || value < 5) {
+      Alert.alert('Valor mínimo', 'O apoio mínimo é de R$ 5,00.');
       return;
     }
-    setSending(true);
-    try {
-      const { data } = await api.post('/payments/donate', { amount: value });
-      if (data.init_point) {
-        setModalOpen(false);
-        setAmount('');
-        await Linking.openURL(data.init_point);
-      }
-    } catch (e) {
-      Alert.alert('Erro', e.response?.data?.error || 'Não foi possível iniciar o pagamento. Tente novamente.');
-    } finally {
-      setSending(false);
-    }
+    setModalOpen(false);
+    router.push({ pathname: '/checkout', params: { kind: 'donate', amount: String(value) } });
   }
 
   return (
     <>
       <TouchableOpacity activeOpacity={0.9} onPress={() => setModalOpen(true)} style={styles.wrap}>
-        <LinearGradient
-          colors={['#3a0d1f', '#7a1230', '#c91c2c']}
-          start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-          style={styles.card}
-        >
-          <View style={styles.iconCircle}>
-            <Ionicons name="heart" size={22} color="#fff" />
-          </View>
+        <LinearGradient colors={['#3a0d1f', '#7a1230', '#c91c2c']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.card}>
+          <View style={styles.iconCircle}><Ionicons name="heart" size={22} color="#fff" /></View>
           <View style={styles.textWrap}>
-            <Text style={styles.title}>Apoie o FlixHome</Text>
-            <Text style={styles.desc}>Curte o app? Ajude a manter tudo no ar com uma doação de qualquer valor.</Text>
+            <Text style={styles.title}>Ajude a manter o FlixHome no ar</Text>
+            <Text style={styles.desc}>Os servidores e o banco de dados custam caro e o valor sobe todo mês. Qualquer apoio, a partir de R$ 5, ajuda muito.</Text>
           </View>
-          <View style={styles.btn}>
-            <Ionicons name="cash-outline" size={15} color="#c91c2c" />
-            <Text style={styles.btnText}>Doar</Text>
-          </View>
+          <View style={styles.btn}><Ionicons name="heart-outline" size={15} color="#c91c2c" /><Text style={styles.btnText}>Apoiar</Text></View>
         </LinearGradient>
       </TouchableOpacity>
 
       <Modal visible={modalOpen} transparent animationType="fade" onRequestClose={() => setModalOpen(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
-            <View style={styles.modalIconCircle}>
-              <Ionicons name="heart" size={26} color="#c91c2c" />
-            </View>
+            <View style={styles.modalIconCircle}><Ionicons name="heart" size={26} color="#c91c2c" /></View>
             <Text style={styles.modalTitle}>Apoie o FlixHome</Text>
             <Text style={styles.modalDesc}>
-              Escolha o valor que quiser doar via Mercado Pago. Todo apoio ajuda a manter o projeto no ar. Obrigado! 💛
+              Manter o app no ar custa hoje cerca de <Text style={{ color: '#fff', fontWeight: '800' }}>R$ 300 por mês</Text> e deve passar de <Text style={{ color: '#fff', fontWeight: '800' }}>R$ 400</Text> no próximo, por causa do banco de dados, que só cresce. Cada apoio ajuda a manter tudo funcionando. Obrigado! 💛
             </Text>
+            <View style={styles.presets}>
+              {PRESETS.map(v => (
+                <TouchableOpacity key={v} style={[styles.preset, Number(amount) === v && styles.presetOn]} onPress={() => setAmount(String(v))}>
+                  <Text style={[styles.presetTxt, Number(amount) === v && { color: '#111' }]}>R$ {v}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
             <View style={styles.inputWrap}>
               <Text style={styles.currency}>R$</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="0,00"
-                placeholderTextColor="#555"
-                keyboardType="decimal-pad"
-                value={amount}
-                onChangeText={setAmount}
-                autoFocus
-              />
+              <TextInput style={styles.input} placeholder="Outro valor" placeholderTextColor="#555" keyboardType="decimal-pad" value={amount} onChangeText={setAmount} />
             </View>
-            <TouchableOpacity style={styles.confirmBtn} onPress={handleDonate} disabled={sending}>
-              {sending ? <ActivityIndicator color="#fff" /> : <Text style={styles.confirmBtnText}>Doar com Mercado Pago</Text>}
+            <TouchableOpacity style={styles.confirmBtn} onPress={handleDonate}>
+              <Text style={styles.confirmBtnText}>Apoiar com PIX ou cartão</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.cancelBtn} onPress={() => setModalOpen(false)}>
-              <Text style={styles.cancelBtnText}>Cancelar</Text>
+              <Text style={styles.cancelBtnText}>Agora não</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -127,6 +106,10 @@ const styles = StyleSheet.create({
     paddingVertical: 13, alignItems: 'center', marginBottom: 10,
   },
   confirmBtnText: { color: '#fff', fontSize: 14, fontWeight: '800' },
+  presets: { flexDirection: 'row', gap: 8, marginBottom: 14, width: '100%' },
+  preset: { flex: 1, height: 42, borderRadius: 999, borderWidth: 1, borderColor: '#333', alignItems: 'center', justifyContent: 'center' },
+  presetOn: { backgroundColor: '#E5E5E5', borderColor: '#E5E5E5' },
+  presetTxt: { color: '#E5E5E5', fontWeight: '800', fontSize: 14 },
   cancelBtn: { paddingVertical: 6 },
   cancelBtnText: { color: '#888', fontSize: 13 },
 });
