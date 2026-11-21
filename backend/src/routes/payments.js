@@ -3,6 +3,8 @@ const { supabase } = require('../services/supabase');
 const { authMiddleware } = require('../middleware/auth');
 const { adminMiddleware } = require('../middleware/admin');
 const asaas = require('../services/asaas');
+const mercadoPago = require('../services/mercadoPago');
+const crypto = require('crypto');
 
 async function getPlansConfig() {
   try {
@@ -79,6 +81,25 @@ async function getSetting(key, fallback = null) {
   return data?.value ?? fallback;
 }
 
+async function getPaymentProvider() {
+  const value = await getSetting('payment_provider', 'mercado_pago');
+  return value === 'asaas' ? 'asaas' : 'mercado_pago';
+}
+
+const remoteId = row => row.provider_payment_id || row.asaas_payment_id;
+const rowProvider = row => row.provider || (row.asaas_payment_id ? 'asaas' : 'mercado_pago');
+const isPaid = status => asaas.isPaid(status);
+
+function gatewayError(provider, e) {
+  return provider === 'mercado_pago' ? mercadoPago.errorMessage(e) : asaas.asaasError(e);
+}
+
+// GET /api/payments/config - somente dados públicos usados para montar o checkout.
+router.get('/config', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ provider: await getPaymentProvider() });
+});
+
 function validCpfCnpj(v) {
   const d = asaas.onlyDigits(v);
   return d.length === 11 || d.length === 14;
@@ -130,35 +151,50 @@ async function fulfill(row) {
     const base = cur?.plan_expires_at && new Date(cur.plan_expires_at) > new Date() ? new Date(cur.plan_expires_at) : new Date();
     const expiresAt = new Date(base.getTime() + (row.duration_days || 30) * 86400000).toISOString();
     await supabase.from('users').update({ plan: row.plan_id, plan_expires_at: expiresAt }).eq('id', row.user_id);
-    console.log(`[asaas] plano ativado user=${row.user_id} plano=${row.plan_id} expira=${expiresAt}`);
+    console.log(`[payments] plano ativado user=${row.user_id} plano=${row.plan_id} expira=${expiresAt}`);
   } else if (row.kind === 'iptv') {
     const { data: u } = await supabase.from('users').select('name, email').eq('id', row.user_id).single();
     const { data: order } = await supabase.from('iptv_orders').insert({
       user_id: row.user_id, user_name: u?.name || 'Usuário', user_email: u?.email || '',
       plan_id: row.plan_id, plan_name: row.plan_name, amount: row.amount,
-      asaas_payment_id: row.asaas_payment_id, status: 'pending',
+      asaas_payment_id: rowProvider(row) === 'asaas' ? remoteId(row) : null,
+      payment_provider: rowProvider(row), provider_payment_id: remoteId(row), status: 'pending',
     }).select().single();
     try {
       const { onIptvPaid } = require('../services/iptvProvision');
       await onIptvPaid(order || { user_id: row.user_id, plan_id: row.plan_id, plan_name: row.plan_name }, {
-        userName: u?.name || 'Usuário', userEmail: u?.email || '', planName: row.plan_name, amount: row.amount, paymentId: row.asaas_payment_id,
+        userName: u?.name || 'Usuário', userEmail: u?.email || '', planName: row.plan_name, amount: row.amount, paymentId: remoteId(row),
       });
-    } catch (e) { console.error('[asaas] notify iptv:', e.message); }
+    } catch (e) { console.error('[payments] notify iptv:', e.message); }
   } else {
-    console.log(`[asaas] apoio recebido user=${row.user_id} valor=${row.amount}`);
+    console.log(`[payments] apoio recebido user=${row.user_id} valor=${row.amount}`);
   }
   return true;
 }
 
-// Sincroniza o status de um pagamento com o Asaas e aplica se pago.
+// Sincroniza no mesmo gateway em que a cobrança nasceu. Trocar o botão do
+// admin nunca muda o provedor de pagamentos já existentes.
 async function syncPayment(row) {
-  const remote = await asaas.getPayment(row.asaas_payment_id);
-  const status = remote.status;
+  const provider = rowProvider(row);
+  const id = remoteId(row);
+  let remote;
+  if (provider === 'mercado_pago') {
+    remote = id ? await mercadoPago.getPayment(id) : await mercadoPago.findPayment(row.id);
+    if (!remote) return row.status;
+    if (!row.provider_payment_id) {
+      await supabase.from('payments').update({ provider_payment_id: String(remote.id) }).eq('id', row.id);
+      row.provider_payment_id = String(remote.id);
+    }
+  } else {
+    if (!id) throw new Error('Pagamento sem identificador do gateway');
+    remote = await asaas.getPayment(id);
+  }
+  const status = provider === 'mercado_pago' ? mercadoPago.normalizeStatus(remote.status) : remote.status;
   if (status !== row.status) {
     await supabase.from('payments').update({ status, updated_at: new Date().toISOString() }).eq('id', row.id);
     row.status = status;
   }
-  if (asaas.isPaid(status)) await fulfill(row);
+  if (isPaid(status)) await fulfill(row);
   return status;
 }
 
@@ -170,14 +206,60 @@ async function syncPayment(row) {
 router.post('/checkout', authMiddleware, async (req, res) => {
   const userId = req.user.id || req.user.userId;
   const { kind, method, cpf, phone, card, holder } = req.body || {};
-  if (!['PIX', 'CREDIT_CARD', 'BOLETO'].includes(method)) return res.status(400).json({ error: 'Forma de pagamento inválida' });
-  if (!validCpfCnpj(cpf)) return res.status(400).json({ error: 'Informe um CPF ou CNPJ válido' });
 
   try {
+    const provider = await getPaymentProvider();
     const item = await resolveItem(kind, req.body);
     const { data: user } = await supabase.from('users').select('name, email').eq('id', userId).single();
     const email = user?.email || req.user.email || '';
     const name = user?.name || email.split('@')[0] || 'Cliente FlixHome';
+
+    if (provider === 'mercado_pago') {
+      const localId = crypto.randomUUID();
+      const front = frontBase().replace(/\/$/, '');
+      const backend = (process.env.BACKEND_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+      const resultBase = kind === 'iptv' ? `${front}/iptv` : `${front}/subscription`;
+
+      const pref = await mercadoPago.createPreference({
+        items: [{
+          id: item.plan_id || kind,
+          title: item.desc,
+          quantity: 1,
+          unit_price: item.amount,
+          currency_id: 'BRL',
+        }],
+        payer: { name, email },
+        back_urls: {
+          success: `${resultBase}/sucesso`,
+          failure: `${resultBase}/falha`,
+          pending: `${resultBase}/pendente`,
+        },
+        notification_url: `${backend}/api/payments/webhook/mp`,
+        external_reference: localId,
+        auto_return: 'approved',
+        statement_descriptor: 'FLIXHOME',
+      });
+
+      const { error: insErr } = await supabase.from('payments').insert({
+        id: localId, user_id: userId, kind, plan_id: item.plan_id, plan_name: item.plan_name,
+        duration_days: item.duration_days, amount: item.amount, method: 'CHECKOUT_PRO',
+        provider: 'mercado_pago', provider_preference_id: pref.id, status: 'PENDING',
+        invoice_url: pref.init_point || null,
+      });
+      if (insErr) throw insErr;
+
+      return res.json({
+        payment_id: localId,
+        provider: 'mercado_pago',
+        status: 'PENDING',
+        method: 'CHECKOUT_PRO',
+        amount: item.amount,
+        redirect_url: pref.init_point,
+      });
+    }
+
+    if (!['PIX', 'CREDIT_CARD', 'BOLETO'].includes(method)) return res.status(400).json({ error: 'Forma de pagamento inválida' });
+    if (!validCpfCnpj(cpf)) return res.status(400).json({ error: 'Informe um CPF ou CNPJ válido' });
 
     const customer = await ensureCustomer(userId, { name, email, cpfCnpj: cpf, phone });
 
@@ -218,11 +300,12 @@ router.post('/checkout', authMiddleware, async (req, res) => {
     const { data: row, error: insErr } = await supabase.from('payments').insert({
       user_id: userId, kind, plan_id: item.plan_id, plan_name: item.plan_name,
       duration_days: item.duration_days, amount: item.amount, method,
+      provider: 'asaas', provider_payment_id: pay.id,
       asaas_payment_id: pay.id, status: pay.status, invoice_url: pay.invoiceUrl || null,
     }).select().single();
     if (insErr) throw insErr;
 
-    const out = { payment_id: pay.id, status: pay.status, method, amount: item.amount, invoice_url: pay.invoiceUrl || null };
+    const out = { payment_id: pay.id, provider: 'asaas', status: pay.status, method, amount: item.amount, invoice_url: pay.invoiceUrl || null };
 
     if (method === 'PIX') {
       const qr = await asaas.getPixQrCode(pay.id);
@@ -235,8 +318,9 @@ router.post('/checkout', authMiddleware, async (req, res) => {
     if (asaas.isPaid(pay.status)) await fulfill(row); // cartão aprovado na hora
     res.json(out);
   } catch (e) {
-    console.error('[asaas] checkout error:', e.response?.data || e.message);
-    res.status(e.status || 500).json({ error: e.status ? e.message : asaas.asaasError(e) });
+    const provider = await getPaymentProvider().catch(() => 'mercado_pago');
+    console.error(`[${provider}] checkout error:`, e.response?.data || e.message);
+    res.status(e.status || 500).json({ error: e.status ? e.message : gatewayError(provider, e) });
   }
 });
 
@@ -244,12 +328,15 @@ router.post('/checkout', authMiddleware, async (req, res) => {
 router.get('/status/:id', authMiddleware, async (req, res) => {
   try {
     const userId = req.user.id || req.user.userId;
-    const { data: row } = await supabase.from('payments').select('*').eq('asaas_payment_id', req.params.id).eq('user_id', userId).maybeSingle();
+    let { data: row } = await supabase.from('payments').select('*').eq('id', req.params.id).eq('user_id', userId).maybeSingle();
+    if (!row) {
+      ({ data: row } = await supabase.from('payments').select('*').or(`provider_payment_id.eq.${req.params.id},asaas_payment_id.eq.${req.params.id}`).eq('user_id', userId).maybeSingle());
+    }
     if (!row) return res.status(404).json({ error: 'Pagamento não encontrado' });
     const status = row.fulfilled_at ? row.status : await syncPayment(row);
-    res.json({ status, paid: asaas.isPaid(status), kind: row.kind });
+    res.json({ status, paid: isPaid(status), kind: row.kind, provider: rowProvider(row) });
   } catch (e) {
-    res.status(500).json({ error: asaas.asaasError(e) });
+    res.status(500).json({ error: e.message });
   }
 });
 
@@ -287,6 +374,54 @@ router.post('/webhook/asaas', async (req, res) => {
     }
   } catch (e) {
     console.error('[asaas] webhook error:', e.message);
+  }
+});
+
+// POST /api/payments/webhook/mp - recebe eventos do Mercado Pago. A assinatura
+// é validada quando MP_WEBHOOK_SECRET está configurado e os dados definitivos
+// sempre são buscados diretamente na API do Mercado Pago.
+router.post('/webhook/mp', async (req, res) => {
+  const topic = req.query.topic || req.query.type || req.body?.type;
+  const id = String(req.query.id || req.query['data.id'] || req.body?.data?.id || '');
+  if (topic && topic !== 'payment') return res.sendStatus(200);
+  if (!id) return res.sendStatus(200);
+  if (!mercadoPago.validWebhookSignature(req, id)) return res.sendStatus(401);
+
+  res.sendStatus(200);
+  try {
+    const payment = await mercadoPago.getPayment(id);
+    const localId = payment.external_reference;
+    if (!localId) return;
+    const { data: row } = await supabase.from('payments').select('*').eq('id', localId).eq('provider', 'mercado_pago').maybeSingle();
+    if (!row) return;
+
+    // Impede que uma notificação válida de outro valor seja associada ao pedido.
+    if (Math.abs(Number(payment.transaction_amount) - Number(row.amount)) > 0.009) {
+      console.error(`[mercado_pago] valor divergente payment=${id} local=${row.id}`);
+      return;
+    }
+
+    const status = mercadoPago.normalizeStatus(payment.status);
+    await supabase.from('payments').update({
+      provider_payment_id: String(payment.id),
+      method: String(payment.payment_type_id || payment.payment_method_id || 'CHECKOUT_PRO').toUpperCase(),
+      status,
+      updated_at: new Date().toISOString(),
+    }).eq('id', row.id);
+    row.provider_payment_id = String(payment.id);
+    row.status = status;
+
+    if (isPaid(status)) await fulfill(row);
+
+    if (['REFUNDED', 'CHARGEBACK'].includes(status) && row.fulfilled_at && row.kind === 'plan') {
+      const { data: u } = await supabase.from('users').select('plan').eq('id', row.user_id).single();
+      if (u?.plan === row.plan_id) {
+        await supabase.from('users').update({ plan: null, plan_expires_at: new Date().toISOString() }).eq('id', row.user_id);
+        console.log(`[mercado_pago] acesso revogado (${status}) user=${row.user_id}`);
+      }
+    }
+  } catch (e) {
+    console.error('[mercado_pago] webhook error:', e.response?.data || e.message);
   }
 });
 
@@ -388,6 +523,24 @@ router.post('/trial/start', authMiddleware, async (req, res) => {
 
 // ───────────────────────── admin: orquestrador de cobranças ─────────────────────────
 
+// GET/PUT /api/payments/admin/provider - alterna somente as próximas cobranças.
+router.get('/admin/provider', adminMiddleware, async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ provider: await getPaymentProvider() });
+});
+
+router.put('/admin/provider', adminMiddleware, async (req, res) => {
+  const provider = String(req.body?.provider || '');
+  if (!['mercado_pago', 'asaas'].includes(provider)) return res.status(400).json({ error: 'Provedor inválido' });
+  const required = provider === 'mercado_pago' ? 'MP_ACCESS_TOKEN' : 'ASAAS_API_KEY';
+  if (!process.env[required]) return res.status(400).json({ error: `${required} não configurada no servidor` });
+  const { error } = await supabase.from('system_settings').upsert({
+    key: 'payment_provider', value: provider, updated_at: new Date().toISOString(),
+  }, { onConflict: 'key' });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true, provider });
+});
+
 // GET /api/payments/admin/list?status=&kind=&limit=
 router.get('/admin/list', adminMiddleware, async (req, res) => {
   try {
@@ -397,7 +550,7 @@ router.get('/admin/list', adminMiddleware, async (req, res) => {
     if (req.query.kind) q = q.eq('kind', req.query.kind);
     const { data, error } = await q;
     if (error) throw error;
-    const paid = (data || []).filter(p => asaas.isPaid(p.status));
+    const paid = (data || []).filter(p => isPaid(p.status));
     res.json({
       payments: data || [],
       totals: { count: data?.length || 0, paid_count: paid.length, paid_amount: paid.reduce((a, p) => a + Number(p.amount), 0) },
@@ -429,7 +582,7 @@ router.get('/admin/summary', adminMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// POST /api/payments/admin/resync-pending - confere no Asaas todos os pendentes (até 50)
+// POST /api/payments/admin/resync-pending - confere cada pendente no gateway de origem (até 50)
 router.post('/admin/resync-pending', adminMiddleware, async (req, res) => {
   try {
     const { data: rows } = await supabase.from('payments').select('*').eq('status', 'PENDING').order('created_at', { ascending: false }).limit(50);
@@ -459,14 +612,14 @@ router.get('/admin/trial-stats', adminMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// POST /api/payments/admin/:id/resync — força consulta ao Asaas (webhook perdido)
+// POST /api/payments/admin/:id/resync — força consulta ao gateway de origem
 router.post('/admin/:id/resync', adminMiddleware, async (req, res) => {
   try {
     const { data: row } = await supabase.from('payments').select('*').eq('id', req.params.id).single();
     if (!row) return res.status(404).json({ error: 'Não encontrado' });
     res.json({ status: await syncPayment(row) });
   } catch (e) {
-    res.status(500).json({ error: asaas.asaasError(e) });
+    res.status(500).json({ error: e.response?.data?.message || asaas.asaasError(e) });
   }
 });
 

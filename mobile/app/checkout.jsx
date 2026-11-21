@@ -56,6 +56,7 @@ export default function Checkout() {
   const { user, refreshUser } = useAuth();
 
   const [item, setItem] = useState(null);
+  const [provider, setProvider] = useState(null);
   const [loadErr, setLoadErr] = useState('');
   const [cpf, setCpf] = useState('');
   const [phone, setPhone] = useState('');
@@ -78,6 +79,8 @@ export default function Checkout() {
   useEffect(() => {
     (async () => {
       try {
+        const { data: paymentConfig } = await api.get('/payments/config');
+        setProvider(paymentConfig.provider || 'mercado_pago');
         if (kind === 'donate') {
           setItem({ name: 'Apoio ao FlixHome', price: Number(donateAmt) || 10, old: null, days: null, sub: 'Contribuição única' });
         } else if (kind === 'iptv') {
@@ -134,8 +137,8 @@ export default function Checkout() {
 
   async function submit() {
     setError('');
-    if (!docOk) return setError('Informe um CPF ou CNPJ válido.');
-    if (method === 'CREDIT_CARD') {
+    if (provider === 'asaas' && !docOk) return setError('Informe um CPF ou CNPJ válido.');
+    if (provider === 'asaas' && method === 'CREDIT_CARD') {
       const [mm, yy] = card.exp.split('/');
       if (digits(card.number).length < 13 || !card.holderName.trim() || !mm || !yy || digits(card.ccv).length < 3 || digits(card.cep).length !== 8) {
         return setError('Confira os dados do cartão.');
@@ -143,13 +146,18 @@ export default function Checkout() {
     }
     setBusy(true);
     try {
-      const body = { kind, plan_id: planId, amount: Number(donateAmt) || undefined, method, cpf: digits(cpf), phone: digits(phone) };
-      if (method === 'CREDIT_CARD') {
+      const body = { kind, plan_id: planId, amount: Number(donateAmt) || undefined };
+      if (provider === 'asaas') Object.assign(body, { method, cpf: digits(cpf), phone: digits(phone) });
+      if (provider === 'asaas' && method === 'CREDIT_CARD') {
         const [mm, yy] = card.exp.split('/');
         body.card = { holderName: card.holderName.trim(), number: digits(card.number), expiryMonth: mm, expiryYear: yy, ccv: digits(card.ccv) };
         body.holder = { postalCode: digits(card.cep), addressNumber: card.num || 'S/N' };
       }
       const { data } = await api.post('/payments/checkout', body);
+      if (data.redirect_url) {
+        await Linking.openURL(data.redirect_url);
+        return;
+      }
       setPay(data);
       if (data.status === 'CONFIRMED' || data.status === 'RECEIVED') onPaid(); else show();
     } catch (e) {
@@ -167,7 +175,7 @@ export default function Checkout() {
       <TouchableOpacity style={[s.btn, { marginTop: 16 }]} onPress={() => router.back()}><Text style={s.btnTxt}>Ver planos</Text></TouchableOpacity>
     </View>
   );
-  if (!item) return <View style={[s.root, { justifyContent: 'center' }]}><ActivityIndicator color={ACCENT} size="large" /></View>;
+  if (!item || !provider) return <View style={[s.root, { justifyContent: 'center' }]}><ActivityIndicator color={ACCENT} size="large" /></View>;
 
   const ringScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 2.4] });
   const ringOp = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.55, 0] });
@@ -326,6 +334,7 @@ export default function Checkout() {
           <View style={s.totalRow}><Text style={s.totalK}>Total</Text><Text style={s.totalV}>{brl(item.price)}</Text></View>
         </View>
 
+        {provider === 'asaas' ? <>
         <Text style={s.h2}>Dados do pagador</Text>
         <View style={s.row}>
           <View style={[s.ro, { flex: 1 }]}><Text style={s.roK}>Nome</Text><Text style={s.roV} numberOfLines={1}>{user?.name || '—'}</Text></View>
@@ -393,14 +402,23 @@ export default function Checkout() {
             </View>
           </View>
         )}
+        </> : <>
+          <Text style={s.h2}>Pagamento pelo Mercado Pago</Text>
+          <View style={[s.method, s.methodOn]}>
+            <View style={s.mIcon}><Text style={s.mAbbr}>MP</Text></View>
+            <View style={{ flex: 1 }}><Text style={s.mTitle}>Mercado Pago</Text><Text style={s.mSub}>PIX, cartão ou boleto no ambiente seguro</Text></View>
+            <Ionicons name="open-outline" size={22} color="#fff" />
+          </View>
+          <Text style={s.mutedC}>Ao continuar, o Mercado Pago será aberto para você concluir a compra. O FlixHome não recebe os dados do seu cartão.</Text>
+        </>}
         {!!error && <Text style={s.err}>{error}</Text>}
       </ScrollView>
 
       <View style={[s.cta, { paddingBottom: insets.bottom + 10 }]}>
-        <TouchableOpacity style={[s.btn, (busy || !docOk) && { opacity: 0.6 }]} disabled={busy || !docOk} onPress={submit} activeOpacity={0.9}>
-          {busy ? <><ActivityIndicator color="#fff" size="small" /><Text style={s.btnTxt}>Processando…</Text></> : <Text style={s.btnTxt}>Pagar  ·  {brl(item.price)}</Text>}
+        <TouchableOpacity style={[s.btn, (busy || (provider === 'asaas' && !docOk)) && { opacity: 0.6 }]} disabled={busy || (provider === 'asaas' && !docOk)} onPress={submit} activeOpacity={0.9}>
+          {busy ? <><ActivityIndicator color="#fff" size="small" /><Text style={s.btnTxt}>Processando…</Text></> : <Text style={s.btnTxt}>{provider === 'mercado_pago' ? 'Ir para o Mercado Pago' : `Pagar  ·  ${brl(item.price)}`}</Text>}
         </TouchableOpacity>
-        <View style={s.safeRow}><Ionicons name="lock-closed-outline" size={12} color="#777" /><Text style={s.safeTxt}>Dados criptografados · processado por Asaas</Text></View>
+        <View style={s.safeRow}><Ionicons name="lock-closed-outline" size={12} color="#777" /><Text style={s.safeTxt}>Pagamento seguro · processado por {provider === 'mercado_pago' ? 'Mercado Pago' : 'Asaas'}</Text></View>
       </View>
     </KeyboardAvoidingView>
   );

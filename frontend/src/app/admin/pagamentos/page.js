@@ -7,7 +7,7 @@ import t from '../configuracoes/bt.module.css';
 const PAID = ['CONFIRMED', 'RECEIVED', 'RECEIVED_IN_CASH'];
 const brl = v => `R$ ${Number(v || 0).toFixed(2).replace('.', ',')}`;
 const KIND = { plan: 'Plano', iptv: 'IPTV', donate: 'Apoio' };
-const METHOD = { PIX: 'PIX', CREDIT_CARD: 'Cartão', BOLETO: 'Boleto' };
+const METHOD = { PIX: 'PIX', CREDIT_CARD: 'Cartão', BOLETO: 'Boleto', CHECKOUT_PRO: 'Mercado Pago', ACCOUNT_MONEY: 'Saldo MP', BANK_TRANSFER: 'PIX', TICKET: 'Boleto' };
 const fmtDate = d => new Date(d).toLocaleString('pt-BR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }).replace('.', '');
 
 function group(status) {
@@ -15,9 +15,10 @@ function group(status) {
   if (status === 'PENDING') return 'pend';
   if (status === 'OVERDUE') return 'over';
   if (String(status).includes('REFUND') || String(status).includes('CHARGEBACK')) return 'ref';
+  if (/CANCEL|REJECT|FAIL|REFUS/i.test(String(status))) return 'fail';
   return 'pend';
 }
-const GROUP_LABEL = { paid: 'Pago', pend: 'Pendente', over: 'Vencido', ref: 'Estornado' };
+const GROUP_LABEL = { paid: 'Pago', pend: 'Pendente', over: 'Vencido', ref: 'Estornado', fail: 'Cancelado' };
 
 export default function PagamentosPage() {
   const [tab, setTab] = useState('pay');
@@ -66,10 +67,11 @@ export default function PagamentosPage() {
     <div className={s.page}>
       <div className={s.head}>
         <h1 className={s.h1}>Assinaturas e pagamentos</h1>
+        <PaymentProviderSwitch onChanged={load} />
         {msg && <span className={s.msg}>{msg}</span>}
         <button className={s.btnGhost} onClick={resyncAll} disabled={syncing}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#E5E5E5" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg>
-          {syncing ? 'Sincronizando…' : 'Ressincronizar com Asaas'}
+          {syncing ? 'Sincronizando…' : 'Ressincronizar pagamentos'}
         </button>
       </div>
 
@@ -93,7 +95,7 @@ export default function PagamentosPage() {
           <div className={s.filters}>
             <input className={s.search} type="search" placeholder="Buscar por e-mail" value={q} onChange={e => setQ(e.target.value)} aria-label="Buscar por e-mail" />
             <select className={s.select} value={fStatus} onChange={e => setFStatus(e.target.value)} aria-label="Status">
-              <option value="">Status: todos</option><option value="pend">Pendente</option><option value="paid">Pago</option><option value="over">Vencido</option><option value="ref">Estornado</option>
+              <option value="">Status: todos</option><option value="pend">Pendente</option><option value="paid">Pago</option><option value="over">Vencido</option><option value="ref">Estornado</option><option value="fail">Cancelado</option>
             </select>
             <select className={s.select} value={fKind} onChange={e => setFKind(e.target.value)} aria-label="Tipo">
               <option value="">Tipo: todos</option><option value="plan">Plano</option><option value="iptv">IPTV</option><option value="donate">Apoio</option>
@@ -151,6 +153,7 @@ function Detail({ p }) {
     ...(paid ? [{ t: 'Pagamento confirmado (webhook)', d: p.updated_at, c: '#22C55E' }] : []),
     ...(p.fulfilled_at && p.kind === 'plan' && p.users?.plan_expires_at ? [{ t: `Plano ativado até ${new Date(p.users.plan_expires_at).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}`, d: p.fulfilled_at, c: '#22C55E' }] : []),
     ...(g === 'ref' ? [{ t: 'Estornado — acesso revogado', d: p.updated_at, c: '#CBD5E1' }] : []),
+    ...(g === 'fail' ? [{ t: 'Pagamento não concluído', d: p.updated_at, c: '#F87171' }] : []),
     ...(g === 'over' ? [{ t: 'Cobrança vencida', d: p.updated_at, c: '#F87171' }] : []),
   ];
   return (
@@ -159,11 +162,42 @@ function Detail({ p }) {
         <h2 style={{ wordBreak: 'break-all' }}>{p.users?.email || p.users?.name}</h2>
         <span className={`${s.badge} ${s['b_' + g]}`}>{GROUP_LABEL[g]}</span>
       </div>
-      <div className={s.sub}>{p.plan_name || KIND[p.kind]} · {METHOD[p.method] || p.method} · {brl(p.amount)} · {String(p.asaas_payment_id).slice(0, 12)}…</div>
+      <div className={s.sub}>{p.plan_name || KIND[p.kind]} · {METHOD[p.method] || p.method} · {brl(p.amount)} · {p.provider === 'mercado_pago' ? 'Mercado Pago' : 'Asaas'} · {String(p.provider_payment_id || p.asaas_payment_id || p.id).slice(0, 12)}…</div>
       <ol className={s.timeline}>
         {items.map((t, i) => <li key={i}><span className={s.dot} style={{ background: t.c }} /><span><b>{t.t}</b><small>{fmtDate(t.d)}</small></span></li>)}
       </ol>
-      {p.invoice_url && <a className={s.sub} href={p.invoice_url} target="_blank" rel="noreferrer" style={{ color: '#E50914' }}>Abrir fatura no Asaas</a>}
+      {p.invoice_url && <a className={s.sub} href={p.invoice_url} target="_blank" rel="noreferrer" style={{ color: '#E50914' }}>Abrir cobrança</a>}
+    </div>
+  );
+}
+
+function PaymentProviderSwitch({ onChanged }) {
+  const [provider, setProvider] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  useEffect(() => { api.get('/payments/admin/provider').then(r => setProvider(r.data.provider)).catch(() => setMsg('Erro ao carregar gateway')); }, []);
+
+  async function toggle() {
+    const next = provider === 'mercado_pago' ? 'asaas' : 'mercado_pago';
+    setBusy(true); setMsg('');
+    try {
+      await api.put('/payments/admin/provider', { provider: next });
+      setProvider(next);
+      setMsg('Alterado com sucesso');
+      onChanged?.();
+    } catch (e) { setMsg(e.response?.data?.error || 'Erro ao alterar gateway'); }
+    finally { setBusy(false); setTimeout(() => setMsg(''), 3000); }
+  }
+
+  if (!provider) return msg ? <span className={s.msg}>{msg}</span> : null;
+  const mp = provider === 'mercado_pago';
+  return (
+    <div className={s.gatewayBox}>
+      <span><small>Gateway ativo</small><b>{mp ? 'Mercado Pago' : 'Asaas'}</b></span>
+      <button type="button" onClick={toggle} disabled={busy} aria-label={`Trocar para ${mp ? 'Asaas' : 'Mercado Pago'}`}>
+        {busy ? 'Alterando…' : `Usar ${mp ? 'Asaas' : 'Mercado Pago'}`}
+      </button>
+      {msg && <em>{msg}</em>}
     </div>
   );
 }

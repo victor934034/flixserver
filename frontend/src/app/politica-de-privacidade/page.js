@@ -33,7 +33,7 @@ export default function PoliticaPrivacidadePage() {
             <li><strong>Dados de cadastro:</strong> nome, e-mail e senha (armazenada de forma criptografada) ao criar uma conta.</li>
             <li><strong>Perfis:</strong> nome e avatar de cada perfil criado dentro da sua conta, incluindo se é um perfil infantil.</li>
             <li><strong>Atividade de uso:</strong> histórico de reprodução (o que você assiste e em qual ponto parou), sua lista de favoritos, avaliações (likes/dislikes) e sugestões de conteúdo enviadas por você.</li>
-            <li><strong>Dados de assinatura e pagamento:</strong> plano contratado, status e data de expiração. Pagamentos são processados por um provedor externo (Mercado Pago) — <strong>não armazenamos dados do seu cartão de crédito</strong>.</li>
+            <li><strong>Dados de assinatura e pagamento:</strong> plano contratado, status e data de expiração. Pagamentos são processados por um provedor externo (Mercado Pago ou Asaas) — <strong>não armazenamos dados do seu cartão de crédito</strong>.</li>
             <li><strong>Notificações:</strong> token de identificação do dispositivo, usado apenas para enviar notificações push (ex: avisos de novo conteúdo ou expiração de assinatura).</li>
             <li><strong>Dados técnicos:</strong> endereço IP, tipo de dispositivo e navegador — usados para segurança, prevenção de abuso e limite de sessões simultâneas.</li>
             <li><strong>IPTV (quando aplicável):</strong> dados de acesso e pedidos relacionados ao serviço de IPTV, se você contratar esse serviço.</li>
@@ -58,7 +58,7 @@ export default function PoliticaPrivacidadePage() {
             <li><strong>Supabase</strong> — banco de dados e autenticação de conta;</li>
             <li><strong>Backblaze B2 e Cloudflare</strong> — armazenamento e entrega (CDN) dos arquivos de vídeo;</li>
             <li><strong>TMDB (The Movie Database)</strong> — fonte de metadados públicos de filmes e séries (sinopses, capas);</li>
-            <li><strong>Mercado Pago</strong> — processamento de pagamentos e assinaturas;</li>
+            <li><strong>Mercado Pago ou Asaas</strong> — processamento de pagamentos e assinaturas, conforme o provedor ativo;</li>
             <li><strong>Expo / serviços de push notification</strong> — envio de notificações ao seu dispositivo;</li>
             <li><strong>WhatsApp Business</strong> — comunicações administrativas relacionadas a pedidos (ex: IPTV), quando aplicável.</li>
           </ul>

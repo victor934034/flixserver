@@ -48,6 +48,7 @@ function Checkout() {
   const donateAmount = Number(sp.get('amount')) || 0;
 
   const [item, setItem] = useState(null);
+  const [provider, setProvider] = useState(null);
   const [loadErr, setLoadErr] = useState('');
   const [step, setStep] = useState(0);
   const [dir, setDir] = useState(1);
@@ -67,6 +68,8 @@ function Checkout() {
     if (!getToken()) { router.replace('/login?next=' + encodeURIComponent(window.location.pathname + window.location.search)); return; }
     (async () => {
       try {
+        const { data: paymentConfig } = await api.get('/payments/config');
+        setProvider(paymentConfig.provider || 'mercado_pago');
         if (kind === 'donate') {
           setItem({ name: 'Apoio ao FlixHome', price: donateAmount || 10, sub: 'Contribuição única' });
         } else if (kind === 'iptv') {
@@ -114,7 +117,7 @@ function Checkout() {
 
   async function submit() {
     setError('');
-    if (method === 'CREDIT_CARD') {
+    if (provider === 'asaas' && method === 'CREDIT_CARD') {
       const [mm, yy] = card.exp.split('/');
       if (digits(card.number).length < 13 || !card.holderName.trim() || !mm || !yy || digits(card.ccv).length < 3 || digits(card.cep).length !== 8) {
         return setError('Confira os dados do cartão.');
@@ -122,13 +125,18 @@ function Checkout() {
     }
     setBusy(true);
     try {
-      const body = { kind, plan_id: planId, amount: donateAmount, method, cpf: digits(cpf), phone: digits(phone) };
-      if (method === 'CREDIT_CARD') {
+      const body = { kind, plan_id: planId, amount: donateAmount };
+      if (provider === 'asaas') Object.assign(body, { method, cpf: digits(cpf), phone: digits(phone) });
+      if (provider === 'asaas' && method === 'CREDIT_CARD') {
         const [mm, yy] = card.exp.split('/');
         body.card = { holderName: card.holderName.trim(), number: digits(card.number), expiryMonth: mm, expiryYear: yy, ccv: digits(card.ccv) };
         body.holder = { postalCode: digits(card.cep), addressNumber: card.num || 'S/N' };
       }
       const { data } = await api.post('/payments/checkout', body);
+      if (data.redirect_url) {
+        window.location.assign(data.redirect_url);
+        return;
+      }
       setPay(data);
       if (data.status === 'CONFIRMED' || data.status === 'RECEIVED') setPaid(true);
       go(2);
@@ -144,7 +152,7 @@ function Checkout() {
   const mmss = useMemo(() => left == null ? '' : `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`, [left]);
 
   if (loadErr) return <main className={styles.main}><div className={styles.card}><p className={styles.err}>{loadErr}</p><Link className={styles.btn} href="/subscription">Ver planos</Link></div></main>;
-  if (!item) return <main className={styles.main}><p className={styles.muted}>Carregando…</p></main>;
+  if (!item || !provider) return <main className={styles.main}><p className={styles.muted}>Carregando…</p></main>;
 
   return (
     <main className={styles.main}>
@@ -167,21 +175,37 @@ function Checkout() {
             </div>
           ) : step === 0 ? (
             <>
-              <h1 className={styles.h1}>Dados do pagador</h1>
-              <label className={styles.label}>CPF ou CNPJ
-                <input className={styles.input} inputMode="numeric" placeholder="000.000.000-00" value={cpf} onChange={e => setCpf(maskCpfCnpj(e.target.value))} />
-              </label>
-              {cpf && !docOk && <p className={styles.err}>Documento inválido.</p>}
-              <label className={styles.label}>Celular <span className={styles.opt}>(opcional)</span>
-                <input className={styles.input} inputMode="tel" placeholder="(11) 90000-0000" value={phone} onChange={e => setPhone(maskPhone(e.target.value))} />
-              </label>
-              <p className={styles.muted}>O CPF é exigido pelo processador de pagamentos. Seus dados são criptografados.</p>
-              <button className={styles.btn} disabled={!docOk} onClick={() => go(1)}>Continuar</button>
+              {provider === 'mercado_pago' ? (
+                <>
+                  <h1 className={styles.h1}>Pagamento pelo Mercado Pago</h1>
+                  <p className={styles.muted}>Na próxima etapa você será encaminhado ao ambiente seguro do Mercado Pago para escolher PIX, cartão ou boleto.</p>
+                  <p className={styles.secure}>🔒 O FlixHome não recebe nem armazena os dados do seu cartão.</p>
+                  <button className={styles.btn} onClick={() => go(1)}>Continuar</button>
+                </>
+              ) : (
+                <>
+                  <h1 className={styles.h1}>Dados do pagador</h1>
+                  <label className={styles.label}>CPF ou CNPJ
+                    <input className={styles.input} inputMode="numeric" placeholder="000.000.000-00" value={cpf} onChange={e => setCpf(maskCpfCnpj(e.target.value))} />
+                  </label>
+                  {cpf && !docOk && <p className={styles.err}>Documento inválido.</p>}
+                  <label className={styles.label}>Celular <span className={styles.opt}>(opcional)</span>
+                    <input className={styles.input} inputMode="tel" placeholder="(11) 90000-0000" value={phone} onChange={e => setPhone(maskPhone(e.target.value))} />
+                  </label>
+                  <p className={styles.muted}>O CPF é exigido pelo processador de pagamentos. Seus dados são criptografados.</p>
+                  <button className={styles.btn} disabled={!docOk} onClick={() => go(1)}>Continuar</button>
+                </>
+              )}
             </>
           ) : step === 1 ? (
             <>
               <h1 className={styles.h1}>Forma de pagamento</h1>
-              {[
+              {provider === 'mercado_pago' ? (
+                <button type="button" className={`${styles.method} ${styles.methodOn}`}>
+                  <span className={styles.mTitle}>Mercado Pago</span><span className={styles.mSub}>PIX, cartão ou boleto</span>
+                  <span className={styles.tag}>Ambiente seguro</span>
+                </button>
+              ) : [
                 ['PIX', 'PIX', 'QR code ou copia e cola', 'Aprovação na hora'],
                 ['CREDIT_CARD', 'Cartão de crédito', 'Visa, Master, Elo, Amex', ''],
                 ['BOLETO', 'Boleto', 'Compensa em 1 a 3 dias úteis', ''],
@@ -192,7 +216,7 @@ function Checkout() {
                 </button>
               ))}
 
-              {method === 'CREDIT_CARD' && (
+              {provider === 'asaas' && method === 'CREDIT_CARD' && (
                 <div className={styles.cardForm}>
                   <label className={styles.label}>Número do cartão {cardBrand(card.number) && <b className={styles.brand}>{cardBrand(card.number)}</b>}
                     <input className={styles.input} inputMode="numeric" placeholder="0000 0000 0000 0000" value={card.number} onChange={e => setCard({ ...card, number: maskCard(e.target.value) })} />
@@ -223,7 +247,7 @@ function Checkout() {
               {error && <p className={styles.err}>{error}</p>}
               <div className={styles.actions}>
                 <button className={styles.ghost} onClick={() => go(0)}>Voltar</button>
-                <button className={styles.btn} disabled={busy} onClick={submit}>{busy ? 'Processando…' : `Pagar ${brl(item.price)}`}</button>
+                <button className={styles.btn} disabled={busy} onClick={submit}>{busy ? 'Processando…' : provider === 'mercado_pago' ? 'Ir para o Mercado Pago' : `Pagar ${brl(item.price)}`}</button>
               </div>
             </>
           ) : pay?.method === 'PIX' ? (

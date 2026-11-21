@@ -118,3 +118,23 @@ INSERT INTO iptv_plans (name, description, price, duration_months, is_active, or
   ('[ONE X] PACOTE 6 MESES COM ADULTO',        '1 conexão · 6 meses · inclui conteúdo adulto (18+)',   82.90, 6,  true, 6, true,  1),
   ('[ONE X] PACOTE 12 MESES SEM ADULTO',       '1 conexão · 12 meses',                                 99.90, 12, true, 7, false, 1),
   ('[ONE X] PACOTE 12 MESES COM ADULTO',       '1 conexão · 12 meses · inclui conteúdo adulto (18+)',  149.90, 12, true, 8, true,  1);
+
+-- >>> 20261121_payment_providers
+-- Alternância entre Mercado Pago e Asaas, mantendo o gateway de origem no histórico.
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS provider text NOT NULL DEFAULT 'asaas';
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS provider_payment_id text;
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS provider_preference_id text;
+CREATE UNIQUE INDEX IF NOT EXISTS payments_provider_remote_unique
+  ON payments (provider, provider_payment_id)
+  WHERE provider_payment_id IS NOT NULL;
+
+UPDATE payments
+SET provider = 'asaas', provider_payment_id = asaas_payment_id
+WHERE asaas_payment_id IS NOT NULL AND provider_payment_id IS NULL;
+
+ALTER TABLE iptv_orders ADD COLUMN IF NOT EXISTS payment_provider text;
+ALTER TABLE iptv_orders ADD COLUMN IF NOT EXISTS provider_payment_id text;
+
+INSERT INTO system_settings (key, value)
+VALUES ('payment_provider', 'mercado_pago')
+ON CONFLICT (key) DO NOTHING;
