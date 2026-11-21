@@ -6,10 +6,29 @@ import {
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Ionicons } from '@expo/vector-icons';
 import api from '../../lib/api';
 
 const CACHE_KEY = 'iptv_categories_cache';
 let _memCache = null;
+
+function TLItem({ state, title, sub, last }) {
+  const color = state === 'done' ? '#22C55E' : state === 'doing' ? '#FBBF24' : '#555';
+  return (
+    <View style={{ flexDirection: 'row', gap: 14 }}>
+      <View style={{ alignItems: 'center' }}>
+        <View style={{ width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: color, backgroundColor: state === 'done' ? '#22C55E' : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+          {state === 'done' && <Ionicons name="checkmark" size={14} color="#0a0a0a" />}
+        </View>
+        {!last && <View style={{ width: 2, flex: 1, minHeight: 26, backgroundColor: state === 'done' ? '#22C55E' : '#333' }} />}
+      </View>
+      <View style={{ paddingBottom: last ? 0 : 14 }}>
+        <Text style={{ color: state === 'todo' ? '#888' : state === 'doing' ? '#FBBF24' : '#fff', fontWeight: '800', fontSize: 15 }}>{title}</Text>
+        {sub ? <Text style={{ color: '#888', fontSize: 12.5, marginTop: 2 }}>{sub}</Text> : null}
+      </View>
+    </View>
+  );
+}
 
 export default function IptvScreen() {
   const router = useRouter();
@@ -150,28 +169,36 @@ export default function IptvScreen() {
   );
 
   if (status === 'none') return (
-    <View style={[styles.center, { paddingTop: insets.top }]}>
-      <Text style={styles.icon}>📺</Text>
-      <Text style={styles.title}>FlixHome IPTV</Text>
-      <Text style={styles.sub}>Você ainda não tem uma assinatura IPTV ativa.</Text>
-      <TouchableOpacity style={styles.btn} onPress={() => router.push('/iptv-plans')}>
-        <Text style={styles.btnText}>Ver planos disponíveis</Text>
+    <View style={[styles.stateRoot, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 90 }]}>
+      <Text style={styles.stateKicker}>SEM IPTV</Text>
+      <Text style={styles.stateH1}>IPTV ao vivo</Text>
+      <View style={styles.stateMid}>
+        <View style={styles.tile}><Ionicons name="tv-outline" size={44} color="#E50914" /></View>
+        <Text style={styles.stateTitle}>Canais ao vivo, 24h</Text>
+        <Text style={styles.sub}>Esportes, notícias, filmes e infantis no mesmo app. Até 2 telas.</Text>
+      </View>
+      <TouchableOpacity style={styles.bigBtn} onPress={() => router.push('/iptv-plans')} activeOpacity={0.9}>
+        <Text style={styles.bigBtnTxt}>Ver planos IPTV</Text>
       </TouchableOpacity>
     </View>
   );
 
   if (status === 'pending') return (
-    <View style={[styles.center, { paddingTop: insets.top }]}>
-      <Text style={styles.icon}>⏳</Text>
-      <Text style={styles.title}>Pagamento confirmado!</Text>
-      {pendingInfo?.plan_name && <Text style={styles.pendingPlan}>{pendingInfo.plan_name}</Text>}
-      <Text style={styles.sub}>
-        Sua assinatura está sendo ativada pelo administrador.{'\n'}
-        Você será notificado assim que ativar.
-      </Text>
-      <TouchableOpacity style={styles.btn} onPress={checkStatus}>
-        <Text style={styles.btnText}>Verificar agora</Text>
-      </TouchableOpacity>
+    <View style={[styles.stateRoot, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 90 }]}>
+      <Text style={styles.stateKicker}>AGUARDANDO ATIVAÇÃO</Text>
+      <View style={styles.pendHead}>
+        <Text style={styles.stateH1}>{pendingInfo?.plan_name || 'IPTV'}</Text>
+        <View style={styles.pendBadge}><Text style={styles.pendTxt}>Pendente</Text></View>
+      </View>
+      <Text style={[styles.sub, { textAlign: 'left', marginTop: 8 }]}>Pagamento recebido. Estamos ligando seu acesso — você recebe uma notificação quando estiver pronto.</Text>
+      <View style={styles.timeline}>
+        <TLItem state="done" title="Pagamento confirmado" sub={pendingInfo?.ordered_at ? new Date(pendingInfo.ordered_at).toLocaleString('pt-BR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''} />
+        <TLItem state="doing" title="Ativando" sub="Normalmente em até 30 min" />
+        <TLItem state="todo" title="Pronto para assistir" last />
+      </View>
+      <View style={{ flex: 1 }} />
+      <TouchableOpacity style={styles.bigBtn} onPress={checkStatus} activeOpacity={0.9}><Text style={styles.bigBtnTxt}>Verificar agora</Text></TouchableOpacity>
+      <TouchableOpacity style={styles.ghostBtn} onPress={() => router.push('/ajuda')}><Text style={styles.ghostTxt}>Falar com o suporte</Text></TouchableOpacity>
     </View>
   );
 
@@ -225,6 +252,20 @@ export default function IptvScreen() {
 }
 
 const styles = StyleSheet.create({
+  stateRoot:   { flex: 1, backgroundColor: '#0A0A0A', paddingHorizontal: 16 },
+  stateKicker: { color: '#888', fontSize: 12, fontWeight: '800', letterSpacing: 2 },
+  stateH1:     { color: '#fff', fontSize: 30, fontWeight: '900', marginTop: 4 },
+  stateMid:    { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 14 },
+  tile:        { width: 96, height: 96, borderRadius: 24, backgroundColor: '#1F1F1F', alignItems: 'center', justifyContent: 'center' },
+  stateTitle:  { color: '#fff', fontSize: 22, fontWeight: '800', textAlign: 'center' },
+  bigBtn:      { height: 56, borderRadius: 14, backgroundColor: '#E50914', alignItems: 'center', justifyContent: 'center' },
+  bigBtnTxt:   { color: '#fff', fontSize: 17, fontWeight: '800' },
+  ghostBtn:    { height: 52, borderRadius: 14, borderWidth: 1, borderColor: '#333', alignItems: 'center', justifyContent: 'center', marginTop: 10 },
+  ghostTxt:    { color: '#fff', fontWeight: '700', fontSize: 15 },
+  pendHead:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  pendBadge:   { backgroundColor: 'rgba(251,191,36,0.16)', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 4 },
+  pendTxt:     { color: '#FBBF24', fontWeight: '900', fontSize: 11 },
+  timeline:    { marginTop: 22, backgroundColor: '#141414', borderRadius: 16, padding: 18, borderWidth: 1, borderColor: '#1F1F1F' },
   container:   { flex: 1, backgroundColor: '#0a0a0a' },
   center:      { flex: 1, backgroundColor: '#0a0a0a', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 32 },
   icon:        { fontSize: 52, marginBottom: 4 },

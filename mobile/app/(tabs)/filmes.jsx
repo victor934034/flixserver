@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MovieCard from '../../components/MovieCard';
 import api from '../../lib/api';
-import FilterBar from '../../components/FilterBar';
+import FilterBar, { sortQuery } from '../../components/FilterBar';
 import { presetQuery } from '../../lib/datePresets';
 
 export default function FilmesScreen() {
@@ -22,12 +22,14 @@ export default function FilmesScreen() {
   const [selectedGenre, setSelectedGenre] = useState(null);
   const [genreModal, setGenreModal] = useState(false);
   const [datePreset, setDatePreset] = useState('');
+  const [minRating, setMinRating] = useState(0);
+  const [sortKey, setSortKey] = useState('recent');
 
   useEffect(() => {
     api.get('/genres').then(r => setGenres(Array.isArray(r.data) ? r.data : [])).catch(() => {});
   }, []);
 
-  useEffect(() => { load(1, true); }, [selectedGenre, datePreset]);
+  useEffect(() => { load(1, true); }, [selectedGenre, datePreset, minRating, sortKey]);
 
   const load = async (p, reset = false) => {
     if (reset) setLoading(true); else setLoadingMore(true);
@@ -35,7 +37,9 @@ export default function FilmesScreen() {
       let url = `/movies?page=${p}&limit=21`;
       if (selectedGenre) url += `&genre=${encodeURIComponent(selectedGenre)}`;
       url += presetQuery(datePreset);
-      if (datePreset) url += '&sort=release_date';
+      if (minRating > 0) url += `&min_rating=${minRating}`;
+      url += sortQuery(sortKey);
+      if (!sortKey || sortKey === 'recent') { if (datePreset) url += '&sort=release_date'; }
       const res = await api.get(url);
       const data = Array.isArray(res.data) ? res.data : (res.data.data ?? res.data.items ?? []);
       setMovies(prev => reset ? data : [...prev, ...data]);
@@ -55,7 +59,7 @@ export default function FilmesScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      <FilterBar title="Filmes" genres={genres} genre={selectedGenre} onGenre={setSelectedGenre} dateKey={datePreset} onDate={setDatePreset} />
+      <FilterBar kind="movies" title="Filmes" minRating={minRating} onMinRating={setMinRating} sortKey={sortKey} onSort={setSortKey} genres={genres} genre={selectedGenre} onGenre={setSelectedGenre} dateKey={datePreset} onDate={setDatePreset} />
 
       {loading ? (
         <View style={styles.loader}><ActivityIndicator size="large" color="#E50914" /></View>

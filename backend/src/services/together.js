@@ -42,6 +42,8 @@ function createRoom({ host, content_type, content_id, title, poster_url, control
 const publicRoom = r => ({
   code: r.code, content_type: r.content_type, content_id: r.content_id, title: r.title,
   poster_url: r.poster_url, host_name: r.hostName, control: r.control, members: r.members.size, started: !!r.started,
+  host_avatar: [...r.members.values()].find(m => m.userId === r.hostId)?.avatar || null,
+  people: [...r.members.values()].slice(0, 5).map(m => ({ userId: m.userId, name: m.name, avatar: m.avatar })),
 });
 const memberList = r => [...r.members.entries()].map(([id, m]) => ({ id, userId: m.userId, name: m.name, avatar: m.avatar, voice: !!m.voice, host: m.userId === r.hostId }));
 
@@ -108,6 +110,13 @@ function attach(httpServer) {
       room.started = true;
       room.touchedAt = Date.now();
       io.to(room.code).emit('room:started', { t: Date.now() });
+    });
+
+    // Anfitrião escolhe quem controla play/pause (antes ou durante a sessão)
+    socket.on('room:control', ({ control } = {}) => {
+      if (!room || socket.user.id !== room.hostId) return;
+      room.control = control === 'host' ? 'host' : 'all';
+      io.to(room.code).emit('room:control', { control: room.control });
     });
 
     // Foto/nome personalizado na sala (a URL precisa ser do nosso CDN)

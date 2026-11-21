@@ -21,7 +21,7 @@ router.get('/', optionalAuth, async (req, res) => {
       .order(sort, { ascending: order === 'asc' })
       .range(offset, offset + Number(limit) - 1);
 
-    if (genre) query = query.contains('genres', [genre]);
+    if (genre) { const gl = String(genre).split(',').map(x => x.trim()).filter(Boolean); query = gl.length > 1 ? query.overlaps('genres', gl) : query.contains('genres', gl); }
     if (year) query = query.eq('year', Number(year));
     if (year_from) query = query.gte('year', Number(year_from));
     if (year_to) query = query.lte('year', Number(year_to));

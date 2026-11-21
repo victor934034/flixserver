@@ -140,6 +140,13 @@ export default function PerfilScreen() {
         <Text style={styles.sectionLabel}>Minha Conta</Text>
         <View style={styles.card}>
           <MenuItem
+            icon="card-outline"
+            label="Minha assinatura"
+            desc="Plano, validade e pagamentos"
+            onPress={() => router.push('/minha-assinatura')}
+          />
+          <View style={styles.divider} />
+          <MenuItem
             icon="heart-outline"
             label="Minha Lista"
             desc="Conteúdos salvos"

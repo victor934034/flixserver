@@ -4,6 +4,7 @@ import {
   KeyboardAvoidingView, Platform, ActivityIndicator, Alert,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
 
 export default function OTPScreen() {
@@ -98,33 +99,33 @@ export default function OTPScreen() {
   };
 
   const code = digits.join('');
+  const [focusIdx, setFocusIdx] = useState(0);
+  const mmss = `${Math.floor(cooldown / 60)}:${String(cooldown % 60).padStart(2, '0')}`;
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <View style={styles.content}>
+    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <View style={styles.topRow}>
+        <TouchableOpacity style={styles.backSq} onPress={() => router.back()}><Ionicons name="chevron-back" size={20} color="#fff" /></TouchableOpacity>
         <Text style={styles.logo}>FLIXHOME</Text>
-        <Text style={styles.title}>Verifique seu email</Text>
-        <Text style={styles.subtitle}>
-          Enviamos um código de 6 dígitos para{'\n'}
-          <Text style={styles.email}>{email}</Text>
-        </Text>
-        <Text style={styles.spamHint}>📬 Não chegou? Olhe também a caixa de <Text style={{ fontWeight: '800', color: '#fbbf24' }}>spam / lixo eletrônico</Text>.</Text>
+        <View style={{ width: 48 }} />
+      </View>
 
-        {/* Caixas OTP */}
+      <View style={styles.content}>
+        <View style={styles.mailTile}><Ionicons name="mail-outline" size={28} color="#E50914" /></View>
+        <Text style={styles.title}>Verifique seu e-mail</Text>
+        <Text style={styles.subtitle}>Enviamos um código de 6 dígitos para</Text>
+        <Text style={styles.email}>{email}</Text>
+
         <View style={styles.boxRow}>
           {digits.map((d, i) => (
             <TextInput
               key={i}
               ref={r => { inputRefs.current[i] = r; }}
-              style={[styles.box, d ? styles.boxFilled : null]}
+              style={[styles.box, focusIdx === i && styles.boxFocus]}
               value={d}
+              onFocus={() => setFocusIdx(i)}
               onChangeText={v => handleDigit(i, v)}
-              onKeyPress={({ nativeEvent }) => {
-                if (nativeEvent.key === 'Backspace') handleBackspace(i);
-              }}
+              onKeyPress={({ nativeEvent }) => { if (nativeEvent.key === 'Backspace') handleBackspace(i); }}
               keyboardType="number-pad"
               maxLength={6}
               selectTextOnFocus
@@ -133,66 +134,52 @@ export default function OTPScreen() {
           ))}
         </View>
 
-        <TouchableOpacity
-          style={[styles.button, code.length < 6 && styles.buttonDisabled]}
-          onPress={handleVerify}
-          disabled={loading || code.length < 6}
-        >
-          {loading
-            ? <ActivityIndicator color="#fff" />
-            : <Text style={styles.buttonText}>Verificar</Text>}
-        </TouchableOpacity>
+        <View style={styles.callout}>
+          <Ionicons name="file-tray-outline" size={22} color="#FBBF24" />
+          <Text style={styles.calloutTxt}>Não chegou? Olhe também a caixa de <Text style={{ fontWeight: '900', color: '#FBBF24' }}>spam / lixo eletrônico.</Text></Text>
+        </View>
 
-        <TouchableOpacity
-          style={styles.resendBtn}
-          onPress={handleResend}
-          disabled={cooldown > 0}
-        >
-          <Text style={[styles.resendText, cooldown > 0 && styles.resendDisabled]}>
-            {cooldown > 0 ? `Reenviar em ${cooldown}s` : 'Reenviar código'}
-          </Text>
-        </TouchableOpacity>
+        <View style={styles.resendRow}>
+          <TouchableOpacity onPress={handleResend} disabled={cooldown > 0}>
+            <Text style={[styles.resendText, cooldown > 0 && styles.resendDisabled]}>Reenviar código</Text>
+          </TouchableOpacity>
+          {cooldown > 0 ? <Text style={styles.cool}>disponível em <Text style={{ color: '#fff', fontWeight: '900' }}>{mmss}</Text></Text> : null}
+        </View>
+      </View>
 
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-          <Text style={styles.backText}>Usar outro email</Text>
+      <View style={styles.footer}>
+        <TouchableOpacity style={[styles.button, code.length < 6 && styles.buttonDisabled]} onPress={handleVerify} disabled={loading || code.length < 6} activeOpacity={0.9}>
+          {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Confirmar</Text>}
         </TouchableOpacity>
+        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}><Text style={styles.backText}>Usar outro e-mail</Text></TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0a0a0a' },
-  content: { flex: 1, justifyContent: 'center', padding: 24, alignItems: 'center' },
-  logo: {
-    fontSize: 32, fontWeight: '900', color: '#E50914',
-    letterSpacing: 6, marginBottom: 32,
-  },
-  title: { fontSize: 20, fontWeight: '700', color: '#fff', marginBottom: 10 },
-  spamHint: { fontSize: 13, color: '#aaa', textAlign: 'center', lineHeight: 19, marginTop: -24, marginBottom: 28, backgroundColor: 'rgba(251,191,36,0.08)', borderWidth: 1, borderColor: 'rgba(251,191,36,0.25)', borderRadius: 10, paddingVertical: 8, paddingHorizontal: 12 },
-  subtitle: { fontSize: 14, color: '#888', textAlign: 'center', lineHeight: 22, marginBottom: 36 },
-  email: { color: '#E50914', fontWeight: '600' },
-
-  boxRow: { flexDirection: 'row', gap: 10, marginBottom: 32 },
-  box: {
-    width: 46, height: 56, borderRadius: 10,
-    backgroundColor: '#1a1a1a', borderWidth: 1.5, borderColor: '#2a2a2a',
-    color: '#fff', fontSize: 24, fontWeight: '700',
-    textAlign: 'center',
-  },
-  boxFilled: { borderColor: '#E50914' },
-
-  button: {
-    backgroundColor: '#E50914', padding: 16, borderRadius: 10,
-    alignItems: 'center', width: '100%', marginBottom: 16,
-  },
-  buttonDisabled: { opacity: 0.4 },
-  buttonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-
-  resendBtn: { padding: 12, marginBottom: 8 },
-  resendText: { color: '#E50914', fontSize: 14, fontWeight: '600' },
-  resendDisabled: { color: '#444' },
-
-  backBtn: { padding: 10 },
-  backText: { color: '#555', fontSize: 13 },
+  container: { flex: 1, backgroundColor: '#0A0A0A', paddingTop: 48 },
+  topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16 },
+  backSq: { width: 48, height: 48, borderRadius: 14, backgroundColor: '#1F1F1F', alignItems: 'center', justifyContent: 'center' },
+  logo: { fontSize: 18, fontWeight: '900', color: '#E50914', letterSpacing: 6 },
+  content: { flex: 1, padding: 24, paddingTop: 28 },
+  mailTile: { width: 64, height: 64, borderRadius: 18, backgroundColor: 'rgba(229,9,20,0.10)', borderWidth: 1, borderColor: 'rgba(229,9,20,0.4)', alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
+  title: { fontSize: 32, fontWeight: '900', color: '#E5E5E5', marginBottom: 10 },
+  subtitle: { fontSize: 16, color: '#A3A3A3' },
+  email: { color: '#fff', fontWeight: '800', fontSize: 16, marginTop: 2 },
+  boxRow: { flexDirection: 'row', gap: 10, marginTop: 28, marginBottom: 22 },
+  box: { flex: 1, height: 64, borderRadius: 14, backgroundColor: '#1F1F1F', borderWidth: 1.5, borderColor: '#2A2A2A', color: '#fff', fontSize: 26, fontWeight: '800', textAlign: 'center' },
+  boxFocus: { borderColor: '#E50914' },
+  callout: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: 'rgba(251,191,36,0.08)', borderWidth: 1, borderColor: 'rgba(251,191,36,0.3)', borderRadius: 14, padding: 16 },
+  calloutTxt: { flex: 1, color: '#FDE68A', fontSize: 15, lineHeight: 21 },
+  resendRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 22 },
+  resendText: { color: '#E50914', fontSize: 15, fontWeight: '800' },
+  resendDisabled: { color: '#666' },
+  cool: { color: '#A3A3A3', fontSize: 15 },
+  footer: { paddingHorizontal: 24, paddingBottom: 34 },
+  button: { height: 58, borderRadius: 14, backgroundColor: '#E50914', alignItems: 'center', justifyContent: 'center' },
+  buttonDisabled: { opacity: 0.45 },
+  buttonText: { color: '#fff', fontSize: 18, fontWeight: '800' },
+  backBtn: { padding: 16, alignItems: 'center' },
+  backText: { color: '#fff', fontSize: 15, fontWeight: '700', textDecorationLine: 'underline' },
 });

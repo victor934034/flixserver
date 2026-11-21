@@ -4,6 +4,8 @@ import {
   ActivityIndicator, Alert, Linking, BackHandler, AppState,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
+import PlanCard, { brl, periodOf, periodName } from '../components/PlanCard';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../contexts/AuthContext';
@@ -128,140 +130,95 @@ export default function SubscriptionScreen() {
     if (!selected) return;
     router.push({ pathname: '/checkout', params: { kind: tab === 1 ? 'iptv' : 'plan', plan_id: selected } });
   };
-  const periodOf = (p) => (p.duration_days ? (p.duration_days <= 31 ? '/mês' : p.duration_days <= 100 ? '/trimestre' : '/ano') : '');
 
-  const fmt = (val) => 'R$ ' + Number(val).toFixed(2).replace('.', ',');
+  const fmt = brl;
+  const selPlan = plans.find(p => p.id === selected);
+  const selPrice = selPlan ? (selPlan.promo_price != null ? selPlan.promo_price : selPlan.price) : 0;
+  const featuresOf = (p) => [
+    'Catálogo completo',
+    p.max_streams ? `${p.max_streams} tela${p.max_streams > 1 ? 's' : ''} simultânea${p.max_streams > 1 ? 's' : ''}` : null,
+    p.description || null,
+    tab === 1 ? 'Canais ao vivo incluídos' : (p.max_streams >= 2 ? 'Assistir juntos com chat e voz' : null),
+  ].filter(Boolean);
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.logo}>FLIXHOME</Text>
-        <Text style={styles.title}>Escolha seu plano</Text>
-        <Text style={styles.subtitle}>
-          {tab === 0
-            ? 'Acesso ilimitado a filmes e séries'
-            : 'Filmes, séries e canais ao vivo IPTV'}
-        </Text>
-      </View>
-
-      {/* Tabs */}
-      <View style={styles.tabRow}>
-        {TABS.map((t, i) => (
-          <TouchableOpacity
-            key={t.key}
-            style={[styles.tab, tab === i && (i === 1 ? styles.tabActiveIPTV : styles.tabActive)]}
-            onPress={() => setTab(i)}
-            activeOpacity={0.8}
-          >
-            <Ionicons
-              name={t.icon}
-              size={14}
-              color={tab === i ? (i === 0 ? '#111' : '#fff') : '#666'}
-              style={{ marginRight: 5 }}
-            />
-            <Text style={[styles.tabText, tab === i && (i === 0 ? styles.tabTextActiveStream : styles.tabTextActiveIPTV)]}>
-              {t.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      {checking && (
-        <View style={styles.checkingBanner}>
-          <ActivityIndicator color={ACCENT} size="small" />
-          <Text style={styles.checkingText}>Verificando pagamento...</Text>
+    <View style={styles.container}>
+      <LinearGradient colors={['#3a0a0c', '#1a0708', '#0A0A0A']} style={StyleSheet.absoluteFill} locations={[0, 0.25, 0.6]} />
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: insets.top + 10, paddingHorizontal: 16, paddingBottom: 150 }} showsVerticalScrollIndicator={false}>
+        <View style={styles.topRow}>
+          <TouchableOpacity onPress={logout} style={styles.circleBtn} hitSlop={8}><Ionicons name="log-out-outline" size={20} color="#fff" /></TouchableOpacity>
+          <Text style={styles.logo}>FLIXHOME</Text>
+          <View style={{ width: 44 }} />
         </View>
-      )}
 
-      {loading ? (
-        <ActivityIndicator color={ACCENT} size="large" style={{ marginTop: 48 }} />
-      ) : loadError ? (
-        <View style={styles.errorBox}>
-          <Ionicons name="alert-circle-outline" size={32} color={ACCENT} />
-          <Text style={styles.errorTitle}>Erro ao carregar planos</Text>
-          <Text style={styles.errorMsg}>{loadError}</Text>
-          <TouchableOpacity style={styles.retryBtn} onPress={loadPlans}>
-            <Text style={styles.retryText}>Tentar novamente</Text>
-          </TouchableOpacity>
+        <Text style={styles.h1}>Assista sem limites.{'\n'}Cancele quando quiser.</Text>
+        <Text style={styles.lead}>Escolha o plano ideal para você e sua família.</Text>
+
+        <View style={styles.chips}>
+          {['Sem anúncios', 'Até 5 perfis', 'Qualidade até 4K', 'Telas simultâneas'].map(t => (
+            <View key={t} style={styles.chip}><Ionicons name="checkmark" size={16} color="#22C55E" /><Text style={styles.chipTxt}>{t}</Text></View>
+          ))}
         </View>
-      ) : (
-        <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={styles.content}
-          showsVerticalScrollIndicator={false}
-        >
-          {trial?.available && (
-            <TouchableOpacity style={styles.trialBox} onPress={startTrial} disabled={trialBusy} activeOpacity={0.85}>
+
+        {trial?.available && (
+          <View style={styles.trialCard}>
+            <View style={styles.trialRow}>
+              <View style={styles.gift}><Ionicons name="gift" size={22} color="#fff" /></View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.trialTitle}>Teste grátis por {trial.days} dias</Text>
-                <Text style={styles.trialSub}>Sem cartão. Cancele quando quiser.</Text>
+                <Text style={styles.trialSub}>Sem cartão. Acesso completo ao catálogo.</Text>
               </View>
-              <View style={styles.trialBtn}>
-                {trialBusy ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.trialBtnText}>Começar</Text>}
-              </View>
+            </View>
+            <TouchableOpacity style={styles.trialBtn} onPress={startTrial} disabled={trialBusy} activeOpacity={0.9}>
+              {trialBusy ? <ActivityIndicator color="#fff" /> : <Text style={styles.trialBtnTxt}>Começar teste grátis</Text>}
             </TouchableOpacity>
-          )}
+          </View>
+        )}
 
-          {tab === 1 && (
-            <View style={styles.iptvBanner}>
-              <Ionicons name="tv" size={22} color={ACCENT} />
-              <Text style={styles.iptvBannerText}>
-                Inclui todos os canais ao vivo do plano Filmes & Séries
-              </Text>
-            </View>
-          )}
+        <View style={styles.seg}>
+          {TABS.map((t, i) => (
+            <TouchableOpacity key={t.key} style={[styles.segBtn, tab === i && styles.segOn]} onPress={() => setTab(i)} activeOpacity={0.85}>
+              <Text style={[styles.segTxt, tab === i && { color: '#111' }]}>{i === 1 ? 'IPTV ao vivo' : t.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
 
-          {plans.length === 0 ? (
-            <View style={styles.emptyBox}>
-              <Text style={styles.emptyIcon}>{tab === 1 ? '📺' : '🎬'}</Text>
-              <Text style={styles.emptyTitle}>
-                {tab === 1 ? 'Nenhum plano IPTV disponível' : 'Nenhum plano disponível'}
-              </Text>
-              <Text style={styles.emptySub}>Entre em contato com o administrador.</Text>
-            </View>
-          ) : (
-            plans.map(plan => {
-              const price = plan.promo_price != null ? plan.promo_price : plan.price;
-              const on = selected === plan.id;
-              return (
-                <TouchableOpacity key={plan.id} activeOpacity={0.9} onPress={() => setSelected(plan.id)}
-                  style={[styles.card, plan.highlight && styles.cardGlow, on && styles.cardOn]}>
-                  {plan.badge ? (
-                    <View style={styles.badgePill}><Text style={styles.badgeTxt}>{plan.badge}</Text></View>
-                  ) : null}
-                  <View style={styles.cardTop}>
-                    <Text style={styles.planName}>{plan.name}</Text>
-                    <View style={[styles.radio, on && styles.radioOn]}>{on && <View style={styles.radioDot} />}</View>
-                  </View>
-                  <View style={styles.priceRow}>
-                    <View>
-                      {plan.promo_price != null ? <Text style={styles.priceOld}>{fmt(plan.price)}</Text> : null}
-                      <Text style={styles.price}>{fmt(price)}</Text>
-                    </View>
-                    <Text style={styles.per}>{periodOf(plan)}</Text>
-                  </View>
-                  <Text style={styles.feat}>
-                    {[plan.max_streams ? `${plan.max_streams} tela${plan.max_streams > 1 ? 's' : ''}` : null, plan.duration_days ? `${plan.duration_days} dias` : null, tab === 1 ? 'Canais ao vivo' : null].filter(Boolean).join(' · ')}
-                  </Text>
-                  {plan.description ? <Text style={styles.desc}>{plan.description}</Text> : null}
-                </TouchableOpacity>
-              );
-            })
-          )}
+        {checking && (
+          <View style={styles.checking}><ActivityIndicator color={ACCENT} size="small" /><Text style={styles.checkingTxt}>Verificando pagamento...</Text></View>
+        )}
 
-          <TouchableOpacity style={styles.logoutBtn} onPress={logout}>
-            <Text style={styles.logoutText}>Sair da conta</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      )}
+        {loading ? (
+          <ActivityIndicator color={ACCENT} size="large" style={{ marginTop: 48 }} />
+        ) : loadError ? (
+          <View style={styles.errorBox}>
+            <Ionicons name="alert-circle-outline" size={32} color={ACCENT} />
+            <Text style={styles.errorTitle}>Erro ao carregar planos</Text>
+            <Text style={styles.errorMsg}>{loadError}</Text>
+            <TouchableOpacity style={styles.retryBtn} onPress={loadPlans}><Text style={styles.retryText}>Tentar novamente</Text></TouchableOpacity>
+          </View>
+        ) : plans.length === 0 ? (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorTitle}>{tab === 1 ? 'Nenhum plano IPTV disponível' : 'Nenhum plano disponível'}</Text>
+            <Text style={styles.errorMsg}>Entre em contato com o administrador.</Text>
+          </View>
+        ) : (
+          plans.map(plan => (
+            <PlanCard key={plan.id} plan={plan} selected={selected === plan.id} onPress={() => setSelected(plan.id)}
+              subtitle={[plan.max_streams ? `${plan.max_streams} tela${plan.max_streams > 1 ? 's' : ''}` : null, plan.duration_days ? `${plan.duration_days} dias` : null].filter(Boolean).join(' · ')}
+              features={featuresOf(plan)} />
+          ))
+        )}
+      </ScrollView>
 
       {!loading && !loadError && plans.length > 0 && (
         <View style={[styles.cta, { paddingBottom: insets.bottom + 12 }]}>
+          <View style={styles.ctaRow}>
+            <Text style={styles.ctaLeft}>{selPlan ? `${selPlan.name} · ${periodName(selPlan)}` : ''}</Text>
+            <Text style={styles.ctaRight}>{selPlan ? `${brl(selPrice)}${periodOf(selPlan)}` : ''}</Text>
+          </View>
           <TouchableOpacity style={[styles.ctaBtn, !selected && { opacity: 0.5 }]} disabled={!selected} onPress={goCheckout} activeOpacity={0.9}>
-            <Text style={styles.ctaTxt}>Assinar agora</Text>
+            <Text style={styles.ctaTxt}>Continuar para pagamento</Text>
           </TouchableOpacity>
-          <Text style={styles.ctaSub}>PIX, cartão ou boleto · pagamento seguro</Text>
         </View>
       )}
     </View>
@@ -269,75 +226,37 @@ export default function SubscriptionScreen() {
 }
 
 const styles = StyleSheet.create({
-  container:    { flex: 1, backgroundColor: '#0a0a0a' },
-  header:       { paddingHorizontal: 24, paddingTop: 28, paddingBottom: 8, alignItems: 'center' },
-  logo:         { fontSize: 26, fontWeight: '900', color: ACCENT, letterSpacing: 5, marginBottom: 8 },
-  title:        { fontSize: 22, fontWeight: '800', color: '#fff', textAlign: 'center', marginBottom: 6 },
-  subtitle:     { fontSize: 13, color: '#666', textAlign: 'center', lineHeight: 18, marginBottom: 4 },
-
-  tabRow:       { flexDirection: 'row', marginHorizontal: 16, marginVertical: 14, backgroundColor: '#111', borderRadius: 12, padding: 4, gap: 4 },
-  tab:          { flex: 1, flexDirection: 'row', paddingVertical: 11, alignItems: 'center', justifyContent: 'center', borderRadius: 9 },
-  tabActive:           { backgroundColor: '#fff' },
-  tabActiveIPTV:       { backgroundColor: ACCENT },
-  tabText:             { color: '#666', fontWeight: '700', fontSize: 13 },
-  tabTextActiveStream: { color: '#111' },
-  tabTextActiveIPTV:   { color: '#fff' },
-
-  iptvBanner:   { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#1a0a0a', borderRadius: 10, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#2a0a0a' },
-  iptvBannerText:{ color: '#aaa', fontSize: 13, flex: 1, lineHeight: 18 },
-
-  trialBox:     { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, marginBottom: 16, borderRadius: 14, backgroundColor: 'rgba(229,9,20,0.10)', borderWidth: 1.5, borderColor: 'rgba(229,9,20,0.5)' },
-  trialTitle:   { color: '#fff', fontSize: 16, fontWeight: '800' },
-  trialSub:     { color: '#A3A3A3', fontSize: 12, marginTop: 2 },
-  trialBtn:     { backgroundColor: ACCENT, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10 },
-  trialBtnText: { color: '#fff', fontWeight: '800', fontSize: 14 },
-
-  content:      { paddingHorizontal: 16, paddingBottom: 40 },
-
-  emptyBox:     { alignItems: 'center', paddingVertical: 48, gap: 10 },
-  emptyIcon:    { fontSize: 48 },
-  emptyTitle:   { color: '#fff', fontSize: 17, fontWeight: '700' },
-  emptySub:     { color: '#555', fontSize: 13, textAlign: 'center' },
-
-  card:         { backgroundColor: '#141414', borderRadius: 16, padding: 20, paddingTop: 24, marginTop: 10, marginBottom: 6, borderWidth: 2, borderColor: '#1F1F1F' },
-  cardGlow:     { shadowColor: '#E50914', shadowOpacity: 0.45, shadowRadius: 14, shadowOffset: { width: 0, height: 0 }, elevation: 8 },
-  cardOn:       { borderColor: ACCENT },
-  badgePill:    { position: 'absolute', top: -11, left: 18, backgroundColor: ACCENT, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 4 },
-  badgeTxt:     { color: '#fff', fontSize: 11, fontWeight: '900', letterSpacing: 0.5 },
-  cardTop:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
-  radio:        { width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: '#555', alignItems: 'center', justifyContent: 'center' },
-  radioOn:      { borderColor: ACCENT },
-  radioDot:     { width: 12, height: 12, borderRadius: 6, backgroundColor: ACCENT },
-  per:          { color: '#888', fontSize: 14, paddingBottom: 6 },
-  feat:         { color: '#A3A3A3', fontSize: 13, marginTop: 4 },
-  cta:          { paddingHorizontal: 16, paddingTop: 12, backgroundColor: '#0A0A0A', borderTopWidth: 1, borderTopColor: '#1F1F1F', gap: 6 },
-  ctaBtn:       { height: 54, borderRadius: 12, backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center' },
-  ctaTxt:       { color: '#fff', fontSize: 17, fontWeight: '800' },
-  ctaSub:       { color: '#666', fontSize: 12, textAlign: 'center' },
-  cardHighlight:{ borderColor: ACCENT },
-  badgeWrap:    { marginBottom: 10 },
-  badge:        { color: ACCENT, fontSize: 10, fontWeight: '800', letterSpacing: 1.5 },
-  planName:     { color: '#fff', fontSize: 18, fontWeight: '800', marginBottom: 10 },
-  priceRow:     { flexDirection: 'row', alignItems: 'flex-end', gap: 6 },
-  price:        { color: '#fff', fontSize: 34, fontWeight: '900' },
-  priceOld:     { color: '#444', fontSize: 14, textDecorationLine: 'line-through' },
-  desc:         { color: '#666', fontSize: 13, marginBottom: 14, lineHeight: 18 },
-  features:     { gap: 8, marginBottom: 18 },
-  feature:      { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  featureText:  { color: '#555', fontSize: 13 },
-  btn:          { backgroundColor: '#1e1e1e', padding: 15, borderRadius: 12, alignItems: 'center' },
-  btnHL:        { backgroundColor: ACCENT },
-  btnDisabled:  { opacity: 0.5 },
-  btnText:      { color: '#fff', fontWeight: '700', fontSize: 15 },
-
-  logoutBtn:    { padding: 18, alignItems: 'center', marginTop: 12 },
-  logoutText:   { color: '#333', fontSize: 13 },
-
-  errorBox:     { alignItems: 'center', padding: 32, gap: 12 },
-  errorTitle:   { color: '#fff', fontSize: 16, fontWeight: '700' },
-  errorMsg:     { color: '#888', fontSize: 13, textAlign: 'center', lineHeight: 18 },
-  retryBtn:     { backgroundColor: ACCENT, paddingHorizontal: 24, paddingVertical: 10, borderRadius: 8, marginTop: 4 },
-  retryText:    { color: '#fff', fontWeight: '700', fontSize: 14 },
-  checkingBanner:{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#111', paddingVertical: 10, marginHorizontal: 16, borderRadius: 8, marginBottom: 4 },
-  checkingText: { color: '#aaa', fontSize: 13 },
+  container: { flex: 1, backgroundColor: '#0A0A0A' },
+  topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  circleBtn: { width: 44, height: 44, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center' },
+  logo: { color: ACCENT, fontWeight: '900', letterSpacing: 6, fontSize: 17 },
+  h1: { color: '#fff', fontSize: 32, fontWeight: '900', textAlign: 'center', marginTop: 22, lineHeight: 38 },
+  lead: { color: '#A3A3A3', fontSize: 15, textAlign: 'center', marginTop: 10 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 20 },
+  chip: { flexBasis: '48.5%', flexGrow: 1, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 12, paddingHorizontal: 12, height: 44 },
+  chipTxt: { color: '#E5E5E5', fontWeight: '700', fontSize: 14 },
+  trialCard: { marginTop: 20, borderRadius: 18, padding: 14, backgroundColor: 'rgba(229,9,20,0.10)', borderWidth: 1.5, borderColor: 'rgba(229,9,20,0.45)', gap: 14 },
+  trialRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  gift: { width: 48, height: 48, borderRadius: 14, backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center' },
+  trialTitle: { color: '#fff', fontSize: 18, fontWeight: '800' },
+  trialSub: { color: '#B3B3B3', fontSize: 13.5, marginTop: 2 },
+  trialBtn: { height: 52, borderRadius: 12, backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center' },
+  trialBtnTxt: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  seg: { flexDirection: 'row', marginTop: 20, backgroundColor: '#141414', borderRadius: 14, padding: 4, borderWidth: 1, borderColor: '#1F1F1F' },
+  segBtn: { flex: 1, height: 44, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  segOn: { backgroundColor: '#E5E5E5' },
+  segTxt: { color: '#A3A3A3', fontWeight: '800', fontSize: 14 },
+  checking: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#141414', paddingVertical: 10, borderRadius: 10, marginTop: 12 },
+  checkingTxt: { color: '#aaa', fontSize: 13 },
+  errorBox: { alignItems: 'center', padding: 32, gap: 10 },
+  errorTitle: { color: '#fff', fontSize: 16, fontWeight: '700', textAlign: 'center' },
+  errorMsg: { color: '#888', fontSize: 13, textAlign: 'center', lineHeight: 18 },
+  retryBtn: { backgroundColor: ACCENT, paddingHorizontal: 24, paddingVertical: 10, borderRadius: 8, marginTop: 4 },
+  retryText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  cta: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 16, paddingTop: 12, backgroundColor: 'rgba(10,10,10,0.97)', borderTopWidth: 1, borderTopColor: '#1F1F1F', gap: 10 },
+  ctaRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  ctaLeft: { color: '#A3A3A3', fontSize: 14 },
+  ctaRight: { color: '#fff', fontSize: 14, fontWeight: '800' },
+  ctaBtn: { height: 56, borderRadius: 14, backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center' },
+  ctaTxt: { color: '#fff', fontSize: 17, fontWeight: '800' },
 });

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, TouchableOpacity, TextInput, FlatList, StyleSheet, Image, Share, Alert,
+  Linking, View, Text, TouchableOpacity, TextInput, FlatList, StyleSheet, Image, Share, Alert,
   KeyboardAvoidingView, Platform, ActivityIndicator, Animated, Easing, ScrollView,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -62,6 +62,7 @@ export default function JuntosSala() {
     await Clipboard.setStringAsync(link);
     setCopied(true); setTimeout(() => setCopied(false), 2000);
   };
+  const whats = () => Linking.openURL(`whatsapp://send?text=${encodeURIComponent(`Vem assistir "${tg.room?.title || playerParams?.title}" comigo no FlixHome! ${link}`)}`).catch(() => share());
   const share = () => Share.share({ message: `Vem assistir "${tg.room?.title || playerParams?.title}" comigo no FlixHome! ${link}` });
   const invite = async (u) => { try { await api.post(`/together/rooms/${code}/invite`, { user_id: u.id }); setSent(s => ({ ...s, [u.id]: true })); } catch {} };
   const send = () => { if (!text.trim()) return; tg.sendChat(text); setText(''); };
@@ -125,7 +126,7 @@ export default function JuntosSala() {
         <View style={s.card}>
           {poster ? <Image source={{ uri: poster }} style={s.poster} /> : <View style={[s.poster, { backgroundColor: '#1F1F1F' }]} />}
           <View style={{ flex: 1, justifyContent: 'center' }}>
-            <Text style={s.kicker}>VOCÊS VÃO ASSISTIR</Text>
+            <Text style={s.kicker}>ASSISTIR JUNTOS</Text>
             <Text style={s.title} numberOfLines={3}>{title}</Text>
             <Text style={s.muted}>Código <Text style={{ color: '#fff', fontWeight: '800', letterSpacing: 3 }}>{code}</Text></Text>
           </View>
@@ -141,8 +142,24 @@ export default function JuntosSala() {
               <Text style={s.copyTxt}>{copied ? 'Copiado!' : 'Copiar'}</Text>
             </TouchableOpacity>
           </View>
-          <TouchableOpacity style={s.secBtn} onPress={share}><Ionicons name="share-social" size={18} color="#fff" /><Text style={s.secTxt}>Compartilhar</Text></TouchableOpacity>
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <TouchableOpacity style={[s.secBtn, { flex: 1, backgroundColor: 'rgba(34,197,94,0.14)', borderColor: 'rgba(34,197,94,0.35)' }]} onPress={whats}><Text style={[s.secTxt, { color: '#22C55E' }]}>WhatsApp</Text></TouchableOpacity>
+            <TouchableOpacity style={[s.secBtn, { flex: 1 }]} onPress={share}><Text style={s.secTxt}>Mais opções</Text></TouchableOpacity>
+          </View>
         </View>
+
+        {isHost && (
+          <View style={s.card2}>
+            <Text style={s.label}>QUEM CONTROLA PLAY/PAUSE</Text>
+            <View style={s.seg}>
+              {[['all', 'Todos controlam'], ['host', 'Só eu controlo']].map(([k, l]) => (
+                <TouchableOpacity key={k} style={[s.segBtn, tg.control === k && s.segOn]} onPress={() => tg.setControl(k)} activeOpacity={0.85}>
+                  <Text style={[s.segTxt, tg.control === k && { color: '#111' }]}>{l}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )}
 
         {/* Pessoas */}
         <View style={s.card2}>
@@ -207,7 +224,7 @@ export default function JuntosSala() {
         </View>
         {isHost ? (
           <TouchableOpacity style={[s.startBtn, (!ok || starting) && { opacity: 0.6 }]} disabled={!ok || starting} onPress={start}>
-            {starting ? <ActivityIndicator color="#fff" /> : <><Ionicons name="play" size={20} color="#fff" /><Text style={s.startTxt}>Iniciar para todos</Text></>}
+            {starting ? <ActivityIndicator color="#fff" /> : <><Ionicons name="play" size={20} color="#fff" /><Text style={s.startTxt}>Iniciar sessão</Text></>}
           </TouchableOpacity>
         ) : (
           <View style={s.waiting}>
@@ -246,6 +263,10 @@ const s = StyleSheet.create({
   secTxt: { color: '#fff', fontWeight: '700' },
   people: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   camBadge: { position: 'absolute', right: 6, top: 40, width: 22, height: 22, borderRadius: 11, backgroundColor: '#E50914', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#141414' },
+  seg: { flexDirection: 'row', backgroundColor: '#0A0A0A', borderRadius: 14, padding: 4, borderWidth: 1, borderColor: '#1F1F1F' },
+  segBtn: { flex: 1, height: 44, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  segOn: { backgroundColor: '#E5E5E5' },
+  segTxt: { color: '#A3A3A3', fontWeight: '800', fontSize: 14 },
   tip: { color: '#888', fontSize: 12 },
   input: { backgroundColor: '#0A0A0A', borderWidth: 1, borderColor: '#2A2A2A', borderRadius: 12, color: '#fff', paddingHorizontal: 12, height: 44 },
   userRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1F1F1F', borderRadius: 12, padding: 10 },

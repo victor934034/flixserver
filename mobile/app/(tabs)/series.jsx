@@ -7,7 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MovieCard from '../../components/MovieCard';
 import api from '../../lib/api';
-import FilterBar from '../../components/FilterBar';
+import FilterBar, { sortQuery } from '../../components/FilterBar';
 import { presetQuery } from '../../lib/datePresets';
 
 export default function SeriesScreen() {
@@ -22,6 +22,8 @@ export default function SeriesScreen() {
   const [selectedGenre, setSelectedGenre] = useState(null);
   const [genreModal, setGenreModal] = useState(false);
   const [datePreset, setDatePreset] = useState('');
+  const [minRating, setMinRating] = useState(0);
+  const [sortKey, setSortKey] = useState('recent');
 
   const GAP = 8;
   const PAD = 12;
@@ -31,7 +33,7 @@ export default function SeriesScreen() {
     api.get('/genres').then(r => setGenres(Array.isArray(r.data) ? r.data : [])).catch(() => {});
   }, []);
 
-  useEffect(() => { load(1); }, [selectedGenre, datePreset]);
+  useEffect(() => { load(1); }, [selectedGenre, datePreset, minRating, sortKey]);
 
   const load = useCallback(async (pageNum = 1) => {
     if (pageNum === 1) setLoading(true); else setLoadingMore(true);
@@ -39,7 +41,9 @@ export default function SeriesScreen() {
       let url = `/series?limit=21&page=${pageNum}`;
       if (selectedGenre) url += `&genre=${encodeURIComponent(selectedGenre)}`;
       url += presetQuery(datePreset);
-      if (datePreset) url += '&sort=release_date';
+      if (minRating > 0) url += `&min_rating=${minRating}`;
+      url += sortQuery(sortKey);
+      if (!sortKey || sortKey === 'recent') { if (datePreset) url += '&sort=release_date'; }
       const res = await api.get(url);
       const items = Array.isArray(res.data) ? res.data : (res.data.data ?? res.data.items ?? []);
       setSeries(prev => pageNum === 1 ? items : [...prev, ...items]);
@@ -47,7 +51,7 @@ export default function SeriesScreen() {
       setPage(pageNum);
     } catch {}
     if (pageNum === 1) setLoading(false); else setLoadingMore(false);
-  }, [selectedGenre, datePreset]);
+  }, [selectedGenre, datePreset, minRating, sortKey]);
 
   const loadMore = () => {
     if (loadingMore || !hasMore) return;
@@ -58,7 +62,7 @@ export default function SeriesScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      <FilterBar title="Séries" genres={genres} genre={selectedGenre} onGenre={setSelectedGenre} dateKey={datePreset} onDate={setDatePreset} />
+      <FilterBar kind="series" title="Séries" minRating={minRating} onMinRating={setMinRating} sortKey={sortKey} onSort={setSortKey} genres={genres} genre={selectedGenre} onGenre={setSelectedGenre} dateKey={datePreset} onDate={setDatePreset} />
 
       {loading ? (
         <View style={styles.loader}><ActivityIndicator size="large" color="#E50914" /></View>

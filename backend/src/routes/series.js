@@ -33,7 +33,7 @@ router.get('/', optionalAuth, async (req, res) => {
       .order(sort, { ascending: order === 'asc' })
       .range(offset, offset + Number(limit) - 1);
 
-    if (genre) query = query.contains('genres', [genre]);
+    if (genre) { const gl = String(genre).split(',').map(x => x.trim()).filter(Boolean); query = gl.length > 1 ? query.overlaps('genres', gl) : query.contains('genres', gl); }
     if (year_from) query = query.gte('year_start', Number(year_from));
     if (year_to) query = query.lte('year_start', Number(year_to));
     if (min_rating) query = query.gte('rating', Number(min_rating));

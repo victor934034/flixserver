@@ -354,6 +354,17 @@ async function grantTrial(userId, req) {
   return { ok: true, days: cfg.days };
 }
 
+// GET /api/payments/mine — pagamentos do próprio usuário (tela "Minha assinatura")
+router.get('/mine', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id || req.user.userId;
+    const { data } = await supabase.from('payments')
+      .select('id, kind, plan_name, amount, method, status, created_at')
+      .eq('user_id', userId).order('created_at', { ascending: false }).limit(20);
+    res.json(data || []);
+  } catch (e) { res.status(500).json({ error: 'Erro ao carregar pagamentos' }); }
+});
+
 // GET /api/payments/trial — a tela de planos usa pra decidir se mostra o botão
 router.get('/trial', authMiddleware, async (req, res) => {
   const cfg = await trialConfig();
