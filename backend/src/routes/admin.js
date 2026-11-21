@@ -1755,15 +1755,16 @@ router.post('/seed-plans', async (req, res) => {
   ];
 
   const IPTV_PRICES = [
-    { name: '[ONE X] PACOTE 1 MÊS SEM ADULTO',         price: 24.90,  duration_months: 1,  order_index: 0 },
-    { name: '[ONE X] PACOTE 1 MÊS SEM ADULTO 2 TELAS', price: 39.90,  duration_months: 1,  order_index: 1 },
-    { name: '[ONE X] PACOTE 1 MÊS COM ADULTO',         price: 27.90,  duration_months: 1,  order_index: 2 },
-    { name: '[ONE X] PACOTE 3 MESES SEM ADULTO',       price: 54.90,  duration_months: 3,  order_index: 3 },
-    { name: '[ONE X] PACOTE 3 MESES COM ADULTO',       price: 57.90,  duration_months: 3,  order_index: 4 },
-    { name: '[ONE X] PACOTE 6 MESES SEM ADULTO',       price: 109.90, duration_months: 6,  order_index: 5 },
-    { name: '[ONE X] PACOTE 6 MESES COM ADULTO',       price: 114.90, duration_months: 6,  order_index: 6 },
-    { name: '[ONE X] PACOTE 12 MESES SEM ADULTO',      price: 159.90, duration_months: 12, order_index: 7 },
-    { name: '[ONE X] PACOTE 12 MESES COM ADULTO',      price: 164.90, duration_months: 12, order_index: 8 },
+    { name: '[ONE X] PACOTE 1 MÊS SEM ADULTO',         price: 11.90,  duration_months: 1,  order_index: 0 },
+    { name: '[ONE X] PACOTE 1 MÊS SEM ADULTO 2 TELAS', price: 16.90,  duration_months: 1,  order_index: 1 },
+    { name: '[ONE X] PACOTE 1 MÊS COM ADULTO',         price: 17.90,  duration_months: 1,  order_index: 2 },
+    { name: '[ONE X] PACOTE 1 MÊS COM ADULTO 2 TELAS', price: 20.90,  duration_months: 1,  order_index: 3 },
+    { name: '[ONE X] PACOTE 3 MESES SEM ADULTO',       price: 29.90,  duration_months: 3,  order_index: 4 },
+    { name: '[ONE X] PACOTE 3 MESES COM ADULTO',       price: 44.90,  duration_months: 3,  order_index: 5 },
+    { name: '[ONE X] PACOTE 6 MESES SEM ADULTO',       price: 54.90,  duration_months: 6,  order_index: 6 },
+    { name: '[ONE X] PACOTE 6 MESES COM ADULTO',       price: 82.90,  duration_months: 6,  order_index: 7 },
+    { name: '[ONE X] PACOTE 12 MESES SEM ADULTO',      price: 99.90,  duration_months: 12, order_index: 8 },
+    { name: '[ONE X] PACOTE 12 MESES COM ADULTO',      price: 149.90, duration_months: 12, order_index: 9 },
   ];
 
   try {
