@@ -3,54 +3,52 @@ import { useNavigate } from 'react-router-dom';
 import { iptvAPI } from '../api/index.js';
 import { KEY, useKeyDown } from '../hooks/useNav.js';
 
-const COLS   = 5;
-const CARD_H = 100;
-const GAP    = 14;
-const PAD    = 60;
-const ACCENT = '#c91c2c';
+const ACCENT = '#E50914';
+const COLS = 4;
+const FAV = '__fav';
 
-let _catCache    = null;
+let _catCache = null;
 let _statusCache = null;
+const _chCache = {};
 
-function CategoryCard({ item, focused, onClick }) {
+function loadFavs() { try { return JSON.parse(localStorage.getItem('iptv_favs') || '[]'); } catch (e) { return []; } }
+function saveFavs(l) { try { localStorage.setItem('iptv_favs', JSON.stringify(l)); } catch (e) {} }
+
+const COLORS = ['#1F4D32', '#7A2E14', '#2A4A7A', '#4A2A5A', '#2F6F85', '#4F7A1F', '#3F3F46', '#7A5A1F'];
+const colorOf = (s) => COLORS[[...String(s || '')].reduce((a, c) => a + c.charCodeAt(0), 0) % COLORS.length];
+
+function Center({ children }) {
+  return <div style={{ width: '100%', height: '100%', background: '#0A0A0A', color: '#E5E5E5', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>{children}</div>;
+}
+function Btn({ label, focused, red, onClick }) {
   return (
-    <div
-      onClick={onClick}
-      style={{
-        flex: 1, height: CARD_H, borderRadius: 12,
-        background: focused ? '#fff' : 'rgba(255,255,255,0.06)',
-        border: '2px solid ' + (focused ? '#fff' : 'rgba(255,255,255,0.07)'),
-        display: 'flex', alignItems: 'center', padding: '0 22px', gap: 14,
-        cursor: 'pointer',
-        transition: 'background 0.15s, border-color 0.15s',
-      }}
-    >
-      <div style={{ flex: 1, overflow: 'hidden' }}>
-        <div style={{
-          fontSize: 14, fontWeight: focused ? 800 : 600,
-          color: focused ? '#0a0a0a' : '#fff',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          transition: 'color 0.15s',
-        }}>
-          {item.category_name}
-        </div>
-      </div>
-      <svg width="18" height="18" viewBox="0 0 24 24" fill={focused ? '#0a0a0a' : 'rgba(255,255,255,0.25)'}>
-        <path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/>
-      </svg>
-    </div>
+    <div onClick={onClick} style={{
+      padding: '18px 40px', borderRadius: 14, fontSize: 26, fontWeight: 800, color: '#fff', cursor: 'pointer',
+      background: red ? ACCENT : '#1F1F1F', border: '3px solid ' + (focused ? '#fff' : (red ? ACCENT : '#2A2A2A')),
+      transform: focused ? 'scale(1.06)' : 'none', transition: 'transform 0.2s',
+    }}>{label}</div>
   );
 }
 
 export default function IptvScreen() {
   const navigate = useNavigate();
-  const [status,     setStatus]     = useState(_statusCache || 'loading');
-  const [categories, setCategories] = useState(_catCache || []);
-  const [focusRow,   setFocusRow]   = useState(0);
-  const [focusCol,   setFocusCol]   = useState(0);
-  const [btnFocus,   setBtnFocus]   = useState(0); // for none/pending: 0=back, 1=plans
-  const scrollRef = useRef(null);
+  const [status, setStatus] = useState(_statusCache || 'loading');
+  const [cats, setCats] = useState(_catCache || []);
+  const [catIdx, setCatIdx] = useState(0);     // índice na lista [Favoritos, ...categorias]
+  const [chans, setChans] = useState([]);
+  const [chLoading, setChLoading] = useState(false);
+  const [favs, setFavs] = useState(loadFavs());
+  const [area, setArea] = useState('side');    // side | grid
+  const [gIdx, setGIdx] = useState(0);
+  const [btn, setBtn] = useState(0);
+  const [opening, setOpening] = useState(null);
+  const gridRef = useRef(null);
   const st = useRef({});
+
+  const list = [{ category_id: FAV, category_name: 'Favoritos' }].concat(cats);
+  const cur = list[catIdx] || list[0];
+  const shown = cur.category_id === FAV ? favs : chans;
+  st.current = { status, list, catIdx, shown, area, gIdx, btn, favs, cur, opening };
 
   useEffect(() => {
     (async () => {
@@ -59,242 +57,157 @@ export default function IptvScreen() {
         _statusCache = data.status;
         setStatus(data.status);
         if (data.status === 'active') {
-          if (!_catCache) {
-            const res = await iptvAPI.categories();
-            _catCache = Array.isArray(res.data) ? res.data : [];
-          }
-          setCategories(_catCache);
+          if (!_catCache) { const r = await iptvAPI.categories(); _catCache = Array.isArray(r.data) ? r.data : []; }
+          setCats(_catCache);
+          setCatIdx(_catCache.length ? 1 : 0);
         }
-      } catch {
-        if (!_catCache) setStatus('none');
-      }
+      } catch (e) { if (!_catCache) setStatus('none'); }
     })();
   }, []);
 
-  const rows = Math.ceil(categories.length / COLS);
-
-  st.current = { focusRow, focusCol, rows, categories, status, btnFocus };
-
   useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const rowTop = focusRow * (CARD_H + GAP);
-    const rowBot = rowTop + CARD_H;
-    const vTop   = el.scrollTop;
-    const vBot   = vTop + el.clientHeight;
-    if (rowTop < vTop + 20)      el.scrollTop = rowTop - 20;
-    else if (rowBot > vBot - 20) el.scrollTop = rowBot - el.clientHeight + 20;
-  }, [focusRow]);
+    if (status !== 'active' || cur.category_id === FAV) return undefined;
+    if (_chCache[cur.category_id]) { setChans(_chCache[cur.category_id]); return undefined; }
+    let alive = true;
+    setChLoading(true);
+    iptvAPI.streams(cur.category_id).then(r => {
+      const l = Array.isArray(r.data) ? r.data : [];
+      _chCache[cur.category_id] = l;
+      if (alive) setChans(l);
+    }).catch(() => { if (alive) setChans([]); }).finally(() => { if (alive) setChLoading(false); });
+    return () => { alive = false; };
+  }, [catIdx, status, cats]);
 
-  useKeyDown(e => {
-    const { focusRow, focusCol, rows, categories, status, btnFocus } = st.current;
+  useEffect(() => { setGIdx(0); }, [catIdx]);
+  useEffect(() => {
+    const el = gridRef.current && gridRef.current.children[gIdx];
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+  }, [gIdx, area]);
+
+  async function openChannel(ch) {
+    if (st.current.opening) return;
+    setOpening(ch.stream_id);
+    try {
+      const { data } = await iptvAPI.streamUrl(ch.stream_id);
+      navigate('/iptv-player', { state: { url: data.url, name: ch.name, logo: ch.stream_icon || '' } });
+    } catch (e) { setOpening(null); }
+  }
+  function toggleFav(ch) {
+    const f = st.current.favs;
+    const next = f.some(x => x.stream_id === ch.stream_id) ? f.filter(x => x.stream_id !== ch.stream_id) : f.concat([{ stream_id: ch.stream_id, name: ch.name, stream_icon: ch.stream_icon }]);
+    setFavs(next); saveFavs(next);
+  }
+
+  useKeyDown(function (e) {
+    const s = st.current;
     const k = e.keyCode;
+    if (k === KEY.BACK || k === KEY.BACKSPACE || k === 461) { e.preventDefault(); if (s.status === 'active' && s.area === 'grid') setArea('side'); else navigate('/'); return; }
 
-    // Always handle BACK
-    if (k === KEY.BACK || k === KEY.BACKSPACE) { e.preventDefault(); navigate('/'); return; }
-
-    // None/pending state — navigate between action buttons
-    if (status === 'none' || status === 'pending') {
-      const maxBtn = status === 'none' ? 1 : 0;
-      if (k === KEY.LEFT)  { e.preventDefault(); setBtnFocus(b => Math.max(0, b - 1)); }
-      if (k === KEY.RIGHT) { e.preventDefault(); setBtnFocus(b => Math.min(maxBtn, b + 1)); }
-      if (k === KEY.ENTER) {
-        e.preventDefault();
-        if (btnFocus === 0) navigate('/');
-        else navigate('/subscription?tab=iptv');
-      }
+    if (s.status === 'none' || s.status === 'pending') {
+      const max = s.status === 'none' ? 1 : 0;
+      if (k === KEY.LEFT) { e.preventDefault(); setBtn(b => Math.max(0, b - 1)); }
+      if (k === KEY.RIGHT) { e.preventDefault(); setBtn(b => Math.min(max, b + 1)); }
+      if (k === KEY.ENTER) { e.preventDefault(); if (s.status === 'none') { navigate(s.btn === 0 ? '/subscription?tab=iptv' : '/'); } else navigate('/'); }
       return;
     }
+    if (s.status !== 'active') return;
 
-    if (status !== 'active') return;
-
-    const colsInRow = (r) => Math.min(COLS, categories.length - r * COLS);
-
-    if (k === KEY.UP) {
-      e.preventDefault();
-      if (focusRow > 0) {
-        const nr = focusRow - 1;
-        setFocusRow(nr);
-        setFocusCol(c => Math.min(c, colsInRow(nr) - 1));
-      }
+    if (s.area === 'side') {
+      if (k === KEY.UP) { e.preventDefault(); setCatIdx(i => Math.max(0, i - 1)); }
+      if (k === KEY.DOWN) { e.preventDefault(); setCatIdx(i => Math.min(s.list.length - 1, i + 1)); }
+      if ((k === KEY.RIGHT || k === KEY.ENTER) && s.shown.length) { e.preventDefault(); setArea('grid'); }
+      return;
     }
-    if (k === KEY.DOWN) {
-      e.preventDefault();
-      if (focusRow < rows - 1) {
-        const nr = focusRow + 1;
-        setFocusRow(nr);
-        setFocusCol(c => Math.min(c, colsInRow(nr) - 1));
-      }
-    }
-    if (k === KEY.LEFT) {
-      e.preventDefault();
-      if (focusCol > 0) setFocusCol(f => f - 1);
-    }
-    if (k === KEY.RIGHT) {
-      e.preventDefault();
-      if (focusCol < colsInRow(focusRow) - 1) setFocusCol(f => f + 1);
-    }
-    if (k === KEY.ENTER) {
-      e.preventDefault();
-      const cat = categories[focusRow * COLS + focusCol];
-      if (cat) navigate('/iptv-channels', { state: { category_id: cat.category_id, category_name: cat.category_name } });
-    }
+    // grid
+    if (k === KEY.LEFT) { e.preventDefault(); if (s.gIdx % COLS === 0) setArea('side'); else setGIdx(i => i - 1); }
+    if (k === KEY.RIGHT) { e.preventDefault(); setGIdx(i => Math.min(s.shown.length - 1, i + 1)); }
+    if (k === KEY.UP) { e.preventDefault(); setGIdx(i => (i - COLS >= 0 ? i - COLS : i)); }
+    if (k === KEY.DOWN) { e.preventDefault(); setGIdx(i => (i + COLS < s.shown.length ? i + COLS : i)); }
+    if (k === KEY.ENTER) { e.preventDefault(); const ch = s.shown[s.gIdx]; if (ch) openChannel(ch); }
+    if (k === KEY.YELLOW || k === 70) { e.preventDefault(); const ch = s.shown[s.gIdx]; if (ch) toggleFav(ch); }
   });
 
-  if (status === 'loading') return (
-    <div style={centerStyle}>
-      <div style={spinStyle} />
-      <div style={{ color: 'rgba(255,255,255,0.35)', fontSize: 16, marginTop: 20 }}>Carregando IPTV…</div>
-    </div>
-  );
+  if (status === 'loading') return <Center><div style={{ width: 56, height: 56, border: '4px solid rgba(255,255,255,0.08)', borderTopColor: ACCENT, borderRadius: '50%', animation: 'spin 0.85s linear infinite' }} /></Center>;
 
   if (status === 'none') return (
-    <div style={{ width: '100%', height: '100%', background: '#0a0a0a', display: 'flex', flexDirection: 'column' }}>
-      {/* Header */}
-      <div style={{ padding: '32px ' + PAD + 'px 20px', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 16, borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-        <svg width="28" height="28" viewBox="0 0 24 24" fill={ACCENT}><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12zM9 10l6 3.5L9 17z"/></svg>
-        <div style={{ fontSize: 22, fontWeight: 900, color: '#fff' }}>FlixHome IPTV</div>
+    <Center>
+      <div style={{ width: 130, height: 130, borderRadius: 32, background: '#1F1F1F', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 64, marginBottom: 26 }}>📺</div>
+      <div style={{ fontSize: 56, fontWeight: 900, marginBottom: 12 }}>Canais ao vivo, 24h</div>
+      <div style={{ fontSize: 28, color: '#A3A3A3', maxWidth: 820, lineHeight: 1.5, marginBottom: 44 }}>Esportes, notícias, filmes e infantis no mesmo app. Até 2 telas.</div>
+      <div style={{ display: 'flex', gap: 20 }}>
+        <Btn red label="Ver planos IPTV" focused={btn === 0} onClick={() => navigate('/subscription?tab=iptv')} />
+        <Btn label="Voltar" focused={btn === 1} onClick={() => navigate('/')} />
       </div>
-
-      {/* Body */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 0 }}>
-        <div style={{ fontSize: 72, marginBottom: 24 }}>📺</div>
-        <div style={{ fontSize: 32, fontWeight: 900, color: '#fff', marginBottom: 12 }}>Acesso IPTV não ativo</div>
-        <div style={{ fontSize: 16, color: 'rgba(255,255,255,0.4)', textAlign: 'center', maxWidth: 560, lineHeight: 1.7, marginBottom: 48 }}>
-          Você ainda não tem um plano que inclui IPTV.<br/>
-          Adicione IPTV ao seu plano ou escolha um plano completo.
-        </div>
-
-        <div style={{ display: 'flex', gap: 16 }}>
-          <div
-            onClick={() => navigate('/')}
-            style={{
-              padding: '15px 36px', borderRadius: 10, cursor: 'pointer',
-              background: btnFocus === 0 ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.06)',
-              border: '2px solid ' + (btnFocus === 0 ? '#fff' : 'rgba(255,255,255,0.12)'),
-              color: '#fff', fontSize: 16, fontWeight: 700,
-              transition: 'background 0.15s, border-color 0.15s',
-            }}
-          >
-            ← Voltar
-          </div>
-          <div
-            onClick={() => navigate('/subscription?tab=iptv')}
-            style={{
-              padding: '15px 36px', borderRadius: 10, cursor: 'pointer',
-              background: btnFocus === 1 ? '#fff' : ACCENT,
-              border: '2px solid ' + (btnFocus === 1 ? '#fff' : ACCENT),
-              color: btnFocus === 1 ? '#0a0a0a' : '#fff',
-              fontSize: 16, fontWeight: 700,
-              transition: 'background 0.15s, border-color 0.15s, color 0.15s',
-            }}
-          >
-            📺 Ver planos com IPTV
-          </div>
-        </div>
-
-        <div style={{ marginTop: 24, fontSize: 13, color: 'rgba(255,255,255,0.2)' }}>
-          Use ← → para navegar • ENTER para confirmar
-        </div>
-      </div>
-    </div>
+    </Center>
   );
 
   if (status === 'pending') return (
-    <div style={{ width: '100%', height: '100%', background: '#0a0a0a', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ padding: '32px ' + PAD + 'px 20px', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 16, borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-        <svg width="28" height="28" viewBox="0 0 24 24" fill={ACCENT}><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12zM9 10l6 3.5L9 17z"/></svg>
-        <div style={{ fontSize: 22, fontWeight: 900, color: '#fff' }}>FlixHome IPTV</div>
+    <Center>
+      <div style={{ fontSize: 22, color: '#FBBF24', fontWeight: 900, letterSpacing: 4, marginBottom: 14 }}>AGUARDANDO ATIVAÇÃO</div>
+      <div style={{ fontSize: 56, fontWeight: 900, marginBottom: 12 }}>Estamos ligando seu acesso</div>
+      <div style={{ fontSize: 28, color: '#A3A3A3', maxWidth: 820, lineHeight: 1.5, marginBottom: 36 }}>Pagamento recebido. Normalmente leva até 30 minutos — a TV atualiza sozinha.</div>
+      <div style={{ textAlign: 'left', padding: '26px 36px', borderRadius: 20, background: '#141414', border: '1px solid #1F1F1F', fontSize: 28, lineHeight: 2, marginBottom: 40 }}>
+        <div style={{ color: '#4ADE80', fontWeight: 800 }}>✓ Pagamento confirmado</div>
+        <div style={{ color: '#FBBF24', fontWeight: 800 }}>◔ Ativando</div>
+        <div style={{ color: '#777', fontWeight: 800 }}>○ Pronto para assistir</div>
       </div>
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 0 }}>
-        <div style={{ fontSize: 72, marginBottom: 24 }}>⏳</div>
-        <div style={{ fontSize: 32, fontWeight: 900, color: '#fff', marginBottom: 12 }}>Ativação em andamento</div>
-        <div style={{ fontSize: 16, color: 'rgba(255,255,255,0.4)', textAlign: 'center', maxWidth: 560, lineHeight: 1.7, marginBottom: 48 }}>
-          Seu plano IPTV foi recebido e está sendo ativado pelo administrador.<br/>
-          Você será notificado assim que estiver pronto.
-        </div>
-        <div
-          onClick={() => navigate('/')}
-          style={{
-            padding: '15px 36px', borderRadius: 10, cursor: 'pointer',
-            background: 'rgba(255,255,255,0.08)',
-            border: '2px solid ' + (btnFocus === 0 ? '#fff' : 'rgba(255,255,255,0.15)'),
-            color: '#fff', fontSize: 16, fontWeight: 700,
-            transition: 'border-color 0.15s',
-          }}
-        >
-          ← Voltar ao início
-        </div>
-        <div style={{ marginTop: 24, fontSize: 13, color: 'rgba(255,255,255,0.2)' }}>
-          ENTER para voltar
-        </div>
-      </div>
-    </div>
+      <Btn label="Voltar ao início" focused onClick={() => navigate('/')} />
+    </Center>
   );
 
   return (
-    <div style={{ width: '100%', height: '100%', background: '#0a0a0a', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      {/* Header */}
-      <div style={{ padding: '32px ' + PAD + 'px 20px', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 24 }}>
-        <button
-          onClick={() => navigate('/')}
-          tabIndex={-1}
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: 8,
-            background: 'rgba(255,255,255,0.07)', border: '1.5px solid rgba(255,255,255,0.10)',
-            borderRadius: 30, padding: '9px 20px',
-            color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer',
-          }}
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
-          Início
-        </button>
-        <div>
-          <div style={{ fontSize: 26, fontWeight: 900, color: '#fff', display: 'flex', alignItems: 'center', gap: 12 }}>
-            <svg width="28" height="28" viewBox="0 0 24 24" fill={ACCENT}><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12zM9 10l6 3.5L9 17z"/></svg>
-            IPTV
-          </div>
-          <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.3)', marginTop: 3 }}>
-            {categories.length} categorias disponíveis
-          </div>
-        </div>
+    <div style={{ width: '100%', height: '100%', background: '#0A0A0A', color: '#E5E5E5', display: 'flex', overflow: 'hidden' }}>
+      <div style={{ width: 300, background: '#0F0F0F', borderRight: '1px solid #1A1A1A', padding: '40px 24px', boxSizing: 'border-box', overflowY: 'auto' }}>
+        <div style={{ fontSize: 20, fontWeight: 900, color: ACCENT, letterSpacing: 8, marginBottom: 34 }}>FLIXHOME</div>
+        {list.map(function (c, i) {
+          const on = i === catIdx;
+          const foc = on && area === 'side';
+          const n = c.category_id === FAV ? favs.length : (_chCache[c.category_id] ? _chCache[c.category_id].length : '');
+          return (
+            <div key={c.category_id} style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px', marginBottom: 6, borderRadius: 12, fontSize: 26,
+              fontWeight: on ? 800 : 600, color: on ? '#fff' : '#A3A3A3', background: on ? 'rgba(229,9,20,0.12)' : 'transparent',
+              border: '3px solid ' + (foc ? '#fff' : 'transparent'), transform: foc ? 'scale(1.03)' : 'none', transition: 'transform 0.2s',
+            }}>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.category_id === FAV ? '★ ' : ''}{c.category_name}</span>
+              <span style={{ fontSize: 22, color: '#777' }}>{n}</span>
+            </div>
+          );
+        })}
       </div>
 
-      {/* Grid */}
-      <div
-        ref={scrollRef}
-        style={{ flex: 1, overflowY: 'auto', padding: '4px ' + PAD + 'px ' + PAD + 'px' }}
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: GAP }}>
-          {Array.from({ length: rows }, (_, ri) => {
-            const rowCats = categories.slice(ri * COLS, ri * COLS + COLS);
+      <div style={{ flex: 1, padding: '40px 50px 30px', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 22 }}>
+          <div style={{ fontSize: 52, fontWeight: 900, letterSpacing: -1 }}>{cur.category_name}</div>
+          <div style={{ fontSize: 24, color: '#A3A3A3' }}>{shown.length} canais · botão amarelo favorita</div>
+        </div>
+        <div ref={gridRef} style={{ flex: 1, overflowY: 'auto', display: 'grid', gridTemplateColumns: 'repeat(' + COLS + ', 1fr)', gap: 18, alignContent: 'start', padding: '8px 8px 20px' }}>
+          {chLoading && <div style={{ gridColumn: '1 / -1', color: '#A3A3A3', fontSize: 26 }}>Carregando canais…</div>}
+          {!chLoading && shown.length === 0 && <div style={{ gridColumn: '1 / -1', color: '#888', fontSize: 28, padding: '40px 0' }}>{cur.category_id === FAV ? 'Nenhum favorito ainda. Aperte o botão amarelo em um canal.' : 'Nenhum canal nesta categoria.'}</div>}
+          {shown.map(function (ch, i) {
+            const foc = area === 'grid' && gIdx === i;
+            const fav = favs.some(f => f.stream_id === ch.stream_id);
             return (
-              <div key={ri} style={{ display: 'flex', gap: GAP }}>
-                {rowCats.map((cat, ci) => (
-                  <CategoryCard
-                    key={cat.category_id}
-                    item={cat}
-                    focused={focusRow === ri && focusCol === ci}
-                    onClick={() => navigate('/iptv-channels', { state: { category_id: cat.category_id, category_name: cat.category_name } })}
-                  />
-                ))}
-                {rowCats.length < COLS && Array.from({ length: COLS - rowCats.length }, (_, fi) => (
-                  <div key={'empty-' + fi} style={{ flex: 1, height: CARD_H }} />
-                ))}
+              <div key={ch.stream_id} onClick={() => openChannel(ch)} style={{
+                padding: '20px 22px', borderRadius: 18, background: foc ? '#262626' : '#141414', minHeight: 150, boxSizing: 'border-box',
+                border: '3px solid ' + (foc ? '#fff' : 'transparent'), transform: foc ? 'scale(1.06)' : 'none', transition: 'transform 0.2s ease-out', position: 'relative', zIndex: foc ? 2 : 1,
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
+                  <div style={{ minWidth: 76, height: 50, borderRadius: 10, background: colorOf(ch.name), display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 8px', overflow: 'hidden' }}>
+                    {ch.stream_icon ? <img src={ch.stream_icon} alt="" style={{ maxWidth: 76, maxHeight: 44, objectFit: 'contain' }} onError={e => { e.target.style.display = 'none'; }} /> : <span style={{ fontWeight: 900, fontSize: 20 }}>{String(ch.name || '?').slice(0, 5).toUpperCase()}</span>}
+                  </div>
+                  <span style={{ fontSize: 30, color: fav ? '#FBBF24' : '#666' }}>{fav ? '★' : '☆'}</span>
+                </div>
+                <div style={{ fontSize: 28, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ch.name}</div>
+                <div style={{ fontSize: 24, marginTop: 6 }}><b style={{ color: '#F87171' }}>{opening === ch.stream_id ? 'ABRINDO…' : 'AO VIVO'}</b></div>
               </div>
             );
           })}
+        </div>
+        <div style={{ display: 'flex', gap: 30, fontSize: 24, color: '#A3A3A3', paddingTop: 6 }}>
+          <span>◀ categorias</span><span><b style={{ color: '#fff' }}>OK</b> assistir</span><span><b style={{ color: '#fff' }}>Botão amarelo</b> favoritar</span>
         </div>
       </div>
     </div>
   );
 }
-
-const centerStyle = {
-  width: '100%', height: '100%', background: '#0a0a0a',
-  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-};
-const spinStyle = {
-  width: 48, height: 48, border: '3px solid rgba(255,255,255,0.06)',
-  borderTopColor: ACCENT, borderRadius: '50%', animation: 'spin 0.85s linear infinite',
-};

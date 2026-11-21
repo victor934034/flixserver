@@ -753,6 +753,31 @@ export default function PlayerScreen() {
         </div>
       )}
 
+      {/* Assistir juntos: chip de sincronia + avatares + avisos (design TV) */}
+      {tg.active && (
+        <div style={{ position: 'absolute', top: 36, right: 56, zIndex: 40, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 22px', borderRadius: 999, fontSize: 26, fontWeight: 800,
+              background: tg.status === 'ready' ? 'rgba(34,197,94,0.18)' : 'rgba(251,191,36,0.18)', color: tg.status === 'ready' ? '#4ADE80' : '#FBBF24' }}>
+              <span style={{ width: 12, height: 12, borderRadius: 6, background: tg.status === 'ready' ? '#22C55E' : '#FBBF24' }} />
+              {tg.status === 'ready' ? 'Sincronizado · ' + tg.members.length + ' assistindo' : 'Ressincronizando…'}
+            </div>
+            <div style={{ display: 'flex' }}>
+              {tg.members.slice(0, 4).map(function (m, i) {
+                return (
+                  <div key={m.id} style={{ width: 52, height: 52, borderRadius: 26, marginLeft: i ? -10 : 0, border: '3px solid ' + (m.voice ? '#22C55E' : '#0A0A0A'), background: ['#7c3aed', '#0ea5e9', '#f97316', '#e11d48'][i % 4], display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 20, color: '#fff', overflow: 'hidden' }}>
+                    {m.avatar ? <img src={m.avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : String(m.name || '?').trim().split(/\s+/).map(function (w) { return w[0]; }).slice(0, 2).join('').toUpperCase()}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          {tg.toasts.map(function (t) {
+            return <div key={t.id} style={{ padding: '10px 22px', borderRadius: 999, background: 'rgba(31,31,31,0.95)', border: '1px solid #2A2A2A', fontSize: 24, color: '#E5E5E5' }}>{t.text}</div>;
+          })}
+        </div>
+      )}
+
       {/* Controls overlay */}
       <div style={{
         position: 'absolute', inset: 0,

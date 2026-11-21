@@ -24,6 +24,7 @@ export default function SubscriptionScreen() {
   const [focused,     setFocused]     = useState(0); // 0..tabItems-1 = plan, last = logout
   const [status,      setStatus]      = useState('');
   const [qrUrl,       setQrUrl]       = useState('');
+  const [payPlan,     setPayPlan]     = useState(null);
   const [subscribing, setSubscribing] = useState(false);
 
   const [trial, setTrial] = useState(null);
@@ -43,6 +44,17 @@ export default function SubscriptionScreen() {
     }).finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    if (!qrUrl) return undefined;
+    const t = setInterval(async () => {
+      try {
+        const { data } = await api.get('/api/auth/me');
+        if (data && data.plan_expires_at && new Date(data.plan_expires_at).getTime() > Date.now()) window.location.reload();
+      } catch (e) {}
+    }, 4000);
+    return () => clearInterval(t);
+  }, [qrUrl]);
+
   const plans    = tab === 0 ? basicPlans : iptvPlans;
   const total    = plans.length + 2; // plans + tabs + logout
   const tabFocus = focused < 2 ? focused : -1;
@@ -50,12 +62,13 @@ export default function SubscriptionScreen() {
   const trialFocus = off === 1 && focused === 2;
   const logoutFocused = focused === plans.length + 2 + off;
 
-  st.current = { tab, plans, focused, total, subscribing, loading, off };
+  st.current = { tab, plans, focused, total, subscribing, loading, off, qrUrl };
 
   useKeyDown(e => {
-    const { tab, plans, focused, total, subscribing, loading, off } = st.current;
+    const { tab, plans, focused, total, subscribing, loading, off, qrUrl: qr0 } = st.current;
     if (loading || subscribing) return;
     const k = e.keyCode;
+    if (qr0) { if (k === KEY.ENTER || k === KEY.BACK || k === KEY.BACKSPACE || k === 461) { e.preventDefault(); setQrUrl(''); setStatus(''); } return; }
 
     if (k === KEY.UP) {
       e.preventDefault();
@@ -109,6 +122,7 @@ export default function SubscriptionScreen() {
   }
 
   async function handleSubscribe(plan) {
+    setPayPlan(plan);
     setSubscribing(true);
     setStatus('Solicitando plano…');
     try {
@@ -128,6 +142,36 @@ export default function SubscriptionScreen() {
   }
 
   const fmt = (val) => 'R$ ' + Number(val).toFixed(2).replace('.', ',');
+
+
+  // ── Tela "Escaneie com o celular para pagar" (design TV) ──
+  if (qrUrl) {
+    return (
+      <div style={{ width: '100%', height: '100%', boxSizing: 'border-box', padding: '60px 90px', color: '#E5E5E5', display: 'flex', flexDirection: 'column',
+        background: 'radial-gradient(ellipse at 15% 45%, rgba(229,9,20,0.14) 0%, #0A0A0A 55%)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ fontSize: 22, fontWeight: 900, color: '#E50914', letterSpacing: 10 }}>FLIXHOME</div>
+          <div style={{ fontSize: 24, fontWeight: 700, color: '#4ADE80' }}>🔒 Pagamento seguro</div>
+        </div>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 70 }}>
+          <div style={{ width: 420, height: 420, borderRadius: 26, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <img src={qrUrl} alt="QR code" style={{ width: 396, height: 396 }} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 60, fontWeight: 900, letterSpacing: -1, lineHeight: 1.05 }}>Escaneie com o celular para pagar</div>
+            <div style={{ fontSize: 28, color: '#A3A3A3', margin: '22px 0 28px' }}>PIX, cartão ou boleto — a página abre direto no seu celular.</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 40, padding: '24px 30px', borderRadius: 18, background: '#141414', border: '1px solid #1F1F1F' }}>
+              <div><div style={{ fontSize: 22, color: '#A3A3A3' }}>Plano</div><div style={{ fontSize: 34, fontWeight: 800 }}>{payPlan ? payPlan.name : ''}</div></div>
+              <div><div style={{ fontSize: 22, color: '#A3A3A3' }}>Total</div><div style={{ fontSize: 34, fontWeight: 800 }}>{payPlan ? fmt(payPlan.promo_price != null ? payPlan.promo_price : payPlan.price) : ''}</div></div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, color: '#4ADE80', fontSize: 26, fontWeight: 800 }}><span style={{ width: 14, height: 14, borderRadius: 7, background: '#22C55E', boxShadow: '0 0 0 6px rgba(34,197,94,0.25)' }} />Aguardando pagamento…</div>
+            </div>
+            <div style={{ fontSize: 24, color: '#A3A3A3', marginTop: 22 }}>A TV atualiza sozinha assim que o pagamento for confirmado.</div>
+          </div>
+        </div>
+        <div style={{ padding: '18px 34px', borderRadius: 12, fontSize: 26, fontWeight: 800, color: '#fff', background: '#1F1F1F', border: '3px solid #fff', alignSelf: 'flex-start', transform: 'scale(1.06)', transformOrigin: 'left center' }}>Voltar aos planos</div>
+      </div>
+    );
+  }
 
   return (
     <div style={{

@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import Navbar from '../components/Navbar';
 import HeroBanner from '../components/HeroBanner';
+import TrialBar from '../components/TrialBar';
 import ContentRow from '../components/ContentRow';
 import api from '../lib/api';
 import { getToken } from '../lib/auth';
@@ -73,6 +74,7 @@ export default function Home() {
   return (
     <>
       <Navbar />
+      <TrialBar />
       <main>
         {!data ? (
           <div className={styles.skeleton}>

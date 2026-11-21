@@ -14,7 +14,10 @@ export default function AutorizarTvPage() {
   const [done, setDone] = useState(false);
 
   useEffect(() => {
-    if (!getToken()) router.replace('/login');
+    // QR da TV traz ?code=XXXXXX; sem login, volta depois do login
+    const q = new URLSearchParams(window.location.search).get('code');
+    if (q) setCode(String(q).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6));
+    if (!getToken()) router.replace('/login?next=' + encodeURIComponent('/autorizar-tv' + window.location.search));
   }, [router]);
 
   async function confirm(e) {
