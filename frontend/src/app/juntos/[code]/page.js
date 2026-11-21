@@ -82,7 +82,7 @@ export default function JuntosPage() {
       <main className={styles.room}>
         <div className={styles.player}>
           {blocked ? <p className={styles.muted}>{blocked}</p> : !content ? <p className={styles.muted}>Conectando à sala…</p> : (
-            <VideoPlayer content={content} sync={tg.sync} overlayTitle={tg.room?.title} />
+            <VideoPlayer content={content} sync={tg.sync} together={tg} overlayTitle={tg.room?.title} />
           )}
           {tg.status === 'reconnecting' && <div className={styles.reconnect}>Reconectando…</div>}
         </div>

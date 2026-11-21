@@ -160,6 +160,7 @@ export default function PlayerScreen({ navigation, route }) {
     contentMeta               = null,
     startAt                   = null,
     room                      = null,
+    live                      = null,
   } = route.params ?? {};
 
   const availTracks = ['dubbing','subtitled','cinema','color','bw'].filter(k => !!tracks[k]);
@@ -167,7 +168,13 @@ export default function PlayerScreen({ navigation, route }) {
   const initKey     = availTracks.find(k => tracks[k] === initialUrl) ?? availTracks[0] ?? 'dubbing';
 
   // ── Next / Prev episode ─────────────────────────────────────────────────────
+  const liveEp = (d) => {
+    if (!live || !live.list || live.list.length < 2) return null;
+    const i = (live.index + d + live.list.length) % live.list.length;
+    return { liveIndex: i, title: live.list[i].name };
+  };
   const nextEp = useMemo(() => {
+    if (live) return liveEp(1);
     if (!seriesContext) return null;
     const { seriesTitle, episodes, currentEpId } = seriesContext;
     const idx = episodes.findIndex(e => e.id === currentEpId);
@@ -188,6 +195,7 @@ export default function PlayerScreen({ navigation, route }) {
   }, [seriesContext, contentMeta]);
 
   const prevEp = useMemo(() => {
+    if (live) return liveEp(-1);
     if (!seriesContext) return null;
     const { seriesTitle, episodes, currentEpId } = seriesContext;
     const idx = episodes.findIndex(e => e.id === currentEpId);
@@ -206,6 +214,18 @@ export default function PlayerScreen({ navigation, route }) {
       contentMeta: { content_type: 'episode', content_id: prev.id, episode_id: prev.id, series_id: contentMeta?.series_id },
     };
   }, [seriesContext, contentMeta]);
+
+  const gotoEp = async (ep) => {
+    if (ep && ep.liveIndex != null) {
+      try {
+        const ch = live.list[ep.liveIndex];
+        const { data } = await api.get(`/iptv/stream-url/${ch.stream_id}`, { params: { fmt: 'm3u8' } });
+        navigation.replace('Player', { url: data.url, title: ch.name, tracks: { dubbing: data.url }, subtitles: {}, contentMeta: null, live: { ...live, index: ep.liveIndex } });
+      } catch {}
+      return;
+    }
+    navigation.replace('Player', ep);
+  };
 
   // ── Refs ────────────────────────────────────────────────────────────────────
   const hideTimer      = useRef(null);
@@ -388,7 +408,7 @@ export default function PlayerScreen({ navigation, route }) {
   useEffect(() => {
     if (isEnded && !endedRef.current) {
       endedRef.current = true;
-      if (nextEp && !tg.active) navigation.replace('Player', nextEp);
+      if (nextEp && !tg.active && !live) navigation.replace('Player', nextEp);
       else navigation.goBack();
     }
   }, [isEnded]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -580,10 +600,21 @@ export default function PlayerScreen({ navigation, route }) {
 
       {tg.active && (
         <View style={s.tgBadge} pointerEvents="none">
-          <Text style={s.tgBadgeTxt}>
-            {tg.status === 'ready' ? `Juntos · ${tg.room?.code || ''} · ${tg.members.length} ${tg.members.length === 1 ? 'pessoa' : 'pessoas'}`
-              : tg.status === 'error' ? tg.error : 'Conectando à sala…'}
-          </Text>
+          <View style={s.tgRow}>
+            <View style={[s.tgChip, tg.status !== 'ready' && { backgroundColor: 'rgba(251,191,36,0.18)' }]}>
+              <View style={[s.tgDot, tg.status !== 'ready' && { backgroundColor: '#FBBF24' }]} />
+              <Text style={[s.tgChipTxt, tg.status !== 'ready' && { color: '#FBBF24' }]}>
+                {tg.status === 'ready' ? `Sincronizado · ${tg.members.length} assistindo` : tg.status === 'error' ? tg.error : 'Ressincronizando…'}
+              </Text>
+            </View>
+            <View style={{ flexDirection: 'row' }}>
+              {tg.members.slice(0, 4).map((m, i) => (
+                <View key={m.id} style={[s.tgAv, { marginLeft: i ? -r(10) : 0, backgroundColor: ['#7c3aed', '#0ea5e9', '#f97316', '#e11d48'][i % 4], borderColor: m.voice ? '#22C55E' : '#0A0A0A' }]}>
+                  <Text style={s.tgAvTxt}>{String(m.name || '?').trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase()}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
           {tg.toasts.map(t => <Text key={t.id} style={s.tgToast}>{t.text}</Text>)}
         </View>
       )}
@@ -746,10 +777,10 @@ export default function PlayerScreen({ navigation, route }) {
                 <CtrlBtn
                   ref={prevBtnRef}
                   icon="play-skip-back"
-                  label="Anterior"
+                  label={live ? 'Canal ▲' : 'Anterior'}
                   grabFocus={grabPrev}
                   onFocus={() => { setGrabPrev(false); onBtnFocus(); }}
-                  onPress={() => navigation.replace('Player', prevEp)}
+                  onPress={() => gotoEp(prevEp)}
                   {...focusNav(idxPrev)}
                 />
               )}
@@ -784,7 +815,7 @@ export default function PlayerScreen({ navigation, route }) {
                   label="Próximo"
                   grabFocus={grabNext}
                   onFocus={() => { setGrabNext(false); onBtnFocus(); }}
-                  onPress={() => navigation.replace('Player', nextEp)}
+                  onPress={() => gotoEp(nextEp)}
                   {...focusNav(idxNext)}
                 />
               )}
@@ -842,6 +873,12 @@ export default function PlayerScreen({ navigation, route }) {
 // ── Styles ─────────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
   tgBadge:      { position: 'absolute', top: r(24), right: r(32), zIndex: 30, alignItems: 'flex-end', gap: r(6) },
+  tgRow:        { flexDirection: 'row', alignItems: 'center', gap: r(16) },
+  tgChip:       { flexDirection: 'row', alignItems: 'center', gap: r(10), backgroundColor: 'rgba(34,197,94,0.18)', paddingHorizontal: r(22), paddingVertical: r(10), borderRadius: 999 },
+  tgDot:        { width: r(12), height: r(12), borderRadius: r(6), backgroundColor: '#22C55E' },
+  tgChipTxt:    { color: '#4ADE80', fontSize: r(26), fontWeight: '800' },
+  tgAv:         { width: r(52), height: r(52), borderRadius: r(26), borderWidth: 3, alignItems: 'center', justifyContent: 'center' },
+  tgAvTxt:      { color: '#fff', fontWeight: '800', fontSize: r(20) },
   tgBadgeTxt:   { color: '#fff', fontSize: r(15), fontWeight: '700', backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: r(14), paddingVertical: r(8), borderRadius: r(999), overflow: 'hidden' },
   tgToast:      { color: '#fff', fontSize: r(14), backgroundColor: 'rgba(229,9,20,0.85)', paddingHorizontal: r(12), paddingVertical: r(6), borderRadius: r(8), overflow: 'hidden' },
   root: { flex: 1, backgroundColor: '#000' },

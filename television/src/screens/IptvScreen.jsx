@@ -111,15 +111,15 @@ export default function IptvScreen({ navigation }) {
     });
   };
 
-  const openChannel = useCallback(async (ch) => {
+  const openChannel = useCallback(async (ch, idx) => {
     if (opening) return;
     setOpening(ch.stream_id);
     try {
       const { data } = await api.get(`/iptv/stream-url/${ch.stream_id}`, { params: { fmt: 'm3u8' } });
-      navigation.navigate('Player', { url: data.url, title: ch.name, tracks: { dubbing: data.url }, subtitles: {}, contentMeta: null });
+      navigation.navigate('Player', { url: data.url, title: ch.name, tracks: { dubbing: data.url }, subtitles: {}, contentMeta: null, live: { list: shown.slice(0, 300).map(c => ({ stream_id: c.stream_id, name: c.name, stream_icon: c.stream_icon })), index: idx || 0, cat: cur ? cur.category_name : '' } });
     } catch {}
     setOpening(null);
-  }, [opening, navigation]);
+  }, [opening, navigation, shown, cur]);
 
   const goBack = () => navigation.goBack();
 
@@ -171,10 +171,10 @@ export default function IptvScreen({ navigation }) {
         ) : (
           <FlatList key={'g' + COLS} data={shown} numColumns={COLS} keyExtractor={c => String(c.stream_id)} columnWrapperStyle={{ gap: r(18) }}
             contentContainerStyle={{ gap: r(18), paddingBottom: r(40), paddingHorizontal: r(8), paddingTop: r(8) }} showsVerticalScrollIndicator={false}
-            renderItem={({ item }) => (
+            renderItem={({ item, index }) => (
               <View style={{ flex: 1 / COLS }}>
                 <ChannelCard ch={item} fav={favs.some(f => f.stream_id === item.stream_id)} opening={opening === item.stream_id}
-                  onPress={() => openChannel(item)} onToggleFav={() => toggleFav(item)} />
+                  onPress={() => openChannel(item, index)} onToggleFav={() => toggleFav(item)} />
               </View>
             )} />
         )}

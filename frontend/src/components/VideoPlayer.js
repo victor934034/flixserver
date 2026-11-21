@@ -30,7 +30,7 @@ function fmt(s) {
   return `${m}:${String(sec).padStart(2,'0')}`;
 }
 
-export default function VideoPlayer({ content, onProgress, startAt = 0, onClose, onNextEpisode, nextEpisodeLabel, overlayTitle, sync }) {
+export default function VideoPlayer({ content, onProgress, startAt = 0, onClose, onNextEpisode, nextEpisodeLabel, overlayTitle, sync, together }) {
   const videoRef     = useRef(null);
   const containerRef = useRef(null);
   const hideTimer    = useRef(null);
@@ -462,7 +462,25 @@ export default function VideoPlayer({ content, onProgress, startAt = 0, onClose,
             </button>
           )}
           <span className={styles.topTitle}>{overlayTitle || content.title}</span>
+          {together && (
+            <div className={styles.tgRight}>
+              <span className={`${styles.tgChip} ${together.status === 'ready' ? '' : styles.tgWarn}`}>
+                <i />{together.status === 'ready' ? `Sincronizado · ${together.members.length} assistindo` : 'Ressincronizando…'}
+              </span>
+              <div className={styles.tgAvs}>
+                {together.members.slice(0, 4).map((m, i) => (
+                  <span key={m.id} className={`${styles.tgAv} ${m.voice ? styles.tgSpeak : ''}`} style={{ marginLeft: i ? -8 : 0, background: ['#7c3aed', '#0ea5e9', '#f97316', '#e11d48'][i % 4] }}>
+                    {m.avatar ? <img src={m.avatar} alt="" /> : String(m.name || '?').trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase()}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
+      )}
+
+      {together && together.toasts.length > 0 && (
+        <div className={styles.tgToasts}>{together.toasts.map(t => <span key={t.id}>{t.text}</span>)}</div>
       )}
 
       {/* Próximo episódio (aparece perto do fim / quando o vídeo termina) */}
