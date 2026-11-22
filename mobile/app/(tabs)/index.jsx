@@ -280,6 +280,10 @@ export default function HomeScreen() {
           </View>
         )}
 
+        {released.length > 0 && (
+          <ContentRow title="Recém lançados" items={released} type="mixed" />
+        )}
+
         <ContentRow title="Filmes" items={movies} type="movie" />
         <ContentRow title="Séries" items={series} type="series" />
         <SupportBanner />
@@ -311,10 +315,6 @@ export default function HomeScreen() {
               ))}
             </ScrollView>
           </View>
-        )}
-
-        {released.length > 0 && (
-          <ContentRow title="Recém lançados" items={released} type="mixed" />
         )}
 
         {recommended.length > 0 && (

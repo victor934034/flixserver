@@ -2,6 +2,7 @@ const router  = require('express').Router();
 const axios   = require('axios');
 const { supabase } = require('../services/supabase');
 const { authMiddleware } = require('../middleware/auth');
+const { castUrlFor } = require('./iptvCast');
 
 // IPTV_SERVER_URL aceita vários servidores separados por vírgula
 // (ex: http://onexx.live,http://onexx.sbs,http://onexx.pro). O primeiro é o
@@ -122,6 +123,17 @@ router.get('/stream-url/:streamId', authMiddleware, async (req, res) => {
     const url = `${server}/live/${encodeURIComponent(cred.xc_username)}/${encodeURIComponent(cred.xc_password)}/${streamId}.${fmt}`;
 
     res.json({ url });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /iptv/cast-url/:streamId — endereço do canal pro Chromecast (passa pelo proxy com CORS/HTTPS)
+router.get('/cast-url/:streamId', authMiddleware, async (req, res) => {
+  try {
+    const cred = await getUserCred(req.user.id);
+    if (!cred || !cred.active) return res.status(403).json({ error: 'Sem acesso IPTV ativo' });
+    res.json({ url: castUrlFor(req, req.user.id, req.params.streamId) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -59,6 +59,16 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' }, // imagens/legendas servidas a outros apps
 }));
 
+// Transmissão do IPTV pro Chromecast: o receiver (outra origem) busca lista e trechos
+// direto aqui, então esta rota é aberta a qualquer origem e fica ANTES do CORS restrito.
+// O acesso é protegido pelo token/assinatura de cada endereço, não pela origem.
+const iptvCast = require('./routes/iptvCast');
+app.use('/api/iptv/cast', (req, res, next) => {
+  res.set({ 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET, OPTIONS', 'Access-Control-Expose-Headers': '*' });
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+}, iptvCast.router);
+
 // CORS: FRONTEND_URL + CORS_ORIGINS (lista separada por vírgula, ex.: TVs/PWAs).
 // Apps nativos não mandam Origin, então não são afetados.
 const allowedOrigins = [process.env.FRONTEND_URL, ...(process.env.CORS_ORIGINS || '').split(',')]
@@ -79,7 +89,8 @@ const limiter = rateLimit({
   max: 2000,
   message: { error: 'Muitas requisições, tente novamente em alguns minutos.' },
   // Exclui auth (tem limiter próprio) e upload (admin autenticado, muitas requisições de partes)
-  skip: (req) => req.path.startsWith('/auth/') || req.path.startsWith('/upload/'),
+  // Cast do IPTV baixa um trecho a cada poucos segundos: contaria como centenas de requisições
+  skip: (req) => req.path.startsWith('/auth/') || req.path.startsWith('/upload/') || req.path.startsWith('/iptv/cast/'),
 });
 app.use('/api/', limiter);
 

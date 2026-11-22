@@ -11,6 +11,27 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import * as KeepAwake from 'expo-keep-awake';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { iptvQueue, streamUrl } from '../lib/iptvStore';
+import api from '../lib/api';
+
+// Chromecast: o módulo nativo só existe em build (não no Expo Go) — sem ele o botão some e o player segue normal.
+const isExpoGo = require('expo-constants').default?.executionEnvironment === 'storeClient';
+let CastButton = () => null;
+let CastState = {};
+let SessionManager = { endCurrentSession: async () => {} };
+let useCastDevice = () => null;
+let useCastState = () => null;
+let useRemoteMediaClient = () => null;
+if (!isExpoGo) {
+  try {
+    const cast = require('react-native-google-cast');
+    CastButton = cast.CastButton;
+    CastState = cast.CastState;
+    SessionManager = cast.SessionManager;
+    useCastDevice = cast.useCastDevice;
+    useCastState = cast.useCastState;
+    useRemoteMediaClient = cast.useRemoteMediaClient;
+  } catch {}
+}
 
 const ACCENT = '#E50914';
 
@@ -27,6 +48,17 @@ export default function IptvPlayerScreen() {
   const [drawer, setDrawer] = useState(false);
   const [hint, setHint] = useState(null); // { name, num, dir }
 
+  // ─── Chromecast: a TV busca o canal sozinha (só o endereço sai do celular) ───
+  const castClient = useRemoteMediaClient();
+  const castState = useCastState();
+  const castDevice = useCastDevice();
+  const isCasting = castState === CastState.CONNECTED && !!castClient;
+  const [castErr, setCastErr] = useState(null);
+  const wasCasting = useRef(false);
+  const curRef = useRef(null);
+
+  curRef.current = cur;
+
   const player = useVideoPlayer({ uri: cur.url }, p => {
     // buffer maior pra ao vivo: evita "carregando" a cada micro-travada da rede
     try { p.bufferOptions = { preferredForwardBufferDuration: 20, minBufferForPlayback: 2, waitsToMinimizeStalling: true }; } catch {}
@@ -40,6 +72,40 @@ export default function IptvPlayerScreen() {
   const isBuffering = (status === 'idle' || status === 'loading') && !playedOnce.current;
   const rebuffering = (status === 'loading') && playedOnce.current;
   const isError = status === 'error';
+
+  // Manda o canal (ou troca de canal) para a TV. O endereço passa pelo servidor (HTTPS + CORS), que o Chromecast exige.
+  const sendToCast = useCallback(async (client, ch) => {
+    try {
+      setCastErr(null);
+      const sid = ch.stream_id != null ? ch.stream_id : (iptvQueue.list[ch.index] || {}).stream_id;
+      if (sid == null) throw new Error('canal sem id');
+      const { data } = await api.get(`/iptv/cast-url/${sid}`);
+      await client.loadMedia({
+        mediaInfo: {
+          contentUrl: data.url,
+          contentType: 'application/x-mpegURL',
+          streamType: 'live',
+          metadata: { type: 'generic', title: String(ch.name || ''), images: ch.logo ? [{ url: String(ch.logo) }] : [] },
+        },
+        autoplay: true,
+      });
+    } catch {
+      setCastErr('Não foi possível transmitir este canal. Confira se a TV está na mesma rede e tente de novo.');
+    }
+  }, []);
+
+  // Ao conectar: pausa o canal no celular (senão toca nos dois) e manda pra TV. Ao desconectar: volta a tocar aqui.
+  useEffect(() => {
+    if (isCasting && !wasCasting.current) {
+      wasCasting.current = true;
+      try { player.pause(); } catch {}
+      sendToCast(castClient, curRef.current);
+    } else if (!isCasting && wasCasting.current) {
+      wasCasting.current = false;
+      setCastErr(null);
+      try { player.play(); } catch {}
+    }
+  }, [isCasting]);
 
   const ctrl = useRef(new Animated.Value(1)).current;
   const [ctrlOn, setCtrlOn] = useState(true);
@@ -76,7 +142,11 @@ export default function IptvPlayerScreen() {
       const u = await streamUrl(item.stream_id, 'm3u8');
       setCur({ name: item.name, logo: item.stream_icon || '', url: u, urlTs: u.replace('.m3u8', '.ts'), index });
       iptvQueue.index = index;
-      player.replace({ uri: u }); player.play();
+      if (isCasting) {
+        sendToCast(castClient, { name: item.name, logo: item.stream_icon || '', stream_id: item.stream_id });
+      } else {
+        player.replace({ uri: u }); player.play();
+      }
     } catch { setFailed(true); }
   };
   const go = (delta) => {
@@ -114,11 +184,11 @@ export default function IptvPlayerScreen() {
       <StatusBar hidden />
       <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="contain" nativeControls={false} surfaceType="textureView" />
 
-      {isBuffering && !failed && (
+      {isBuffering && !failed && !isCasting && (
         <View style={s.overlay} pointerEvents="none"><ActivityIndicator size="large" color={ACCENT} /><Text style={s.bufText}>Carregando canal…</Text></View>
       )}
 
-      {rebuffering && !failed && (
+      {rebuffering && !failed && !isCasting && (
         <View style={s.rebuf} pointerEvents="none"><ActivityIndicator size="small" color="#fff" /><Text style={s.rebufTxt}>Ajustando a conexão…</Text></View>
       )}
 
@@ -153,6 +223,17 @@ export default function IptvPlayerScreen() {
         </View>
       )}
 
+      {isCasting && !failed && (
+        <View style={s.castOverlay} pointerEvents="box-none">
+          <View style={s.castIcon}><Ionicons name="tv-outline" size={34} color="#fff" /></View>
+          <Text style={s.castTitle}>Transmitindo para {(castDevice && castDevice.friendlyName) || 'a TV'}</Text>
+          <Text style={s.castSub} numberOfLines={1}>{cur.name}</Text>
+          {castErr ? <Text style={s.castErr}>{castErr}</Text> : null}
+          <TouchableOpacity style={[s.redBtn, { marginTop: 8 }]} onPress={() => SessionManager.endCurrentSession()}><Text style={s.btnTxt}>Parar transmissão</Text></TouchableOpacity>
+          {q.length > 1 && <Text style={s.swipe}>Deslize ↑↓ para trocar de canal na TV</Text>}
+        </View>
+      )}
+
       {!failed && (
         <Animated.View style={[StyleSheet.absoluteFill, { opacity: ctrl }]} pointerEvents={ctrlOn ? 'box-none' : 'none'}>
           <View style={[s.top, { paddingTop: Math.max(insets.top, 10) }]}>
@@ -163,6 +244,11 @@ export default function IptvPlayerScreen() {
               {cat ? <Text style={s.cat} numberOfLines={1}>{cat}</Text> : null}
             </View>
             <View style={s.liveBadge}><View style={s.liveDot} /><Text style={s.liveTxt}>AO VIVO</Text></View>
+            <View style={[s.listBtn, isCasting && { backgroundColor: ACCENT }]}>
+              <Ionicons name="tv-outline" size={21} color="#fff" />
+              {/* O botão nativo fica por cima, transparente: abre a lista de Chromecasts ao tocar */}
+              <CastButton style={[StyleSheet.absoluteFillObject, { opacity: 0 }]} tintColor="transparent" />
+            </View>
             {q.length > 1 && <TouchableOpacity style={s.listBtn} onPress={() => { setDrawer(true); }}><Ionicons name="list" size={22} color="#fff" /></TouchableOpacity>}
           </View>
 
@@ -229,6 +315,11 @@ const s = StyleSheet.create({
   dNum: { color: '#888', width: 34, fontWeight: '700' },
   dLogo: { width: 40, height: 28, borderRadius: 6 },
   dName: { flex: 1, color: '#fff', fontWeight: '700', fontSize: 14 },
+  castOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: '#050505', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 30 },
+  castIcon: { width: 72, height: 72, borderRadius: 36, backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center' },
+  castTitle: { color: '#fff', fontSize: 22, fontWeight: '900', marginTop: 6 },
+  castSub: { color: '#A3A3A3', fontSize: 15 },
+  castErr: { color: '#FBBF24', fontSize: 13, textAlign: 'center', maxWidth: 420 },
   errRoot: { ...StyleSheet.absoluteFillObject, backgroundColor: '#000' },
   errTop: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16 },
   errName: { flex: 1, color: '#fff', fontWeight: '800', fontSize: 16 },
