@@ -43,7 +43,7 @@ export default function IptvPlayerScreen() {
   const insets = useSafeAreaInsets();
 
   const [cur, setCur] = useState({ name: String(name || ''), logo: String(logo || ''), url: String(url || ''), urlTs: String(urlTs || ''), index: iptvQueue.index });
-  const [attempt, setAttempt] = useState(0); // 0 m3u8, 1 ts
+  const [attempt, setAttempt] = useState(0); // 0 m3u8, 1 ts, 2 pelo servidor (HTTPS)
   const [failed, setFailed] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [hint, setHint] = useState(null); // { name, num, dir }
@@ -128,10 +128,22 @@ export default function IptvPlayerScreen() {
     };
   }, []);
 
-  // m3u8 falhou -> tenta .ts automaticamente; depois mostra o erro
+  // Terceira via: o canal passa pelo nosso servidor em HTTPS. O Android bloqueia HTTP puro em apps de loja
+  // e alguns provedores redirecionam pra IP — o servidor entrega o mesmo canal por HTTPS.
+  const playViaServer = async () => {
+    try {
+      const sid = (iptvQueue.list[curRef.current.index] || {}).stream_id;
+      if (sid == null) throw new Error('sem canal');
+      const { data } = await api.get(`/iptv/cast-url/${sid}`);
+      player.replace({ uri: data.url }); player.play();
+    } catch { setFailed(true); }
+  };
+
+  // m3u8 falhou -> tenta .ts; depois tenta pelo servidor (HTTPS); só então mostra o erro
   useEffect(() => {
     if (!isError) return;
     if (attempt === 0 && cur.urlTs && cur.urlTs !== cur.url) { setAttempt(1); player.replace({ uri: cur.urlTs }); player.play(); }
+    else if (attempt <= 1) { setAttempt(2); playViaServer(); }
     else setFailed(true);
   }, [isError]);
   useEffect(() => { if (status === 'readyToPlay') setFailed(false); }, [status]);
@@ -159,11 +171,16 @@ export default function IptvPlayerScreen() {
   };
   const retryAnother = () => { // "outro servidor": alterna o formato do stream (m3u8 <-> ts)
     setFailed(false);
-    const next = attempt === 0 ? cur.urlTs : cur.url;
-    setAttempt(a => (a === 0 ? 1 : 0));
-    player.replace({ uri: next || cur.url }); player.play();
+    const n = (attempt + 1) % 3;
+    setAttempt(n);
+    if (n === 2) playViaServer();
+    else { player.replace({ uri: (n === 1 ? cur.urlTs : cur.url) || cur.url }); player.play(); }
   };
-  const retry = () => { setFailed(false); player.replace({ uri: attempt === 0 ? cur.url : cur.urlTs }); player.play(); };
+  const retry = () => {
+    setFailed(false);
+    if (attempt === 2) playViaServer();
+    else { player.replace({ uri: attempt === 0 ? cur.url : cur.urlTs }); player.play(); }
+  };
 
   // swipe vertical troca de canal
   const goRef = useRef(go); goRef.current = go;
@@ -208,7 +225,7 @@ export default function IptvPlayerScreen() {
               <TouchableOpacity style={s.ghost} onPress={retry}><Text style={s.btnTxt}>Tentar de novo</Text></TouchableOpacity>
               <TouchableOpacity style={s.ghost} onPress={() => router.back()}><Text style={s.btnTxt}>Ver canais</Text></TouchableOpacity>
             </View>
-            <Text style={s.errCode}>Servidor {attempt + 1} de 2 · código ERR_STREAM_TIMEOUT</Text>
+            <Text style={s.errCode}>Servidor {attempt + 1} de 3 · código ERR_STREAM_TIMEOUT</Text>
           </View>
         </View>
       )}
@@ -254,7 +271,7 @@ export default function IptvPlayerScreen() {
 
           <View style={[s.bottom, { paddingBottom: Math.max(insets.bottom, 12) }]}>
             <TouchableOpacity onPress={togglePlay} style={s.pp}><Ionicons name={isPlaying ? 'pause' : 'play'} size={26} color="#fff" /></TouchableOpacity>
-            <View style={s.quality}><Ionicons name="cellular" size={14} color="#22C55E" /><Text style={s.qTxt}>Ao vivo · {attempt === 0 ? 'HLS' : 'TS'}</Text></View>
+            <View style={s.quality}><Ionicons name="cellular" size={14} color="#22C55E" /><Text style={s.qTxt}>Ao vivo · {attempt === 0 ? 'HLS' : attempt === 1 ? 'TS' : 'Seguro'}</Text></View>
             <View style={{ flex: 1 }} />
             {q.length > 1 && <Text style={s.swipe}>Deslize ↑↓ para trocar</Text>}
           </View>
