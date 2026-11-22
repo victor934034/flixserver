@@ -66,7 +66,8 @@ export default function IptvPlayerScreen() {
   });
   const playedOnce = useRef(false);
   const { isPlaying = false } = useEvent(player, 'playingChange', { isPlaying: false });
-  const { status = 'idle' } = useEvent(player, 'statusChange', { status: 'idle' });
+  const { status = 'idle', error: playerErr = null } = useEvent(player, 'statusChange', { status: 'idle' });
+  const [errLog, setErrLog] = useState([]); // motivo real de cada tentativa (diagnóstico)
   useEffect(() => { if (status === 'readyToPlay') playedOnce.current = true; }, [status]);
   // 1ª abertura: tela de carregando. Depois de já ter tocado, travadas viram só um aviso discreto.
   const isBuffering = (status === 'idle' || status === 'loading') && !playedOnce.current;
@@ -142,6 +143,7 @@ export default function IptvPlayerScreen() {
   // m3u8 falhou -> tenta .ts; depois tenta pelo servidor (HTTPS); só então mostra o erro
   useEffect(() => {
     if (!isError) return;
+    setErrLog(l => [...l, `${['HLS', 'TS', 'Seguro'][attempt] || attempt}: ${(playerErr && playerErr.message) || 'sem detalhe'}`.slice(0, 220)]);
     if (attempt === 0 && cur.urlTs && cur.urlTs !== cur.url) { setAttempt(1); player.replace({ uri: cur.urlTs }); player.play(); }
     else if (attempt <= 1) { setAttempt(2); playViaServer(); }
     else setFailed(true);
@@ -149,7 +151,7 @@ export default function IptvPlayerScreen() {
   useEffect(() => { if (status === 'readyToPlay') setFailed(false); }, [status]);
 
   const load = async (item, index) => {
-    setFailed(false); setAttempt(0); playedOnce.current = false;
+    setFailed(false); setAttempt(0); setErrLog([]); playedOnce.current = false;
     try {
       const u = await streamUrl(item.stream_id, 'm3u8');
       setCur({ name: item.name, logo: item.stream_icon || '', url: u, urlTs: u.replace('.m3u8', '.ts'), index });
@@ -226,6 +228,7 @@ export default function IptvPlayerScreen() {
               <TouchableOpacity style={s.ghost} onPress={() => router.back()}><Text style={s.btnTxt}>Ver canais</Text></TouchableOpacity>
             </View>
             <Text style={s.errCode}>Servidor {attempt + 1} de 3 · código ERR_STREAM_TIMEOUT</Text>
+            {errLog.map((e, i) => <Text key={i} style={s.errDetail}>{e}</Text>)}
           </View>
         </View>
       )}
@@ -349,5 +352,6 @@ const s = StyleSheet.create({
   redBtn: { height: 46, paddingHorizontal: 20, borderRadius: 12, backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center' },
   ghost: { height: 46, paddingHorizontal: 20, borderRadius: 12, borderWidth: 1, borderColor: '#333', alignItems: 'center', justifyContent: 'center' },
   btnTxt: { color: '#fff', fontWeight: '800', fontSize: 14 },
+  errDetail: { color: '#F87171', fontSize: 11, textAlign: 'center', maxWidth: 560 },
   errCode: { color: '#666', fontSize: 12, marginTop: 4 },
 });
