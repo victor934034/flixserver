@@ -74,7 +74,8 @@
           "androidPlayServicesCastFrameworkVersion": "22.0.0"
         }
       ],
-      "./plugins/withOptionalFeatures"
+      "./plugins/withOptionalFeatures",
+      ["expo-build-properties", { "android": { "usesCleartextTraffic": true } }]
     ],
     "experiments": {
       "typedRoutes": true

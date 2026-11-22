@@ -21,9 +21,19 @@ const unb64 = s => Buffer.from(s, 'base64url').toString();
 const sign = (u, e) => crypto.createHmac('sha256', secret()).update(`${u}|${e}`).digest('hex').slice(0, 32);
 const safeEq = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); };
 
+// Endereço PÚBLICO do servidor. Atrás do proxy (Easypanel) o cabeçalho Host chega como
+// "localhost:3001", então: variável de ambiente > host encaminhado pelo proxy > padrão de produção.
 function baseUrl(req) {
-  const proto = String(req.get('x-forwarded-proto') || req.protocol || 'https').split(',')[0].trim();
-  return `${proto}://${req.get('host')}`;
+  const fixed = process.env.PUBLIC_BASE_URL || process.env.BACKEND_URL;
+  if (fixed) return String(fixed).replace(/\/$/, '');
+  const fwdHost = String(req.get('x-forwarded-host') || '').split(',')[0].trim();
+  if (fwdHost && !/^(localhost|127\.)/i.test(fwdHost)) {
+    const proto = String(req.get('x-forwarded-proto') || 'https').split(',')[0].trim();
+    return `${proto}://${fwdHost}`;
+  }
+  const host = String(req.get('host') || '');
+  if (host && !/^(localhost|127\.)/i.test(host)) return `${req.protocol || 'https'}://${host}`;
+  return 'https://movies0-movie.mgf7wb.easypanel.host';
 }
 
 // Endereço que o celular entrega ao Chromecast
