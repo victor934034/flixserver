@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { HashRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
+import { fetchHomeBase, fetchHomeProfile, fetchCatalog, assembleHome, preloadImages, posterOf } from './lib/homeData.js';
 import { AuthProvider, useAuth }    from './contexts/AuthContext.jsx';
 import LoginScreen                  from './screens/LoginScreen.jsx';
 import HomeScreen                   from './screens/HomeScreen.jsx';
@@ -54,9 +55,11 @@ function Guard({ children }) {
 
 function SubscriptionGate() {
   const { user, loading, hasValidSubscription, activeProfile } = useAuth();
+  const [params] = useSearchParams();
   if (loading) return <Blank />;
   if (!user) return <Navigate to="/login" replace />;
-  if (hasValidSubscription()) return activeProfile ? <Navigate to="/" replace /> : <Navigate to="/profile-select" replace />;
+  // "Ver planos IPTV" abre /subscription?tab=iptv mesmo com plano ativo (antes voltava pra Home)
+  if (hasValidSubscription() && params.get('tab') !== 'iptv') return activeProfile ? <Navigate to="/" replace /> : <Navigate to="/profile-select" replace />;
   return <SubscriptionScreen />;
 }
 
@@ -114,8 +117,8 @@ function SplashOrchestrator({ children }) {
   }
 
   useEffect(() => {
-    // Minimum splash time: 2 seconds
-    const t = setTimeout(() => { minTimeDone.current = true; tryFinish(); }, 2000);
+    // Tempo mínimo da abertura: 5 segundos
+    const t = setTimeout(() => { minTimeDone.current = true; tryFinish(); }, 5000);
     return () => clearTimeout(t);
   }, []);
 
@@ -123,55 +126,33 @@ function SplashOrchestrator({ children }) {
     // Pre-fetch home data as soon as auth resolves
     if (authLoading) return;
 
+    // Tudo que o app usa é carregado AQUI, antes de entrar: assim a navegação não espera rede
     const doFetch = async () => {
       try {
-        const profileId = activeProfile && activeProfile.id;
-
-        const [pm, nm, ps, ns, hist] = await Promise.allSettled([
-          moviesAPI.popular().then(r => r.data || []),
-          moviesAPI.newReleases().then(r => r.data || []),
-          seriesAPI.popular().then(r => r.data || []),
-          seriesAPI.newReleases().then(r => r.data || []),
-          user
-            ? api.get('/api/history' + (profileId ? '?profile_id=' + profileId : '')).then(r => r.data || []).catch(() => [])
-            : Promise.resolve([]),
-        ]);
-
-        const val  = r => r.status === 'fulfilled' ? r.value : [];
-        const seen = new Set();
-        const dedup = arr => arr.filter(it => {
-          if (seen.has(it.id)) return false; seen.add(it.id); return true;
-        }).slice(0, 18);
-
-        const history = val(hist).filter(h => h.progress > 0 && h.duration > 0 && !h.completed).slice(0, 12);
-        const pm_ = dedup(val(pm));
-        const nm_ = dedup(val(nm));
-        const ps_ = dedup(val(ps));
-        const ns_ = dedup(val(ns));
-
-        const homeSections = [
-          history.length > 0 ? { key: 'history', title: 'Continue Assistindo', data: history } : null,
-          { key: 'pm', title: 'Filmes em Alta',  data: pm_ },
-          { key: 'ps', title: 'Séries em Alta',  data: ps_ },
-          { key: 'nm', title: 'Filmes Novos',    data: nm_ },
-          { key: 'ns', title: 'Séries Novas',    data: ns_ },
-        ].filter(Boolean).filter(s => s.data.length > 0);
-
-        prefetchCache['home']   = { featured: pm_[0] || ps_[0] || null, sections: homeSections };
-        prefetchCache['movies'] = {
-          featured: pm_[0] || null,
-          sections: [
-            { key: 'pm', title: 'Mais Assistidos', data: pm_ },
-            { key: 'nm', title: 'Novidades',        data: nm_ },
-          ].filter(s => s.data.length > 0),
-        };
-        prefetchCache['series'] = {
-          featured: ps_[0] || null,
-          sections: [
-            { key: 'ps', title: 'Mais Assistidas', data: ps_ },
-            { key: 'ns', title: 'Novidades',        data: ns_ },
-          ].filter(s => s.data.length > 0),
-        };
+        if (user) {
+          const profileId = activeProfile && activeProfile.id;
+          const work = (async () => {
+            const [base, prof, mov, ser] = await Promise.all([
+              fetchHomeBase(),
+              fetchHomeProfile(profileId, true),
+              fetchCatalog('movies'),
+              fetchCatalog('series'),
+            ]);
+            prefetchCache.homeBase = base;
+            prefetchCache['profile:' + (profileId || '')] = prof;
+            prefetchCache['catalog:movies'] = mov;
+            prefetchCache['catalog:series'] = ser;
+            const home = assembleHome(base, prof);
+            // Banners (capa grande) primeiro: são os que mais demoram a aparecer
+            const urls = [home.featured && home.featured.backdrop_url, mov.featured && mov.featured.backdrop_url, ser.featured && ser.featured.backdrop_url];
+            home.sections.forEach(s => s.data.slice(0, 14).forEach(it => urls.push(posterOf(it))));
+            mov.sections.forEach(s => s.data.slice(0, 32).forEach(it => urls.push(posterOf(it))));
+            ser.sections.forEach(s => s.data.slice(0, 32).forEach(it => urls.push(posterOf(it))));
+            await preloadImages(urls, 25000);
+          })();
+          // Limite: se a rede estiver muito ruim, entra mesmo assim depois de 40s
+          await Promise.race([work, new Promise(r => setTimeout(r, 40000))]);
+        }
       } catch {}
 
       prefetchDone.current = true;

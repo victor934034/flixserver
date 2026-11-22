@@ -145,10 +145,14 @@ export default function SubscriptionScreen({ navigation, route }) {
 
   useEffect(() => {
     if (!qrUrl) return undefined;
+    // Quem já tem plano (ex.: contratando IPTV) só conta como pago quando a validade AUMENTA
+    let baseline = 0;
+    api.get('/auth/me').then(r => { baseline = r.data?.plan_expires_at ? new Date(r.data.plan_expires_at).getTime() : 0; }).catch(() => {});
     const t = setInterval(async () => {
       try {
         const { data } = await api.get('/auth/me');
-        if (data?.plan_expires_at && new Date(data.plan_expires_at).getTime() > Date.now()) { await refreshUser?.(); navigation.replace('Home'); }
+        const exp = data?.plan_expires_at ? new Date(data.plan_expires_at).getTime() : 0;
+        if (exp > Date.now() && exp > baseline) { await refreshUser?.(); navigation.replace('Home'); }
       } catch {}
     }, 4000);
     return () => clearInterval(t);

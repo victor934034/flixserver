@@ -21,7 +21,7 @@ const TABS = [
 ];
 
 export default function SubscriptionScreen() {
-  const { logout, user } = useAuth();
+  const { logout, user, hasValidSubscription } = useAuth();
   const navigate         = useNavigate();
   const [searchParams]   = useSearchParams();
   const initialTab       = searchParams.get('tab') === 'iptv' ? 1 : 0;
@@ -57,10 +57,14 @@ export default function SubscriptionScreen() {
 
   useEffect(() => {
     if (!qrUrl) return undefined;
+    // Quem já tem plano (ex.: contratando IPTV) só conta como pago quando a validade AUMENTA
+    let baseline = 0;
+    api.get('/api/auth/me').then(r => { baseline = r.data && r.data.plan_expires_at ? new Date(r.data.plan_expires_at).getTime() : 0; }).catch(() => {});
     const t = setInterval(async () => {
       try {
         const { data } = await api.get('/api/auth/me');
-        if (data && data.plan_expires_at && new Date(data.plan_expires_at).getTime() > Date.now()) window.location.reload();
+        const exp = data && data.plan_expires_at ? new Date(data.plan_expires_at).getTime() : 0;
+        if (exp > Date.now() && exp > baseline) { window.location.hash = '#/'; window.location.reload(); }
       } catch (e) {}
     }, 4000);
     return () => clearInterval(t);
@@ -135,7 +139,7 @@ export default function SubscriptionScreen() {
       else { logout(); }
     } else if (k === KEY.BACK) {
       e.preventDefault();
-      logout();
+      if (hasValidSubscription()) navigate(-1); else logout();
     }
   }, []);
 

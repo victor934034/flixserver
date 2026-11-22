@@ -22,10 +22,12 @@ export default function SplashScreen({ onReady }) {
   useEffect(() => {
     // Minimum display time + progress animation
     const steps = [
-      { at: 100,  p: 20, text: 'Conectando…' },
-      { at: 600,  p: 50, text: 'Carregando catálogo…' },
-      { at: 1200, p: 75, text: 'Quase lá…' },
-      { at: 1800, p: 92, text: 'Preparando tudo…' },
+      { at: 100,   p: 10, text: 'Conectando…' },
+      { at: 1500,  p: 30, text: 'Carregando catálogo…' },
+      { at: 4000,  p: 55, text: 'Baixando banners e capas…' },
+      { at: 8000,  p: 75, text: 'Quase lá…' },
+      { at: 14000, p: 88, text: 'Preparando tudo…' },
+      { at: 22000, p: 94, text: 'Só mais um instante…' },
     ];
     const timers = steps.map(s =>
       setTimeout(() => { setProgress(s.p); setLabel(s.text); }, s.at)
@@ -66,6 +68,15 @@ export default function SplashScreen({ onReady }) {
       pointerEvents: visible ? 'auto' : 'none',
     }}>
       {/* Logo */}
+      <img
+        src="/icon.png"
+        alt="FlixHome"
+        style={{
+          width: 120, height: 120, borderRadius: 24, objectFit: 'cover',
+          marginBottom: 28,
+          boxShadow: '0 0 60px rgba(201,28,44,0.35), 0 8px 40px rgba(0,0,0,0.8)',
+        }}
+      />
       <div style={{
         fontSize: 72, fontWeight: 900, letterSpacing: 12,
         color: '#c91c2c',

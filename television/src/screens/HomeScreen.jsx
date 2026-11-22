@@ -423,6 +423,60 @@ function SearchPanel({ query, onKey, results, defaultItems = [], placeholder, lo
   );
 }
 
+// ─── Filtros do catálogo (iguais ao app): data de lançamento, nota mínima e ordem
+const YEAR = new Date().getFullYear();
+const DATE_PRESETS = [
+  { key: '',      label: 'Qualquer data' },
+  { key: '30d',   label: 'Últimos 30 dias' },
+  { key: '180d',  label: 'Últimos 6 meses' },
+  { key: 'year',  label: `Este ano (${YEAR})` },
+  { key: '2020s', label: 'Anos 2020' },
+  { key: '2010s', label: 'Anos 2010' },
+  { key: '2000s', label: 'Anos 2000' },
+  { key: '1990s', label: 'Anos 90' },
+];
+const RATINGS = [0, 5, 6, 7, 8, 9];
+const SORTS = [
+  { key: 'az',      label: 'A–Z' },
+  { key: 'release', label: 'Lançamento' },
+  { key: 'oldest',  label: 'Mais antigos' },
+  { key: 'rating',  label: 'Melhor avaliados' },
+];
+const nextOf = (list, cur, keyOf) => list[(list.findIndex(x => keyOf(x) === cur) + 1) % list.length];
+const yearOf = it => Number(it.year ?? it.year_start) || 0;
+function matchDate(it, key) {
+  if (!key) return true;
+  if (key === '30d' || key === '180d') {
+    if (!it.release_date) return false;
+    const from = new Date(Date.now() - (key === '30d' ? 30 : 180) * 86400000).toISOString().slice(0, 10);
+    const today = new Date().toISOString().slice(0, 10);
+    return it.release_date >= from && it.release_date <= today;
+  }
+  const y = yearOf(it);
+  if (key === 'year') return y === YEAR;
+  const start = Number(key.slice(0, 4));
+  return y >= start && y <= start + 9;
+}
+
+const FilterBtn = React.forwardRef(function FilterBtn({ label, active, onPress, onFocus, nextFocusUp, nextFocusDown, nextFocusLeft, nextFocusRight }, ref) {
+  const [foc, setFoc] = useState(false);
+  return (
+    <TVPressable
+      ref={ref}
+      onPress={onPress}
+      onFocus={() => { setFoc(true); onFocus?.(); }}
+      onBlur={() => setFoc(false)}
+      nextFocusUp={nextFocusUp}
+      nextFocusDown={nextFocusDown}
+      nextFocusLeft={nextFocusLeft}
+      nextFocusRight={nextFocusRight}
+      style={[s.genreBtn, active && s.filterBtnOn, foc && s.genreBtnFoc]}
+    >
+      <Text style={[s.genreBtnTxt, foc && s.genreBtnTxtFoc]} numberOfLines={1}>{label}</Text>
+    </TVPressable>
+  );
+});
+
 // ─── Genre filter dropdown (Filmes/Series) ────────────────────────────────────
 const GenreButton = React.forwardRef(function GenreButton(
   { label, open, onPress, onFocus, nextFocusUp, nextFocusDown, nextFocusRight }, ref
@@ -517,6 +571,9 @@ export default function HomeScreen({ navigation }) {
   const [catalogSeries, setCatalogSeries] = useState(null);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogGenre, setCatalogGenre]   = useState(null); // filtro ativo (Filmes/Series)
+  const [dateKey, setDateKey]         = useState('');
+  const [minRating, setMinRating]     = useState(0);
+  const [sortKey, setSortKey]         = useState('az');
   const [genreOpen, setGenreOpen]         = useState(false);
   const [searchTypeFilter, setSearchTypeFilter] = useState(null); // 'movie' | 'series' | null
   const [recommendations, setRecommendations] = useState([]);
@@ -550,6 +607,9 @@ export default function HomeScreen({ navigation }) {
   const assistirRef = useRef(null);
   const maisInfoRef = useRef(null);
   const genreBtnRef = useRef(null);
+  const dateBtnRef = useRef(null);
+  const ratingBtnRef = useRef(null);
+  const sortBtnRef = useRef(null);
   const searchBtnRef = useRef(null);
   const rowRefsMap = useRef({}).current;
   function getRowRef(i) {
@@ -707,7 +767,7 @@ export default function HomeScreen({ navigation }) {
         ? api.get('/history', { params: profileParams }).catch(() => ({ data: [] }))
         : Promise.resolve({ data: [] });
       const recsReq = api.get('/recommendations', { params: profileParams }).catch(() => ({ data: [] }));
-      const [feat, nm, ns, pm, ps, hist, recs] = await Promise.all([
+      const [feat, nm, ns, pm, ps, hist, recs, relM, relS] = await Promise.all([
         api.get('/featured').catch(() => ({ data: [] })),
         api.get('/movies/section/new').catch(() => ({ data: [] })),
         api.get('/series/section/new').catch(() => ({ data: [] })),
@@ -715,9 +775,15 @@ export default function HomeScreen({ navigation }) {
         api.get('/series/section/popular').catch(() => ({ data: [] })),
         historyReq,
         recsReq,
+        api.get('/movies/section/released').catch(() => ({ data: [] })),
+        api.get('/series/section/released').catch(() => ({ data: [] })),
       ]);
       const a = d => (Array.isArray(d.data) ? d.data : []);
-      const [fl, nm2, ns2, pm2, ps2, hist2, recs2] = [feat, nm, ns, pm, ps, hist, recs].map(a);
+      const [fl, nm2, ns2, pm2, ps2, hist2, recs2, relM2, relS2] = [feat, nm, ns, pm, ps, hist, recs, relM, relS].map(a);
+      // Recém lançados: pela data real de lançamento (filmes + séries misturados)
+      const released2 = [...relM2, ...relS2]
+        .sort((x, y) => String(y.release_date || '').localeCompare(String(x.release_date || '')))
+        .slice(0, 20);
       setFeatured(fl[0] || nm2[0] || pm2[0] || null);
       setRecommendations(recs2);
 
@@ -741,6 +807,7 @@ export default function HomeScreen({ navigation }) {
 
       setSections([
         ...(continuing.length > 0 ? [{ title: 'Continuar Assistindo', data: continuing, type: 'mixed' }] : []),
+        ...(released2.length > 0 ? [{ title: 'Recém lançados', data: released2, type: 'mixed' }] : []),
         ...(recs2.length > 0 ? [{ title: 'Recomendados pra você', data: recs2, type: 'mixed' }] : []),
         { title: 'Lançamentos — Filmes', data: nm2, type: 'movie'  },
         { title: 'Lançamentos — Séries', data: ns2, type: 'series' },
@@ -789,9 +856,16 @@ export default function HomeScreen({ navigation }) {
   const filteredCatalog = useMemo(() => {
     const list = activeNav === 1 ? catalogMovies : activeNav === 2 ? catalogSeries : null;
     if (!list) return [];
-    if (!catalogGenre) return list;
-    return list.filter(it => (it.genres || []).includes(catalogGenre));
-  }, [activeNav, catalogMovies, catalogSeries, catalogGenre]);
+    let out = list.filter(it =>
+      (!catalogGenre || (it.genres || []).includes(catalogGenre)) &&
+      matchDate(it, dateKey) &&
+      (!minRating || Number(it.rating) >= minRating));
+    if (sortKey === 'release') out = [...out].sort((a, b) => String(b.release_date || '').localeCompare(String(a.release_date || '')));
+    else if (sortKey === 'oldest') out = [...out].sort((a, b) => String(a.release_date || '9999').localeCompare(String(b.release_date || '9999')));
+    else if (sortKey === 'rating') out = [...out].sort((a, b) => (Number(b.rating) || 0) - (Number(a.rating) || 0));
+    else if (sortKey === 'az') out = [...out].sort((a, b) => String(a.title || '').localeCompare(String(b.title || ''), 'pt'));
+    return out;
+  }, [activeNav, catalogMovies, catalogSeries, catalogGenre, dateKey, minRating, sortKey]);
 
   // defaultItems da busca, já filtrados por tipo quando aberta via botão de
   // seção (Filmes/Series) — prioriza recomendações antes do catálogo geral.
@@ -856,6 +930,7 @@ export default function HomeScreen({ navigation }) {
     setActiveNav(idx);
     if (idx !== 4) { setSearchQuery(''); setSearchTypeFilter(null); }
     setCatalogGenre(null);
+    setDateKey(''); setMinRating(0); setSortKey('az');
     setGenreOpen(false);
     setSidebarOpen(false);
     setGrabContentFocus(true);
@@ -1067,7 +1142,7 @@ export default function HomeScreen({ navigation }) {
                           onPress={() => setGenreOpen(o => !o)}
                           nextFocusUp={findNodeHandle(assistirRef.current)}
                           nextFocusDown={findNodeHandle(getRowRef(0).current)}
-                          nextFocusRight={findNodeHandle(searchBtnRef.current)}
+                          nextFocusRight={findNodeHandle(dateBtnRef.current)}
                         />
 
                         {genreOpen && (
@@ -1083,14 +1158,50 @@ export default function HomeScreen({ navigation }) {
                       </View>
                     ) : <View />}
 
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: r(10) }}>
+                    <FilterBtn
+                      ref={dateBtnRef}
+                      label={'Data: ' + (DATE_PRESETS.find(p => p.key === dateKey) || DATE_PRESETS[0]).label}
+                      active={!!dateKey}
+                      onPress={() => setDateKey(k => nextOf(DATE_PRESETS, k, p => p.key).key)}
+                      onFocus={onContentFoc}
+                      nextFocusUp={findNodeHandle(assistirRef.current)}
+                      nextFocusDown={findNodeHandle(getRowRef(0).current)}
+                      nextFocusLeft={catalogGenres.length > 0 ? findNodeHandle(genreBtnRef.current) : undefined}
+                      nextFocusRight={findNodeHandle(ratingBtnRef.current)}
+                    />
+                    <FilterBtn
+                      ref={ratingBtnRef}
+                      label={'Nota: ' + (minRating > 0 ? `★ ${minRating}+` : 'Todas')}
+                      active={minRating > 0}
+                      onPress={() => setMinRating(v => nextOf(RATINGS, v, x => x))}
+                      onFocus={onContentFoc}
+                      nextFocusUp={findNodeHandle(assistirRef.current)}
+                      nextFocusDown={findNodeHandle(getRowRef(0).current)}
+                      nextFocusLeft={findNodeHandle(dateBtnRef.current)}
+                      nextFocusRight={findNodeHandle(sortBtnRef.current)}
+                    />
+                    <FilterBtn
+                      ref={sortBtnRef}
+                      label={'Ordem: ' + (SORTS.find(p => p.key === sortKey) || SORTS[0]).label}
+                      active={sortKey !== 'az'}
+                      onPress={() => setSortKey(k => nextOf(SORTS, k, p => p.key).key)}
+                      onFocus={onContentFoc}
+                      nextFocusUp={findNodeHandle(assistirRef.current)}
+                      nextFocusDown={findNodeHandle(getRowRef(0).current)}
+                      nextFocusLeft={findNodeHandle(ratingBtnRef.current)}
+                      nextFocusRight={findNodeHandle(searchBtnRef.current)}
+                    />
+
                     <SectionSearchBtn
                       ref={searchBtnRef}
                       onPress={() => openSectionSearch(activeNav === 1 ? 'movie' : 'series')}
                       onFocus={onContentFoc}
                       nextFocusUp={findNodeHandle(assistirRef.current)}
                       nextFocusDown={findNodeHandle(getRowRef(0).current)}
-                      nextFocusLeft={catalogGenres.length > 0 ? findNodeHandle(genreBtnRef.current) : undefined}
+                      nextFocusLeft={findNodeHandle(sortBtnRef.current)}
                     />
+                    </View>
                   </View>
 
                   {catalogLoading && !(activeNav === 1 ? catalogMovies : catalogSeries)?.length ? (
@@ -1119,7 +1230,7 @@ export default function HomeScreen({ navigation }) {
                           item={item}
                           onPress={() => openDetail(item, activeNav === 1 ? 'movie' : 'series')}
                           onFocus={onContentFoc}
-                          nextFocusUp={index < CATALOG_COLS ? findNodeHandle(catalogGenres.length > 0 ? genreBtnRef.current : searchBtnRef.current) : undefined}
+                          nextFocusUp={index < CATALOG_COLS ? findNodeHandle(catalogGenres.length > 0 ? genreBtnRef.current : dateBtnRef.current) : undefined}
                         />
                       )}
                     />
@@ -1302,6 +1413,7 @@ const s = StyleSheet.create({
     borderWidth: r(2), borderColor: 'transparent',
     paddingHorizontal: r(14), paddingVertical: r(9),
   },
+  filterBtnOn: { backgroundColor: 'rgba(229,9,20,0.25)' },
   genreBtnFoc: { backgroundColor: '#E50914', borderColor: '#fff' },
   genreBtnTxt: { color: '#ccc', fontSize: r(14), fontWeight: '700' },
   genreBtnTxtFoc: { color: '#fff' },

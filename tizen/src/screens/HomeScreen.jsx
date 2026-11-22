@@ -1,22 +1,43 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
-import { moviesAPI, seriesAPI, watchlistAPI } from '../api/index.js';
+import { moviesAPI, seriesAPI, watchlistAPI, recommendationsAPI } from '../api/index.js';
 import api from '../api/index.js';
 import { prefetchCache } from '../App.jsx';
 import Sidebar from '../components/Sidebar.jsx';
+import { fetchHomeBase, fetchHomeProfile, fetchCatalog, assembleHome, filterCatalog } from '../lib/homeData.js';
 import { KEY, useKeyDown } from '../hooks/useNav.js';
 
-const NAV       = ['home', 'movies', 'series', 'search', 'iptv', 'minha-lista'];
+const NAV       = ['home', 'movies', 'series', 'minha-lista', 'search', 'iptv'];
 const ACCENT    = '#c91c2c';
 
 // Card sizes (from DC design spec)
-const PORT_W    = 172;  // portrait card width
-const PORT_H    = 208;  // portrait card height
-const LAND_W    = 306;  // landscape card (continue watching)
-const LAND_H    = 128;
-const CARD_GAP  = 14;
+const PORT_W    = 196;  // portrait card width
+const PORT_H    = 294;  // portrait card height (2:3 poster ratio)
+const CARD_GAP  = 18;
 const PAD_L     = 48;   // row padding from content edge
+
+// Filtros do catálogo (iguais ao app): data de lançamento, nota mínima e ordem
+const YEAR = new Date().getFullYear();
+const DATE_PRESETS = [
+  { key: '',      label: 'Qualquer data',        q: {} },
+  { key: '30d',   label: 'Últimos 30 dias',      q: { released_days: 30 } },
+  { key: '180d',  label: 'Últimos 6 meses',      q: { released_days: 180 } },
+  { key: 'year',  label: 'Este ano (' + YEAR + ')', q: { year_from: YEAR, year_to: YEAR } },
+  { key: '2020s', label: 'Anos 2020',            q: { year_from: 2020, year_to: 2029 } },
+  { key: '2010s', label: 'Anos 2010',            q: { year_from: 2010, year_to: 2019 } },
+  { key: '2000s', label: 'Anos 2000',            q: { year_from: 2000, year_to: 2009 } },
+  { key: '1990s', label: 'Anos 90',              q: { year_from: 1990, year_to: 1999 } },
+];
+const RATINGS = [0, 5, 6, 7, 8, 9];
+const SORTS = [
+  { key: 'az',      label: 'A–Z',              q: { sort: 'title', order: 'asc' } },
+  { key: 'recent',  label: 'Mais recentes',    q: { sort: 'created_at', order: 'desc' } },
+  { key: 'release', label: 'Lançamento',       q: { sort: 'release_date', order: 'desc' } },
+  { key: 'oldest',  label: 'Mais antigos',     q: { sort: 'release_date', order: 'asc' } },
+  { key: 'rating',  label: 'Melhor avaliados', q: { sort: 'rating', order: 'desc' } },
+];
+const MENU_LABEL = { genre: 'Categoria', date: 'Data', rating: 'Nota', sort: 'Ordem' };
 
 // ── RAF smooth scroll ─────────────────────────────────────────────────────────
 function smoothScroll(el, prop, target, rafRef) {
@@ -35,35 +56,62 @@ function smoothScroll(el, prop, target, rafRef) {
   rafRef.current = requestAnimationFrame(step);
 }
 
+// Series so mostra selo quando P&B (audio DUB/LEG/CAM varia por episodio,
+// nao faz sentido resumir num card so). Filme mostra a versao mais notavel.
+function getVersionBadge(item) {
+  const isSeries = item.total_seasons !== undefined;
+  if (isSeries) return item.has_bw ? 'P&B' : null;
+  if (item.file_bw) return 'P&B';
+  if (item.file_cinema) return 'CAM';
+  if (item.file_dubbing) return 'DUB';
+  if (item.file_subtitled) return 'LEG';
+  if (item.file_4k) return '4K';
+  if (item.file_color) return 'COR';
+  return null;
+}
+
 // ── Portrait card (172×208) ───────────────────────────────────────────────────
-function PortraitCard({ item, focused, hovered, onClick, onEnter, onLeave }) {
+const PortraitCard = React.memo(function PortraitCard({ item, focused, onClick, width, height }) {
+  const W = width || PORT_W;
+  const H = height || PORT_H;
   const img   = item.poster_url || item.backdrop_url || item.thumbnail_url;
   const title = item.title || item.name || item.episode_title || '';
-  const isHighlit = focused || hovered;
+  const isHighlit = focused;
+  const versionBadge = getVersionBadge(item);
 
+  // Sombra/glow e a transicao de scale so custam caro quando aplicadas nos
+  // ~460 cards do catalogo de uma vez (box-shadow forca rasterizacao por
+  // item, e "transition" promove cada card a sua propria camada de
+  // composicao). Aplicando isso SO no card focado (o unico que muda), o
+  // resto da grade fica estatico e barato de pintar - navegacao volta a
+  // ficar fluida sem perder o efeito visual.
   return (
     <div
       onClick={onClick}
-      onMouseEnter={onEnter}
-      onMouseLeave={onLeave}
-      style={{
-        flexShrink: 0, width: PORT_W, cursor: 'pointer',
-        position: 'relative',
+      style={isHighlit ? {
+        flexShrink: 0, width: W, cursor: 'pointer', position: 'relative',
+        transform: 'scale(1.07)', transition: 'transform 0.15s ease', zIndex: 5,
+      } : {
+        flexShrink: 0, width: W, cursor: 'pointer', position: 'relative',
       }}
     >
       {/* Image */}
-      <div style={{
-        width: PORT_W, height: PORT_H, position: 'relative',
-        borderRadius: 8, background: '#0a0a0a', overflow: 'hidden',
-        boxShadow: isHighlit ? 'inset 0 0 0 3px #fff' : 'none',
-        transition: 'box-shadow 0.18s',
+      <div style={isHighlit ? {
+        width: W, height: H, position: 'relative',
+        borderRadius: 12, background: '#0a0a0a', overflow: 'hidden',
+        boxShadow: '0 0 0 3px #fff, 0 0 26px rgba(255,255,255,0.28), 0 14px 34px rgba(0,0,0,0.6)',
+      } : {
+        width: W, height: H, position: 'relative',
+        borderRadius: 12, background: '#0a0a0a', overflow: 'hidden',
       }}>
         {img ? (
           <img
             src={img}
             alt=""
+            loading="lazy"
+            decoding="async"
             style={{
-              width: '100%', height: '100%', objectFit: 'contain',
+              width: '100%', height: '100%', objectFit: 'cover',
               display: 'block',
             }}
           />
@@ -74,15 +122,15 @@ function PortraitCard({ item, focused, hovered, onClick, onEnter, onLeave }) {
           }} />
         )}
 
-        {/* Genre tag */}
-        {item.genres && item.genres[0] && !isHighlit && (
+        {/* Selo DUB/LEG/CAM/P&B */}
+        {versionBadge && (
           <div style={{
-            position: 'absolute', top: 8, left: 8,
+            position: 'absolute', top: 8, right: 8,
             background: 'rgba(0,0,0,0.72)', borderRadius: 4,
-            padding: '3px 7px', fontSize: 10, fontWeight: 700,
-            color: 'rgba(255,255,255,0.7)', letterSpacing: 0.5,
+            padding: '3px 7px', fontSize: 10, fontWeight: 800,
+            color: '#fff', letterSpacing: 0.5,
             }}>
-            {item.genres[0]}
+            {versionBadge}
           </div>
         )}
 
@@ -115,126 +163,20 @@ function PortraitCard({ item, focused, hovered, onClick, onEnter, onLeave }) {
         marginTop: 9, fontSize: 13, fontWeight: isHighlit ? 700 : 400,
         color: isHighlit ? '#fff' : 'rgba(255,255,255,0.5)',
         lineHeight: 1.35,
-        width: PORT_W,
+        width: W,
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        transition: 'color 0.18s ease, font-weight 0.18s ease',
       }}>
         {title}
       </div>
     </div>
   );
-}
-
-// ── Landscape card (306×128) for "Continue Assistindo" ──────────────────────
-function LandscapeCard({ item, focused, hovered, onClick, onEnter, onLeave }) {
-  const img   = item.backdrop_url || item.thumbnail_url || item.poster_url;
-  const title = item.title || item.name || item.episode_title || '';
-  const pct   = item.progress > 0 && item.duration > 0
-    ? Math.min(100, Math.round((item.progress / item.duration) * 100)) : 0;
-  const isHighlit = focused || hovered;
-
-  return (
-    <div
-      onClick={onClick}
-      onMouseEnter={onEnter}
-      onMouseLeave={onLeave}
-      style={{
-        flexShrink: 0, width: LAND_W, cursor: 'pointer',
-        position: 'relative',
-      }}
-    >
-      <div style={{
-        width: LAND_W, height: LAND_H, position: 'relative',
-        borderRadius: 8, overflow: 'hidden',
-        boxShadow: isHighlit ? 'inset 0 0 0 3px #fff' : 'none',
-        transition: 'box-shadow 0.18s',
-      }}>
-        {img ? (
-          <img
-            src={img}
-            alt=""
-            style={{
-              width: '100%', height: '100%', objectFit: 'cover',
-              display: 'block',
-            }}
-          />
-        ) : (
-          <div style={{
-            width: '100%', height: '100%',
-            background: 'linear-gradient(135deg,#1c1c1c,#2a2a2a)',
-          }} />
-        )}
-
-        {/* Gradient overlay + title */}
-        <div style={{
-          position: 'absolute', bottom: 0, left: 0, right: 0,
-          height: '55%', borderRadius: '0 0 8px 8px',
-          background: 'linear-gradient(to top,rgba(0,0,0,0.9) 0%,transparent 100%)',
-        }} />
-        <div style={{
-          position: 'absolute', bottom: 24, left: 10, right: 10,
-          fontSize: 12, fontWeight: 700, color: '#fff',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>
-          {title}
-        </div>
-
-        {/* Progress bar */}
-        {pct > 0 && (
-          <div style={{
-            position: 'absolute', bottom: 0, left: 0, right: 0,
-            height: 4, borderRadius: '0 0 8px 8px',
-            background: 'rgba(255,255,255,0.18)',
-          }}>
-            <div style={{
-              height: '100%', width: pct + '%',
-              background: ACCENT, borderRadius: '0 0 0 8px',
-              transition: 'width 0.3s',
-            }} />
-          </div>
-        )}
-
-        {/* Play overlay */}
-        {isHighlit && (
-          <div style={{
-            position: 'absolute', inset: 0, borderRadius: 8,
-            background: 'rgba(0,0,0,0.25)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            <div style={{
-              width: 40, height: 40, borderRadius: '50%',
-              background: 'rgba(255,255,255,0.93)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              <div style={{
-                width: 0, height: 0, borderStyle: 'solid',
-                borderWidth: '8px 0 8px 15px',
-                borderColor: 'transparent transparent transparent #111',
-                marginLeft: 3,
-              }} />
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div style={{
-        marginTop: 8, fontSize: 12, fontWeight: isHighlit ? 700 : 400,
-        color: isHighlit ? '#fff' : 'rgba(255,255,255,0.45)',
-        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        transition: 'color 0.18s ease',
-      }}>
-        {pct > 0 ? pct + '% assistido' : ''}
-      </div>
-    </div>
-  );
-}
+});
 
 // ── Card Row ──────────────────────────────────────────────────────────────────
-function CardRow({ data, colFocus, isActive, isLandscape, onSelect }) {
+function CardRow({ data, colFocus, isActive, onSelect }) {
   const rowRef   = useRef(null);
   const rafRef   = useRef(null);
-  const [hov, setHov] = useState(-1);
-  const W = isLandscape ? LAND_W : PORT_W;
+  const W = PORT_W;
 
   useEffect(() => {
     if (!rowRef.current || !isActive) return;
@@ -264,24 +206,11 @@ function CardRow({ data, colFocus, isActive, isLandscape, onSelect }) {
     >
       {data.map((item, ci) => {
         const focused = isActive && ci === colFocus;
-        if (isLandscape) {
-          return (
-            <LandscapeCard
-              key={item.id} item={item}
-              focused={focused} hovered={hov === ci}
-              onClick={() => onSelect(item)}
-              onEnter={() => setHov(ci)}
-              onLeave={() => setHov(-1)}
-            />
-          );
-        }
         return (
           <PortraitCard
             key={item.id} item={item}
-            focused={focused} hovered={hov === ci}
+            focused={focused}
             onClick={() => onSelect(item)}
-            onEnter={() => setHov(ci)}
-            onLeave={() => setHov(-1)}
           />
         );
       })}
@@ -289,77 +218,122 @@ function CardRow({ data, colFocus, isActive, isLandscape, onSelect }) {
   );
 }
 
-// ── Hero Banner (left info + right poster) ───────────────────────────────────
+// ── Catalog grid (Filmes/Series completo) — quebra linha em vez de fileira unica,
+// senao navegar 100+ itens so de LEFT/RIGHT e inviavel. Cards um pouco maiores
+// que o padrao das fileiras pra preencher a largura disponivel (sem sidebar
+// expandida do lado) em vez de sobrar espaco vazio.
+const CATALOG_COLS = 8;
+const CATALOG_CARD_W = 206;
+const CATALOG_CARD_H = Math.round(CATALOG_CARD_W * PORT_H / PORT_W);
+
+function CatalogGrid({ data, colFocus, isActive, onSelect, scrollRef, vertRafRef }) {
+  const itemRefs = useRef([]);
+  // Usa o mesmo smoothScroll manual (com cancelAnimationFrame) que o resto
+  // do app ja usa pra rolar as fileiras - scrollIntoView() nativo NAO
+  // cancela direito quando voce navega rapido (varias chamadas brigando
+  // entre si), e era exatamente isso que travava a pagina ao se mover rapido.
+  useEffect(() => {
+    if (!isActive) return;
+    const el = itemRefs.current[colFocus];
+    const sc = scrollRef?.current;
+    if (!el || !sc) return;
+    // Posição dentro da área rolável medida pela tela (offsetTop não serve: as
+    // linhas da grade têm content-visibility e viram "pai" de posicionamento)
+    const elT = el.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop;
+    const elB = elT + el.offsetHeight;
+    const scT = sc.scrollTop;
+    const scB = scT + sc.clientHeight;
+    let target = sc.scrollTop;
+    if (elT < scT + 20)      target = elT - 20;
+    else if (elB > scB - 20) target = elB - sc.clientHeight + 20;
+    // Trava o alvo dentro do que da pra rolar de verdade - qualquer erro de
+    // medida (offsetTop errado por layout ainda nao assentado etc.) nao pode
+    // arremessar o scroll pro final/inicio do zero.
+    target = Math.max(0, Math.min(target, sc.scrollHeight - sc.clientHeight));
+    if (Math.abs(target - sc.scrollTop) > 1) smoothScroll(sc, 'scrollTop', target, vertRafRef);
+  }, [colFocus, isActive, scrollRef, vertRafRef]);
+
+  const rows = [];
+  for (let i = 0; i < data.length; i += CATALOG_COLS) rows.push(data.slice(i, i + CATALOG_COLS));
+  const rowH = CATALOG_CARD_H + 30;
+  // Cada linha só é desenhada quando está perto da tela (content-visibility) —
+  // com centenas de títulos isso é o que deixa a rolagem fluida. O padding
+  // (compensado pela margem) evita cortar o brilho/zoom do card em foco.
+  return (
+    <div style={{ paddingLeft: PAD_L, paddingRight: PAD_L, paddingBottom: 24, paddingTop: 16 }}>
+      {rows.map((row, ri) => (
+        <div key={ri} style={{
+          display: 'flex', gap: CARD_GAP,
+          padding: '20px 30px', margin: '-20px -30px ' + (CARD_GAP - 20) + 'px',
+          contentVisibility: 'auto', containIntrinsicSize: '1px ' + (rowH + 40) + 'px',
+        }}>
+          {row.map((item, k) => {
+            const ci = ri * CATALOG_COLS + k;
+            const focused = isActive && ci === colFocus;
+            return (
+              <div key={item.id} ref={el => { itemRefs.current[ci] = el; }} style={{ width: CATALOG_CARD_W, flexShrink: 0 }}>
+                <PortraitCard
+                  item={item} focused={focused}
+                  width={CATALOG_CARD_W} height={CATALOG_CARD_H}
+                  onClick={() => onSelect(item)}
+                />
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Hero Banner ───────────────────────────────────────────────────────────────
 function HeroBanner({ item, focusedBtn, onWatch, onDetail }) {
   if (!item) return null;
   const title    = item.title || item.name || '';
   const backdrop = item.backdrop_url;
-  const poster   = item.poster_url || item.backdrop_url;
-  const isSeries = item.total_seasons !== undefined;
   const rating   = item.rating ? parseFloat(item.rating).toFixed(1) : null;
 
   return (
     <div style={{
-      position: 'relative', height: 612, flexShrink: 0, overflow: 'hidden',
-      background: 'linear-gradient(135deg,#0c1520 0%,#140820 45%,#0a1618 80%,#0a0a0a 100%)',
+      position: 'relative', height: 540, flexShrink: 0, overflow: 'hidden',
+      background: '#0a0a0a',
     }}>
-      {/* Backdrop blurred bg */}
+      {/* Backdrop — igual ao TV Android: imagem cheia com leve blur, sem
+          painel de pôster separado do lado direito. */}
       {backdrop && (
         <img
           src={backdrop}
           alt=""
           style={{
             position: 'absolute', inset: 0, width: '100%', height: '100%',
-            objectFit: 'cover', display: 'block', opacity: 0.18,
-            transform: 'scale(1.02)',
+            objectFit: 'cover', display: 'block',
+            filter: 'blur(3px)', transform: 'scale(1.02)',
           }}
         />
       )}
 
-      {/* Gradient overlays — merged into one pass for GPU efficiency */}
-      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to right, rgba(10,12,20,0.98) 0%, rgba(10,12,20,0.92) 35%, rgba(10,12,20,0.45) 65%, transparent 100%)' }} />
-      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, #0a0a0a 0%, transparent 40%)' }} />
-
-      {/* Right poster */}
-      {poster && (
-        <div style={{
-          position: 'absolute', right: 140, top: 40, bottom: 40,
-          width: 380,
-        }}>
-          <img
-            src={poster}
-            alt=""
-            style={{
-              width: '100%', height: '100%', objectFit: 'cover',
-              borderRadius: 12,
-              display: 'block',
-            }}
-          />
-          {/* Fade left edge of poster into bg */}
-          <div style={{
-            position: 'absolute', top: 0, left: 0, bottom: 0, width: '55%',
-            background: 'linear-gradient(to right, rgba(10,10,10,1) 0%, rgba(10,10,10,0) 100%)',
-            borderRadius: '12px 0 0 12px',
-          }} />
-        </div>
-      )}
+      {/* Gradient overlays */}
+      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to right, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.1) 60%)' }} />
+      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, #0a0a0a 0%, transparent 55%)' }} />
 
       {/* Left side info */}
       <div style={{
         position: 'absolute', bottom: 68, left: PAD_L,
         maxWidth: 660,
-        animation: 'fadein 0.5s ease',
       }}>
         {/* Badges row */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-          <div style={{
-            background: ACCENT, color: '#fff',
-            fontSize: 11, fontWeight: 800, letterSpacing: 1.5,
-            padding: '4px 10px', borderRadius: 5,
-            textTransform: 'uppercase',
-          }}>
-            {isSeries ? 'SÉRIE' : 'FILME'}
-          </div>
+          {item.age_rating && (
+            <div style={{
+              background: ACCENT, borderRadius: 4, padding: '3px 8px',
+              fontSize: 12, fontWeight: 900, color: '#fff',
+            }}>
+              {item.age_rating}+
+            </div>
+          )}
+          {item.year && (
+            <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.55)', fontWeight: 500 }}>{item.year}</span>
+          )}
           {rating && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="#f5c518">
@@ -368,31 +342,13 @@ function HeroBanner({ item, focusedBtn, onWatch, onDetail }) {
               <span style={{ fontSize: 13, fontWeight: 700, color: '#f5c518' }}>{rating}</span>
             </div>
           )}
-          {item.year && (
-            <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.5)', fontWeight: 500 }}>{item.year}</span>
-          )}
-          {isSeries && item.total_seasons && (
-            <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.5)', fontWeight: 500 }}>
-              {item.total_seasons} temporada{item.total_seasons > 1 ? 's' : ''}
-            </span>
-          )}
-          {item.age_rating && (
-            <div style={{
-              border: '1.5px solid rgba(255,255,255,0.35)',
-              borderRadius: 4, padding: '2px 7px',
-              fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.6)',
-            }}>
-              {item.age_rating}
-            </div>
-          )}
         </div>
 
         {/* Title */}
         <div style={{
-          fontSize: 72, fontWeight: 900, color: '#fff',
-          lineHeight: 1.0, marginBottom: 18,
-          textShadow: '0 4px 32px rgba(0,0,0,0.9)',
-          letterSpacing: -2,
+          fontSize: 52, fontWeight: 900, color: '#fff',
+          lineHeight: 1.1, marginBottom: 14,
+          textShadow: '0 2px 16px rgba(0,0,0,0.8)',
           overflow: 'hidden', display: '-webkit-box',
           WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
         }}>
@@ -402,11 +358,11 @@ function HeroBanner({ item, focusedBtn, onWatch, onDetail }) {
         {/* Synopsis */}
         {item.synopsis && (
           <div style={{
-            fontSize: 16, color: 'rgba(255,255,255,0.68)',
-            lineHeight: 1.7, maxWidth: 560,
+            fontSize: 15, color: 'rgba(255,255,255,0.68)',
+            lineHeight: 1.6, maxWidth: 560,
             overflow: 'hidden', display: '-webkit-box',
-            WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
-            marginBottom: 32,
+            WebkitLineClamp: 3, WebkitBoxOrient: 'vertical',
+            marginBottom: 26,
           }}>
             {item.synopsis}
           </div>
@@ -424,8 +380,6 @@ function HeroBanner({ item, focusedBtn, onWatch, onDetail }) {
               fontSize: 17, fontWeight: 800, cursor: 'pointer',
               outline: focusedBtn === 0 ? '3px solid rgba(255,255,255,0.7)' : 'none',
               outlineOffset: '3px',
-              transform: focusedBtn === 0 ? 'scale(1.04)' : 'scale(1)',
-              transition: 'transform 0.18s, outline 0.18s',
               boxShadow: 'none',
             }}
           >
@@ -448,8 +402,6 @@ function HeroBanner({ item, focusedBtn, onWatch, onDetail }) {
               fontSize: 17, fontWeight: 700, cursor: 'pointer',
               outline: focusedBtn === 1 ? '3px solid rgba(255,255,255,0.7)' : 'none',
               outlineOffset: '3px',
-              transform: focusedBtn === 1 ? 'scale(1.04)' : 'scale(1)',
-              transition: 'transform 0.18s, border-color 0.18s',
               boxShadow: 'none',
             }}
           >
@@ -465,171 +417,315 @@ function HeroBanner({ item, focusedBtn, onWatch, onDetail }) {
 }
 
 // ── Search Panel ──────────────────────────────────────────────────────────────
-function SearchPanel({ onSelect, onBack }) {
-  const [query,   setQuery]   = useState('');
-  const [results, setResults] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [resFoc,  setResFoc]  = useState(-1); // -1 = input focused
-  const inputRef  = useRef(null);
-  const gridRef   = useRef(null);
-  const itemRefs  = useRef([]);
-  const debRef    = useRef(null);
-  const stRef     = useRef({ results: [], resFoc: -1 });
-  stRef.current   = { results, resFoc };
+// Teclado virtual — igual ao do TV Android (nenhum controle de TV real tem
+// um jeito universal de digitar num <input>, entao um teclado proprio
+// navegavel por seta e o unico jeito confiavel em qualquer controle/OEM).
+const KB_ROWS = [
+  ['SPC', '⌫'],
+  ['a', 'b', 'c', 'd', 'e', 'f'],
+  ['g', 'h', 'i', 'j', 'k', 'l'],
+  ['m', 'n', 'o', 'p', 'q', 'r'],
+  ['s', 't', 'u', 'v', 'w', 'x'],
+  ['y', 'z', '1', '2', '3', '4'],
+  ['5', '6', '7', '8', '9', '0'],
+];
+const SEARCH_COLS = 3;
+const SEARCH_LEFT_W = 370;
 
-  const COLS = 6;
+function SearchPanel({ onSelect, onBack, typeFilter }) {
+  const [query,       setQuery]       = useState('');
+  const [results,     setResults]     = useState({ movies: [], series: [] });
+  const [defaultItems, setDefaultItems] = useState([]);
+  const [loading,     setLoading]     = useState(false);
+  const [zone,        setZone]        = useState('kb'); // 'kb' | 'sug' | 'grid'
+  const [kbRow,       setKbRow]       = useState(1);
+  const [kbCol,       setKbCol]       = useState(0);
+  const [sugIdx,      setSugIdx]      = useState(0);
+  const [gridIdx,     setGridIdx]     = useState(0);
+  const itemRefs = useRef([]);
+  const debRef   = useRef(null);
+  const stRef    = useRef({});
 
-  useEffect(() => { setTimeout(() => inputRef.current && inputRef.current.focus(), 80); }, []);
+  const searchItems = [...results.movies, ...results.series];
+  const allItems     = query ? searchItems : defaultItems;
+  const suggestions  = allItems.slice(0, 8);
+  stRef.current = { query, zone, kbRow, kbCol, sugIdx, gridIdx, allItems, suggestions };
+
+  // Catalogo pra sugestao quando ainda nao ha busca — populares de filme/serie,
+  // sem misturar "continuar assistindo" (isso e progresso, nao catalogo).
+  // Respeita o typeFilter (botao de busca de Filmes/Series pula direto aqui
+  // ja filtrado por tipo, igual ao padrao do app Android).
+  useEffect(() => {
+    Promise.all([
+      typeFilter !== 'series' ? moviesAPI.popular().then(r => r.data || []).catch(() => []) : Promise.resolve([]),
+      typeFilter !== 'movie'  ? seriesAPI.popular().then(r => r.data || []).catch(() => []) : Promise.resolve([]),
+    ]).then(([pm, ps]) => {
+      const seen = new Set();
+      const merged = [...pm, ...ps].filter(it => {
+        if (seen.has(it.id)) return false; seen.add(it.id); return true;
+      }).slice(0, 20);
+      setDefaultItems(merged);
+    });
+  }, [typeFilter]);
 
   useEffect(() => {
     clearTimeout(debRef.current);
-    if (!query.trim()) { setResults([]); setResFoc(-1); return; }
+    if (!query.trim()) { setResults({ movies: [], series: [] }); return; }
     debRef.current = setTimeout(async () => {
       setLoading(true);
       try {
         const [mv, sr] = await Promise.all([
-          moviesAPI.search(query).then(r => (r.data || []).slice(0, 18)),
-          seriesAPI.search(query).then(r => (r.data || []).slice(0, 18)),
+          typeFilter !== 'series' ? moviesAPI.search(query).then(r => (r.data || []).slice(0, 18)) : Promise.resolve([]),
+          typeFilter !== 'movie'  ? seriesAPI.search(query).then(r => (r.data || []).slice(0, 18)) : Promise.resolve([]),
         ]);
-        setResults([...mv, ...sr]);
-        setResFoc(-1);
-      } catch { setResults([]); }
+        setResults({ movies: mv, series: sr });
+      } catch { setResults({ movies: [], series: [] }); }
       finally { setLoading(false); }
-    }, 400);
-  }, [query]);
+    }, 250);
+  }, [query, typeFilter]);
 
-  // Keep focused result scrolled into view
+  useEffect(() => { setGridIdx(0); setSugIdx(0); }, [query]);
+
   useEffect(() => {
-    if (resFoc < 0) return;
-    const el = itemRefs.current[resFoc];
+    if (zone !== 'grid') return;
+    const el = itemRefs.current[gridIdx];
     if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  }, [resFoc]);
+  }, [gridIdx, zone]);
+
+  function pressKey(key) {
+    if (key === 'SPC') setQuery(q => q + ' ');
+    else if (key === '⌫') setQuery(q => q.slice(0, -1));
+    else setQuery(q => q + key);
+  }
 
   useKeyDown(e => {
-    const { results, resFoc } = stRef.current;
+    const { zone, kbRow, kbCol, sugIdx, gridIdx, allItems, suggestions } = stRef.current;
     const k = e.keyCode;
     if (k === KEY.BACK) { e.preventDefault(); onBack(); return; }
 
-    const inputFocused = document.activeElement === inputRef.current;
-
-    if (k === KEY.BACKSPACE && !inputFocused) { e.preventDefault(); onBack(); return; }
-
-    if (inputFocused) {
-      if (k === KEY.DOWN && results.length > 0) {
+    if (zone === 'kb') {
+      if (k === KEY.LEFT)  { e.preventDefault(); if (kbCol > 0) setKbCol(c => c - 1); else onBack(); }
+      if (k === KEY.RIGHT) {
         e.preventDefault();
-        inputRef.current.blur();
-        setResFoc(0);
+        const rowLen = KB_ROWS[kbRow].length;
+        if (kbCol < rowLen - 1) setKbCol(c => c + 1);
+        else if (allItems.length > 0) { setZone('grid'); setGridIdx(0); }
       }
+      if (k === KEY.UP)    { e.preventDefault(); if (kbRow > 0) { const nr = kbRow - 1; setKbRow(nr); setKbCol(c => Math.min(c, KB_ROWS[nr].length - 1)); } }
+      if (k === KEY.DOWN)  {
+        e.preventDefault();
+        if (kbRow < KB_ROWS.length - 1) { const nr = kbRow + 1; setKbRow(nr); setKbCol(c => Math.min(c, KB_ROWS[nr].length - 1)); }
+        else if (suggestions.length > 0) { setZone('sug'); setSugIdx(0); }
+      }
+      if (k === KEY.ENTER) { e.preventDefault(); pressKey(KB_ROWS[kbRow][kbCol]); }
       return;
     }
 
-    // Grid navigation (COLS columns)
+    if (zone === 'sug') {
+      if (k === KEY.UP)    { e.preventDefault(); if (sugIdx > 0) setSugIdx(i => i - 1); else setZone('kb'); }
+      if (k === KEY.DOWN)  { e.preventDefault(); if (sugIdx < suggestions.length - 1) setSugIdx(i => i + 1); }
+      if (k === KEY.LEFT)  { e.preventDefault(); onBack(); }
+      if (k === KEY.RIGHT) { e.preventDefault(); if (allItems.length > 0) { setZone('grid'); setGridIdx(0); } }
+      if (k === KEY.ENTER) { e.preventDefault(); if (suggestions[sugIdx]) onSelect(suggestions[sugIdx]); }
+      return;
+    }
+
+    // zone === 'grid'
     if (k === KEY.UP) {
       e.preventDefault();
-      if (resFoc < COLS) {
-        // first row → go back to input
-        setResFoc(-1);
-        inputRef.current && inputRef.current.focus();
-      } else {
-        setResFoc(f => Math.max(0, f - COLS));
-      }
+      if (gridIdx < SEARCH_COLS) setZone('kb');
+      else setGridIdx(i => Math.max(0, i - SEARCH_COLS));
     }
     if (k === KEY.DOWN) {
       e.preventDefault();
-      setResFoc(f => Math.min(results.length - 1, f + COLS));
+      setGridIdx(i => Math.min(allItems.length - 1, i + SEARCH_COLS));
     }
     if (k === KEY.LEFT) {
       e.preventDefault();
-      if (resFoc % COLS > 0) setResFoc(f => f - 1);
+      if (gridIdx % SEARCH_COLS > 0) setGridIdx(i => i - 1);
+      else setZone(suggestions.length > 0 ? 'sug' : 'kb');
     }
     if (k === KEY.RIGHT) {
       e.preventDefault();
-      if (resFoc % COLS < COLS - 1 && resFoc + 1 < results.length) setResFoc(f => f + 1);
+      if (gridIdx % SEARCH_COLS < SEARCH_COLS - 1 && gridIdx + 1 < allItems.length) setGridIdx(i => i + 1);
     }
-    if (k === KEY.ENTER) {
-      e.preventDefault();
-      if (results[resFoc]) onSelect(results[resFoc]);
-    }
+    if (k === KEY.ENTER) { e.preventDefault(); if (allItems[gridIdx]) onSelect(allItems[gridIdx]); }
   });
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', padding: '0 ' + PAD_L + 'px', overflow: 'hidden' }}>
-      {/* Header */}
-      <div style={{ padding: '44px 0 28px' }}>
-        <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 3, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', marginBottom: 16 }}>
-          Buscar
-        </div>
-        <div style={{ position: 'relative' }}>
-          <svg style={{ position: 'absolute', left: 20, top: '50%', transform: 'translateY(-50%)', opacity: 0.45 }} width="22" height="22" viewBox="0 0 24 24" fill="#fff">
-            <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'radial-gradient(ellipse at 20% 0%, rgba(201,28,44,0.08) 0%, transparent 45%), #0a0a0a' }}>
+      {/* Header — campo de busca com destaque visual */}
+      <div style={{ padding: '30px ' + PAD_L + 'px 22px' }}>
+        <div style={{
+          display: 'inline-flex', alignItems: 'center', gap: 14,
+          padding: '14px 24px', borderRadius: 14, minWidth: 420,
+          background: 'rgba(255,255,255,0.05)',
+          border: '2px solid ' + (zone === 'kb' ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.12)'),
+          boxShadow: zone === 'kb' ? '0 0 0 4px rgba(255,255,255,0.06)' : 'none',
+        }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={ACCENT} strokeWidth="2.2">
+            <circle cx="11" cy="11" r="7"/>
+            <path d="M21 21l-4.35-4.35" strokeLinecap="round"/>
           </svg>
-          <input
-            ref={inputRef}
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            placeholder="Títulos, gêneros, pessoas…"
-            autoComplete="off" autoCorrect="off" spellCheck={false}
-            style={{
-              width: '100%', padding: '18px 24px 18px 56px',
-              background: 'rgba(255,255,255,0.07)',
-              border: '2px solid ' + (query ? ACCENT : 'rgba(255,255,255,0.12)'),
-              borderRadius: 10, color: '#fff', fontSize: 20, outline: 'none',
-              fontFamily: 'inherit', fontWeight: 500,
-              transition: 'border-color 0.2s',
-            }}
-          />
+          {query ? (
+            <span style={{ fontSize: 21, fontWeight: 600, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {query}<span style={{ opacity: 0.5 }}> |</span>
+            </span>
+          ) : (
+            <span style={{ fontSize: 21, color: 'rgba(255,255,255,0.35)' }}>
+              {typeFilter === 'movie' ? 'Buscar filmes…' : typeFilter === 'series' ? 'Buscar séries…' : 'Digite para buscar…'}
+            </span>
+          )}
+          {loading && <div style={{ width: 16, height: 16, border: '2px solid rgba(255,255,255,0.15)', borderTopColor: ACCENT, borderRadius: '50%', animation: 'spin 0.8s linear infinite', marginLeft: 4 }} />}
         </div>
       </div>
 
-      {/* Results grid */}
-      <div ref={gridRef} style={{ flex: 1, overflowY: 'auto', paddingBottom: 32 }}>
-        {loading && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 0', color: 'rgba(255,255,255,0.4)', fontSize: 14 }}>
-            <div style={{ width: 18, height: 18, border: '2px solid rgba(255,255,255,0.15)', borderTopColor: ACCENT, borderRadius: '50%', animation: 'spin 0.8s linear infinite', flexShrink: 0 }} />
-            Buscando…
+      {/* Body: teclado + sugestoes | grade */}
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+        {/* Esquerda — teclado + sugestoes */}
+        <div style={{ width: SEARCH_LEFT_W, flexShrink: 0, padding: '4px ' + PAD_L + 'px 24px', overflowY: 'auto' }}>
+          <div style={{
+            display: 'inline-block', padding: 14, borderRadius: 16,
+            background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)',
+          }}>
+            {KB_ROWS.map((row, ri) => (
+              <div key={ri} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                {row.map((key, ki) => {
+                  const isFoc = zone === 'kb' && kbRow === ri && kbCol === ki;
+                  const wide  = key === 'SPC';
+                  return (
+                    <div
+                      key={key}
+                      onClick={() => { setZone('kb'); setKbRow(ri); setKbCol(ki); pressKey(key); }}
+                      style={{
+                        flex: wide ? 3 : 1, height: 44, minWidth: wide ? undefined : 44,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        borderRadius: 9, cursor: 'pointer',
+                        fontSize: 15, fontWeight: 700,
+                        color: isFoc ? '#fff' : 'rgba(255,255,255,0.7)',
+                        background: isFoc ? ACCENT : 'rgba(255,255,255,0.06)',
+                        border: '2px solid ' + (isFoc ? '#fff' : 'transparent'),
+                        boxShadow: isFoc ? '0 4px 14px rgba(201,28,44,0.5)' : 'none',
+                        textTransform: key === 'SPC' ? 'uppercase' : 'none',
+                        letterSpacing: key === 'SPC' ? 1 : 0,
+                      }}
+                    >
+                      {key === 'SPC' ? 'ESPAÇO' : key}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
           </div>
-        )}
-        {!loading && query && results.length === 0 && (
-          <div style={{ padding: '32px 0', color: 'rgba(255,255,255,0.3)', fontSize: 16 }}>
-            Nenhum resultado para "{query}"
+
+          {suggestions.length > 0 && (
+            <div style={{ marginTop: 24 }}>
+              <div style={{ fontSize: 11, fontWeight: 800, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 12, paddingLeft: 2 }}>
+                Sugestões
+              </div>
+              {suggestions.map((item, i) => {
+                const isFoc = zone === 'sug' && sugIdx === i;
+                const isS   = item.total_seasons !== undefined;
+                const img   = item.poster_url || item.backdrop_url;
+                return (
+                  <div
+                    key={item.id}
+                    onClick={() => onSelect(item)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 12,
+                      padding: '8px 10px', borderRadius: 10, cursor: 'pointer',
+                      background: isFoc ? 'rgba(255,255,255,0.10)' : 'transparent',
+                      border: '2px solid ' + (isFoc ? '#fff' : 'transparent'),
+                      boxShadow: isFoc ? '0 6px 18px rgba(0,0,0,0.5)' : 'none',
+                      marginBottom: 3,
+                    }}
+                  >
+                    <div style={{
+                      width: 34, height: 48, borderRadius: 5, flexShrink: 0, overflow: 'hidden',
+                      background: '#1c1c1c', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      boxShadow: isFoc ? '0 0 0 2px #fff' : 'none',
+                    }}>
+                      {img
+                        ? <img src={img} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        : (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill={isFoc ? ACCENT : '#484848'}>
+                            {isS
+                              ? <path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h5v-2H3V5h18v14h-5v2h5c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM8 19h8v-2H8v2z"/>
+                              : <path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2h-2z"/>}
+                          </svg>
+                        )
+                      }
+                    </div>
+                    <span style={{ fontSize: 14, color: isFoc ? '#fff' : 'rgba(255,255,255,0.65)', fontWeight: isFoc ? 700 : 500, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {item.title || item.name}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {!loading && !!query && searchItems.length === 0 && (
+            <div style={{ marginTop: 20, fontSize: 13, color: 'rgba(255,255,255,0.3)' }}>
+              Nenhum resultado para "{query}"
+            </div>
+          )}
+        </div>
+
+        {/* Direita — grade de resultados (cards com pôster + título) */}
+        <div style={{ flex: 1, padding: '4px ' + PAD_L + 'px 24px', overflowY: 'auto' }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'rgba(255,255,255,0.4)', marginBottom: 16, textTransform: 'uppercase', letterSpacing: 1 }}>
+            {query
+              ? (allItems.length > 0 ? `${allItems.length} resultado${allItems.length !== 1 ? 's' : ''}` : (!loading ? `Sem resultados para "${query}"` : ''))
+              : 'Catálogo'}
           </div>
-        )}
-        {results.length > 0 && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(' + COLS + ', 1fr)', gap: 18 }}>
-            {results.map((item, i) => {
-              const isFoc = resFoc === i;
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(' + SEARCH_COLS + ', 1fr)', gap: 22, paddingBottom: 32 }}>
+            {allItems.map((item, i) => {
+              const isFoc = zone === 'grid' && gridIdx === i;
+              // Capa oficial primeiro — backdrop e uma cena do meio do
+              // filme, nao a "logo"/capa que a pessoa espera ver no card.
               const img   = item.poster_url || item.backdrop_url;
+              const isS   = item.total_seasons !== undefined;
               return (
                 <div
                   key={item.id}
                   ref={el => { itemRefs.current[i] = el; }}
                   onClick={() => onSelect(item)}
                   style={{
-                    display: 'flex', flexDirection: 'column',
-                    borderRadius: 10, overflow: 'hidden', cursor: 'pointer',
-                    background: isFoc ? 'rgba(255,255,255,0.09)' : 'transparent',
-                    border: '2px solid ' + (isFoc ? '#fff' : 'rgba(255,255,255,0.06)'),
-                    transition: 'background 0.15s, border-color 0.15s',
+                    display: 'flex', flexDirection: 'column', cursor: 'pointer',
+                    transform: isFoc ? 'scale(1.04)' : 'scale(1)',
+                    transition: 'transform 0.15s ease',
                   }}
                 >
-                  {img && (
-                    <div style={{ width: '100%', aspectRatio: '2/3', background: '#0a0a0a', overflow: 'hidden' }}>
-                      <img src={img} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
-                    </div>
-                  )}
-                  <div style={{ padding: '10px 12px 12px' }}>
-                    <div style={{ fontSize: 13, fontWeight: isFoc ? 700 : 500, color: isFoc ? '#fff' : 'rgba(255,255,255,0.7)', marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <div style={{
+                    width: '100%', aspectRatio: '2/3', background: '#0a0a0a', overflow: 'hidden', position: 'relative',
+                    borderRadius: 12,
+                    boxShadow: isFoc ? '0 0 0 3px #fff, 0 0 22px rgba(255,255,255,0.28), 0 12px 28px rgba(0,0,0,0.6)' : 'none',
+                  }}>
+                    {img
+                      ? <img src={img} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                      : <div style={{ width: '100%', height: '100%', background: 'linear-gradient(135deg,#1c1c1c,#2a2a2a)' }} />
+                    }
+                    {isFoc && (
+                      <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.28)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <div style={{ width: 46, height: 46, borderRadius: '50%', background: 'rgba(255,255,255,0.93)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <div style={{ width: 0, height: 0, borderStyle: 'solid', borderWidth: '10px 0 10px 17px', borderColor: 'transparent transparent transparent #111', marginLeft: 3 }} />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ padding: '10px 2px 0' }}>
+                    <div style={{ fontSize: 13.5, fontWeight: isFoc ? 700 : 500, color: isFoc ? '#fff' : 'rgba(255,255,255,0.75)', marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {item.title || item.name}
                     </div>
-                    <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>
-                      {item.total_seasons !== undefined ? 'Série' : 'Filme'}{item.year ? ' · ' + item.year : ''}
+                    <div style={{ fontSize: 11.5, color: 'rgba(255,255,255,0.35)' }}>
+                      {isS ? 'Série' : 'Filme'}{item.year ? ' · ' + item.year : ''}
                     </div>
                   </div>
                 </div>
               );
             })}
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
@@ -651,7 +747,6 @@ function SectionLabel({ title, isActive, isHistory }) {
       <span style={{
         fontSize: 20, fontWeight: 700,
         color: isActive ? '#fff' : 'rgba(255,255,255,0.55)',
-        transition: 'color 0.18s ease',
         letterSpacing: 0.3,
       }}>
         {title}
@@ -672,7 +767,7 @@ function buildSections(activeNav, pm, nm, ps, ns, fullCatalog) {
     if (seen.has(it.id)) return false; seen.add(it.id); return true;
   }).slice(0, 20);
   // Paginas Filmes/Series mostram so o catalogo completo — sem separar em
-  // Lançamentos/Populares (pedido explicito, igual TV Android e LG).
+  // Lançamentos/Populares (pedido explicito, igual TV Android e Tizen).
   if (activeNav === 'movies') {
     const all = fullCatalog || [];
     return { featured: all[0] || pm[0] || nm[0] || null, sections: [
@@ -700,7 +795,7 @@ export default function HomeScreen() {
 
   const [activeNav,    setActiveNav]    = useState('home');
   const [featured,     setFeatured]     = useState(null);
-  const [sections,     setSections]     = useState([]);
+  const [baseSections, setSections]     = useState([]);
   const [loadingData,  setLoadingData]  = useState(true);
   const [focusArea,    setFocusArea]    = useState('content');
   const [navFocus,     setNavFocus]     = useState(0);
@@ -710,7 +805,61 @@ export default function HomeScreen() {
   const [colFocus,     setColFocus]     = useState(0);
   const [bannerBtn,    setBannerBtn]    = useState(0); // 0=Assistir, 1=Mais Info
 
-  const dataCache  = useRef({});
+  // Filtro de categoria — só pras páginas Filmes/Séries. Genero especifico de
+  // cada tipo (Filme x Serie tem catalogos de genero diferentes, nao pode
+  // misturar), derivado do proprio catalogo sem filtro (senao a lista de
+  // opcoes encolhe pro genero atual assim que voce filtra uma vez).
+  const [catalogGenres,  setCatalogGenres]  = useState({}); // { movies: [...], series: [...] }
+  const [genreFilter,    setGenreFilter]    = useState(null);
+  const [genreZone,      setGenreZone]      = useState('off'); // 'off' | 'button' | 'open'
+  const [genreIdx,       setGenreIdx]       = useState(0); // 0 = "Todos"
+  // Toolbar (Filmes/Series) tem 1 ou 2 itens: dropdown de categoria (só se
+  // houver generos) e botao de busca (sempre). toolbarIdx navega entre eles
+  // enquanto genreZone === 'button'.
+  const [toolbarIdx,     setToolbarIdx]     = useState(0);
+  const [searchTypeFilter, setSearchTypeFilter] = useState(null); // 'movie' | 'series' | null
+  const [dateKey,   setDateKey]   = useState('');
+  const [minRating, setMinRating] = useState(0);
+  const [sortKey,   setSortKey]   = useState('az');
+  const [openMenu, setOpenMenu] = useState(null); // qual dropdown está aberto
+  const genres = catalogGenres[activeNav] || [];
+  const toolbarItems = [...(genres.length > 0 ? ['genre'] : []), 'date', 'rating', 'sort', 'search'];
+  // Dropdowns da toolbar (categoria, data, nota, ordem) — mesma lógica para todos
+  const menuOptions = (key) => (
+    key === 'genre'  ? [{ label: 'Todos', value: null }, ...genres.map(g => ({ label: g, value: g }))] :
+    key === 'date'   ? DATE_PRESETS.map(p => ({ label: p.label, value: p.key })) :
+    key === 'rating' ? RATINGS.map(x => ({ label: x ? '★ ' + x + '+' : 'Todas', value: x })) :
+                       SORTS.map(p => ({ label: p.label, value: p.key }))
+  );
+  const menuValue  = (key) => (key === 'genre' ? genreFilter : key === 'date' ? dateKey : key === 'rating' ? minRating : sortKey);
+  const menuActive = (key) => (key === 'genre' ? !!genreFilter : key === 'date' ? !!dateKey : key === 'rating' ? minRating > 0 : sortKey !== 'az');
+  const menuText   = (key) => { const o = menuOptions(key).find(x => x.value === menuValue(key)); return o ? o.label : ''; };
+  const applyMenu  = (key, value) => {
+    if (key === 'genre')  setGenreFilter(value);
+    if (key === 'date')   setDateKey(value);
+    if (key === 'rating') setMinRating(value);
+    if (key === 'sort')   setSortKey(value);
+    setColFocus(0); setRowFocus(1);
+  };
+  const openMenuFor = (key) => {
+    setOpenMenu(key);
+    setGenreIdx(Math.max(0, menuOptions(key).findIndex(x => x.value === menuValue(key))));
+    setGenreZone('open');
+  };
+
+  // Filmes/Séries: os filtros rodam aqui no aparelho (catálogo já carregado), sem rede nem spinner
+  const sections = useMemo(() => {
+    const isCat = activeNav === 'movies' || activeNav === 'series';
+    const sec = baseSections[0];
+    const k = sec && sec.key;
+    // Troca de aba: por um quadro ainda vale a lista da aba anterior — não mostra
+    if (!isCat) return k === 'all' ? [] : baseSections;
+    if (!sec) return baseSections;
+    if (k !== 'all') return [];
+    return [{ ...sec, data: filterCatalog(sec.data, { genre: genreFilter, date: dateKey, rating: minRating, sort: sortKey }) }];
+  }, [baseSections, activeNav, genreFilter, dateKey, minRating, sortKey]);
+
+  const dataCache     = useRef({});
 
   // Atualização automática: confere a versão do catálogo e recarrega a Home sozinha
   const [refreshKey, setRefreshKey] = useState(0);
@@ -731,11 +880,14 @@ export default function HomeScreen() {
     const t = setInterval(check, 45000);
     return () => clearInterval(t);
   }, []);
+  const prevProfileId = useRef(undefined);
   const scrollRef  = useRef(null);
   const rowEls     = useRef([]);
+  const genreRowRef = useRef(null);
   const vertRafRef = useRef(null);
+  const catalogMoveTimeRef = useRef(0);
   const st         = useRef({});
-  st.current = { focusArea, navFocus, rowFocus, colFocus, sections, featured, activeNav, bannerBtn };
+  st.current = { focusArea, navFocus, rowFocus, colFocus, sections, featured, activeNav, bannerBtn, genres, genreFilter, genreZone, genreIdx, toolbarIdx, toolbarItems };
 
   const showSidebar = sideExpanded || sideHovered || focusArea === 'sidebar';
 
@@ -774,6 +926,12 @@ export default function HomeScreen() {
     setRowFocus(0);
     setColFocus(0);
     setBannerBtn(0);
+    setGenreFilter(null);
+    setDateKey(''); setMinRating(0); setSortKey('az'); setOpenMenu(null);
+    setGenreZone('off');
+    setGenreIdx(0);
+    setToolbarIdx(0);
+    setSearchTypeFilter(null);
   }, [logout, navigate, setActiveProfile]);
 
   // Load watchlist when minha-lista is active
@@ -803,72 +961,102 @@ export default function HomeScreen() {
       .finally(() => setLoadingData(false));
   }, [activeNav, activeProfile]);
 
-  // Load content
+  // Conteúdo: tudo vem pré-carregado da tela de abertura (prefetchCache). Aqui só
+  // lê o cache — sem rede ao navegar, e os filtros não recarregam nada.
   useEffect(() => {
-    if (activeNav === 'search') return;
-    if (activeNav === 'minha-lista') return;
-    if (prefetchCache[activeNav] && !dataCache.current[activeNav]) {
-      dataCache.current[activeNav] = prefetchCache[activeNav];
-    }
-    if (dataCache.current[activeNav]) {
-      const c = dataCache.current[activeNav];
+    if (activeNav === 'search' || activeNav === 'minha-lista') return undefined;
+    const curProfileId = activeProfile ? activeProfile.id : null;
+    prevProfileId.current = curProfileId;
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+
+    let alive = true;
+    const apply = (c) => {
       setFeatured(c.featured);
       setSections(c.sections);
+      if (c.genres) setCatalogGenres(prev => ({ ...prev, [activeNav]: c.genres }));
       setLoadingData(false);
-      return;
+    };
+
+    if (activeNav === 'home') {
+      const pid = curProfileId || '';
+      if (dataCache.current.home && dataCache.current.homeProfile === pid) { apply(dataCache.current.home); return undefined; }
+      (async () => {
+        let base = prefetchCache.homeBase;
+        if (!base) { setLoadingData(true); base = await fetchHomeBase(); prefetchCache.homeBase = base; }
+        let prof = prefetchCache['profile:' + pid];
+        if (!prof && activeProfile) {
+          setLoadingData(true);
+          prof = await fetchHomeProfile(curProfileId, true);
+          prefetchCache['profile:' + pid] = prof;
+        }
+        if (!alive) return;
+        const c = assembleHome(base, prof);
+        dataCache.current.home = c; dataCache.current.homeProfile = pid;
+        apply(c);
+      })().catch(() => { if (alive) setLoadingData(false); });
+      return () => { alive = false; };
     }
-    setLoadingData(true);
-    const profileId = activeProfile && activeProfile.id;
-    const fullCatalogReq = activeNav === 'movies'
-      ? moviesAPI.list({ limit: 500, sort: 'title', order: 'asc' }).then(r => r.data?.data || []).catch(() => [])
-      : activeNav === 'series'
-        ? seriesAPI.list({ limit: 500, sort: 'title', order: 'asc' }).then(r => r.data?.data || []).catch(() => [])
-        : Promise.resolve(null);
-    Promise.all([
-      moviesAPI.popular().then(r => r.data || []),
-      moviesAPI.newReleases().then(r => r.data || []),
-      seriesAPI.popular().then(r => r.data || []),
-      seriesAPI.newReleases().then(r => r.data || []),
-      activeProfile
-        ? api.get('/api/history' + (profileId ? '?profile_id=' + profileId : '')).then(r => r.data || []).catch(() => [])
-        : Promise.resolve([]),
-      fullCatalogReq,
-    ]).then(([pm, nm, ps, ns, hist, fullCatalog]) => {
-      const history = hist.filter(h => h.progress > 0 && h.duration > 0 && !h.completed).slice(0, 12);
-      const built   = buildSections(activeNav, pm, nm, ps, ns, fullCatalog);
-      // Filmes/Series: so o catalogo, "Continue Assistindo" fica de fora.
-      const secs    = (history.length > 0 && activeNav !== 'movies' && activeNav !== 'series')
-        ? [{ key: 'history', title: 'Continue Assistindo', data: history }, ...built.sections]
-        : built.sections;
-      dataCache.current[activeNav] = { featured: built.featured, sections: secs };
-      setFeatured(built.featured);
-      setSections(secs);
-    }).catch(() => {}).finally(() => setLoadingData(false));
+
+    // Filmes / Séries
+    const cached = dataCache.current[activeNav] || prefetchCache['catalog:' + activeNav];
+    if (cached) { dataCache.current[activeNav] = cached; apply(cached); return undefined; }
+    setLoadingData(true); setSections([]); setFeatured(null);
+    fetchCatalog(activeNav).then(c => {
+      if (!alive) return;
+      prefetchCache['catalog:' + activeNav] = c; dataCache.current[activeNav] = c; apply(c);
+    }).catch(() => {}).finally(() => { if (alive) setLoadingData(false); });
+    return () => { alive = false; };
   }, [activeNav, activeProfile, refreshKey]);
+
+  // Dropdown: mantém a opção em foco visível ao descer a lista
+  useEffect(() => {
+    if (genreZone !== 'open') return;
+    const el = document.getElementById('menu-opt-' + genreIdx);
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+  }, [genreIdx, genreZone]);
+
 
   // Smooth vertical scroll to keep focused row visible
   useEffect(() => {
-    const el = rowEls.current[rowFocus];
+    // Quando o foco esta na toolbar (categoria/busca) de Filmes/Series, ela
+    // fica acima da grade mas nao e uma "row" no array de sections - sem
+    // isso o scroll continuava alinhado ao topo da grade e a toolbar ficava
+    // escondida acima da viewport, parecendo que o foco "pulou" ela.
+    const el = (genreZone !== 'off' && genreRowRef.current) ? genreRowRef.current : rowEls.current[rowFocus];
     if (!el || !scrollRef.current) return;
     const sc  = scrollRef.current;
     const elT = el.offsetTop;
-    const elB = elT + el.offsetHeight;
+    const elH = el.offsetHeight;
+    const elB = elT + elH;
     const scT = sc.scrollTop;
     const scB = scT + sc.clientHeight;
     let target = sc.scrollTop;
-    if (elT < scT + 20)      target = elT - 20;
-    else if (elB > scB - 20) target = elB - sc.clientHeight + 20;
-    if (target !== sc.scrollTop) smoothScroll(sc, 'scrollTop', target, vertRafRef);
-  }, [rowFocus]);
+    // A "row" pode ser o catalogo inteiro de Filmes/Series (centenas de itens,
+    // varios milhares de px de altura) - tentar encaixar o fim dela (elB) na
+    // viewport, como se fosse uma fileira comum, jogava o scroll quase pro
+    // final da lista inteira. Quando a "linha" e maior que a viewport, so
+    // alinha o TOPO dela; o efeito de colFocus do CatalogGrid cuida do resto.
+    if (elH > sc.clientHeight) {
+      target = elT - 20;
+    } else {
+      if (elT < scT + 20)      target = elT - 20;
+      else if (elB > scB - 20) target = elB - sc.clientHeight + 20;
+    }
+    target = Math.max(0, Math.min(target, sc.scrollHeight - sc.clientHeight));
+    if (Math.abs(target - sc.scrollTop) > 1) smoothScroll(sc, 'scrollTop', target, vertRafRef);
+  }, [rowFocus, genreZone]);
 
   useKeyDown(e => {
-    const { focusArea, navFocus, rowFocus, colFocus, sections, featured, activeNav, bannerBtn } = st.current;
+    const { focusArea, navFocus, rowFocus, colFocus, sections, featured, activeNav, bannerBtn, genres, genreIdx, genreZone, genreFilter, toolbarIdx, toolbarItems } = st.current;
     const k = e.keyCode;
     const hasBanner = activeNav !== 'minha-lista';
     const totalRows = (hasBanner ? 1 : 0) + sections.length;
+    const isCatalogNav = activeNav === 'movies' || activeNav === 'series';
 
     if (k === KEY.BACK) {
       e.preventDefault();
+      if (genreZone === 'open') { setGenreZone('button'); return; }
+      if (genreZone !== 'off') { setGenreZone('off'); return; }
       if (focusArea === 'content') { setFocusArea('sidebar'); setSideExpanded(true); }
       return;
     }
@@ -884,6 +1072,81 @@ export default function HomeScreen() {
 
     if (activeNav === 'search') return;
 
+    // Toolbar (Filmes/Series) — dropdown de categoria (se houver generos) +
+    // botao de busca, navegaveis com LEFT/RIGHT. genreZone: 'button' (foco
+    // na toolbar) e 'open' (lista do dropdown navegavel). UP so move o foco
+    // pra toolbar - ela NAO abre sozinho.
+    if (genreZone === 'button') {
+      if (k === KEY.ENTER) {
+        e.preventDefault();
+        const item = toolbarItems[toolbarIdx];
+        if (item === 'search') {
+          setSearchTypeFilter(activeNav === 'movies' ? 'movie' : 'series');
+          setGenreZone('off');
+          setActiveNav('search');
+          setFocusArea('content');
+        } else {
+          openMenuFor(item);
+        }
+      }
+      if (k === KEY.DOWN)  { e.preventDefault(); setGenreZone('off'); }
+      if (k === KEY.UP)    { e.preventDefault(); if (hasBanner) { setRowFocus(0); setGenreZone('off'); } }
+      if (k === KEY.RIGHT) { e.preventDefault(); setToolbarIdx(i => Math.min(toolbarItems.length - 1, i + 1)); }
+      if (k === KEY.LEFT)  {
+        e.preventDefault();
+        if (toolbarIdx > 0) { setToolbarIdx(i => i - 1); return; }
+        setGenreZone('off');
+        setFocusArea('sidebar'); setSideExpanded(true); setNavFocus(Math.max(0, NAV.indexOf(activeNav)));
+      }
+      return;
+    }
+    if (genreZone === 'open') {
+      const opts = menuOptions(openMenu);
+      if (k === KEY.UP)    { e.preventDefault(); if (genreIdx > 0) setGenreIdx(i => i - 1); }
+      if (k === KEY.DOWN)  { e.preventDefault(); if (genreIdx < opts.length - 1) setGenreIdx(i => i + 1); }
+      if (k === KEY.LEFT || k === KEY.RIGHT) { e.preventDefault(); setGenreZone('button'); }
+      if (k === KEY.ENTER) { e.preventDefault(); if (opts[genreIdx]) applyMenu(openMenu, opts[genreIdx].value); setGenreZone('button'); }
+      return;
+    }
+    if (k === KEY.UP && isCatalogNav && rowFocus === 0) {
+      e.preventDefault();
+      setToolbarIdx(0);
+      setGenreZone('button');
+      return;
+    }
+
+    // Catalogo (Filmes/Series) quebra em grade — UP/DOWN andam CATALOG_COLS
+    // por vez dentro da mesma "linha logica" em vez de trocar de secao.
+    const catalogSecIdx = hasBanner ? rowFocus - 1 : rowFocus;
+    const catalogSec = isCatalogNav ? sections[catalogSecIdx] : null;
+    const isCatalogRow = catalogSec && catalogSec.key === 'all';
+
+    // Throttle: segurar UP/DOWN dispara o repeat nativo do teclado bem mais
+    // rapido do que a animacao de scroll (180ms) consegue acompanhar - cada
+    // novo pulo cancelava a anterior no meio, dando a impressao de "travado"
+    // e de "desceu tudo sozinho" com so um toque mais demorado no controle.
+    if ((k === KEY.UP || k === KEY.DOWN) && isCatalogRow) {
+      const now = Date.now();
+      if (now - catalogMoveTimeRef.current < 140) { e.preventDefault(); return; }
+      catalogMoveTimeRef.current = now;
+    }
+
+    if (k === KEY.UP && isCatalogRow) {
+      e.preventDefault();
+      if (colFocus < CATALOG_COLS) {
+        setToolbarIdx(0);
+        setGenreZone('button');
+      } else {
+        setColFocus(c => Math.max(0, c - CATALOG_COLS));
+      }
+      return;
+    }
+    if (k === KEY.DOWN && isCatalogRow) {
+      e.preventDefault();
+      setColFocus(c => Math.max(0, Math.min(catalogSec.data.length - 1, c + CATALOG_COLS)));
+      return;
+    }
+
     if (k === KEY.UP) {
       e.preventDefault();
       if (rowFocus > 0) { setRowFocus(f => f - 1); setColFocus(0); }
@@ -897,6 +1160,14 @@ export default function HomeScreen() {
       if (hasBanner && rowFocus === 0) {
         if (bannerBtn > 0) { setBannerBtn(f => f - 1); }
         else { setFocusArea('sidebar'); setSideExpanded(true); setNavFocus(Math.max(0, NAV.indexOf(activeNav))); }
+      } else if (isCatalogRow && colFocus % CATALOG_COLS === 0) {
+        // Borda esquerda VISUAL da grade (nao so colFocus===0) - senao LEFT
+        // no inicio de qualquer linha "voltava" pro ultimo item da linha de
+        // cima em vez de ir pra sidebar, ja que colFocus e um indice unico
+        // corrido por cima de varias linhas.
+        setFocusArea('sidebar');
+        setSideExpanded(true);
+        setNavFocus(Math.max(0, NAV.indexOf(activeNav)));
       } else {
         if (colFocus > 0) {
           setColFocus(f => f - 1);
@@ -945,6 +1216,12 @@ export default function HomeScreen() {
           setRowFocus(0);
           setColFocus(0);
           setBannerBtn(0);
+          setGenreFilter(null);
+          setDateKey(''); setMinRating(0); setSortKey('az');
+          setGenreZone('off');
+          setGenreIdx(0);
+          setToolbarIdx(0);
+          setSearchTypeFilter(null);
         }}
         onLogout={() => { logout(); navigate('/login', { replace: true }); }}
         onSwitchProfile={() => { setActiveProfile(null); navigate('/profile-select', { replace: true }); }}
@@ -956,6 +1233,7 @@ export default function HomeScreen() {
       <div style={{ flex: 1, height: '100%', overflow: 'hidden', position: 'relative' }}>
         {activeNav === 'search' ? (
           <SearchPanel
+            typeFilter={searchTypeFilter}
             onSelect={openDetail}
             onBack={() => { setFocusArea('sidebar'); setSideExpanded(true); }}
           />
@@ -981,6 +1259,88 @@ export default function HomeScreen() {
               </div>
             )}
 
+            {/* Toolbar de Filmes/Séries: Categoria, Data, Nota e Ordem em dropdown + busca */}
+            {(activeNav === 'movies' || activeNav === 'series') && (
+              <div ref={genreRowRef} style={{ padding: '18px ' + PAD_L + 'px 4px', display: 'flex', alignItems: 'center', gap: 10, position: 'relative', zIndex: 30 }}>
+                {toolbarItems.filter(k => k !== 'search').map(key => {
+                  const isOpen = genreZone === 'open' && openMenu === key;
+                  const isFoc  = genreZone !== 'off' && toolbarItems[toolbarIdx] === key;
+                  return (
+                    <div key={key} style={{ position: 'relative' }}>
+                      <div
+                        onClick={() => { setToolbarIdx(toolbarItems.indexOf(key)); if (isOpen) setGenreZone('button'); else openMenuFor(key); }}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 10,
+                          padding: '10px 20px', borderRadius: 8, cursor: 'pointer',
+                          fontSize: 14, fontWeight: 700, color: '#fff',
+                          background: menuActive(key) ? 'rgba(201,28,44,0.22)' : 'rgba(255,255,255,0.08)',
+                          border: '2px solid ' + (isFoc ? '#fff' : 'rgba(255,255,255,0.14)'),
+                        }}
+                      >
+                        {MENU_LABEL[key]}: {menuText(key)}
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="#fff" style={{ transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>
+                          <path d="M7 10l5 5 5-5z"/>
+                        </svg>
+                      </div>
+                      {isOpen && (
+                        <div style={{
+                          position: 'absolute', top: '100%', left: 0, marginTop: 6, zIndex: 40,
+                          minWidth: 240, maxHeight: 420, overflowY: 'auto',
+                          background: 'rgba(14,14,16,0.98)', borderRadius: 12,
+                          border: '1px solid rgba(255,255,255,0.10)',
+                          boxShadow: '0 20px 60px rgba(0,0,0,0.7)', padding: 8,
+                        }}>
+                          {menuOptions(key).map((o, i) => {
+                            const isSel = genreIdx === i;
+                            const isCur = o.value === menuValue(key);
+                            return (
+                              <div
+                                key={String(o.value) + i}
+                                id={'menu-opt-' + i}
+                                onClick={() => { applyMenu(key, o.value); setGenreZone('button'); }}
+                                style={{
+                                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16,
+                                  padding: '10px 14px', borderRadius: 7, cursor: 'pointer',
+                                  fontSize: 13.5, fontWeight: isCur ? 800 : 500, whiteSpace: 'nowrap',
+                                  color: isSel || isCur ? '#fff' : 'rgba(255,255,255,0.6)',
+                                  background: isSel ? 'rgba(255,255,255,0.10)' : 'transparent',
+                                  border: '2px solid ' + (isSel ? 'rgba(255,255,255,0.5)' : 'transparent'),
+                                }}
+                              >
+                                {o.label}
+                                {isCur && <span style={{ color: ACCENT, fontSize: 15 }}>✓</span>}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {/* Busca — pula direto pra tela de Busca já filtrada por tipo (filme/série) */}
+                <div
+                  onClick={() => {
+                    setSearchTypeFilter(activeNav === 'movies' ? 'movie' : 'series');
+                    setGenreZone('off');
+                    setActiveNav('search');
+                    setFocusArea('content');
+                  }}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    width: 40, height: 40, borderRadius: 8, cursor: 'pointer',
+                    background: 'rgba(255,255,255,0.08)',
+                    border: '2px solid ' + (genreZone === 'button' && toolbarIdx === toolbarItems.length - 1 ? '#fff' : 'rgba(255,255,255,0.14)'),
+                  }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2">
+                    <circle cx="11" cy="11" r="7"/>
+                    <path d="M21 21l-4.35-4.35" strokeLinecap="round"/>
+                  </svg>
+                </div>
+              </div>
+            )}
+
             {/* Minha Lista empty state */}
             {activeNav === 'minha-lista' && sections.length === 0 && !loadingData && (
               <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16 }}>
@@ -998,7 +1358,6 @@ export default function HomeScreen() {
                 const ri        = activeNav === 'minha-lista' ? si : si + 1;
                 const isActive  = focusArea === 'content' && rowFocus === ri;
                 const isHistory = sec.key === 'history';
-                const isLand    = isHistory;
 
                 return (
                   <div
@@ -1007,13 +1366,25 @@ export default function HomeScreen() {
                     style={{ marginTop: si === 0 ? 12 : 8, marginBottom: 0 }}
                   >
                     <SectionLabel title={sec.title} isActive={isActive} isHistory={isHistory} />
-                    <CardRow
-                      data={sec.data}
-                      colFocus={colFocus}
-                      isActive={isActive}
-                      isLandscape={isLand}
-                      onSelect={openDetail}
-                    />
+                    {sec.key === 'all' && sec.data.length === 0 ? (
+                      <div style={{ padding: '40px ' + PAD_L + 'px', color: 'rgba(255,255,255,0.4)', fontSize: 18 }}>Nenhum título com esses filtros. Mude a Categoria, Data ou Nota.</div>
+                    ) : sec.key === 'all' ? (
+                      <CatalogGrid
+                        data={sec.data}
+                        colFocus={colFocus}
+                        isActive={isActive}
+                        onSelect={openDetail}
+                        scrollRef={scrollRef}
+                        vertRafRef={vertRafRef}
+                      />
+                    ) : (
+                      <CardRow
+                        data={sec.data}
+                        colFocus={colFocus}
+                        isActive={isActive}
+                        onSelect={openDetail}
+                      />
+                    )}
                   </div>
                 );
               })}

@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { moviesAPI, seriesAPI, watchlistAPI, recommendationsAPI } from '../api/index.js';
 import api from '../api/index.js';
 import { prefetchCache } from '../App.jsx';
 import Sidebar from '../components/Sidebar.jsx';
+import { fetchHomeBase, fetchHomeProfile, fetchCatalog, assembleHome, filterCatalog } from '../lib/homeData.js';
 import { KEY, useKeyDown } from '../hooks/useNav.js';
 
 const NAV       = ['home', 'movies', 'series', 'minha-lista', 'search', 'iptv'];
@@ -15,6 +16,28 @@ const PORT_W    = 196;  // portrait card width
 const PORT_H    = 294;  // portrait card height (2:3 poster ratio)
 const CARD_GAP  = 18;
 const PAD_L     = 48;   // row padding from content edge
+
+// Filtros do catálogo (iguais ao app): data de lançamento, nota mínima e ordem
+const YEAR = new Date().getFullYear();
+const DATE_PRESETS = [
+  { key: '',      label: 'Qualquer data',        q: {} },
+  { key: '30d',   label: 'Últimos 30 dias',      q: { released_days: 30 } },
+  { key: '180d',  label: 'Últimos 6 meses',      q: { released_days: 180 } },
+  { key: 'year',  label: 'Este ano (' + YEAR + ')', q: { year_from: YEAR, year_to: YEAR } },
+  { key: '2020s', label: 'Anos 2020',            q: { year_from: 2020, year_to: 2029 } },
+  { key: '2010s', label: 'Anos 2010',            q: { year_from: 2010, year_to: 2019 } },
+  { key: '2000s', label: 'Anos 2000',            q: { year_from: 2000, year_to: 2009 } },
+  { key: '1990s', label: 'Anos 90',              q: { year_from: 1990, year_to: 1999 } },
+];
+const RATINGS = [0, 5, 6, 7, 8, 9];
+const SORTS = [
+  { key: 'az',      label: 'A–Z',              q: { sort: 'title', order: 'asc' } },
+  { key: 'recent',  label: 'Mais recentes',    q: { sort: 'created_at', order: 'desc' } },
+  { key: 'release', label: 'Lançamento',       q: { sort: 'release_date', order: 'desc' } },
+  { key: 'oldest',  label: 'Mais antigos',     q: { sort: 'release_date', order: 'asc' } },
+  { key: 'rating',  label: 'Melhor avaliados', q: { sort: 'rating', order: 'desc' } },
+];
+const MENU_LABEL = { genre: 'Categoria', date: 'Data', rating: 'Nota', sort: 'Ordem' };
 
 // ── RAF smooth scroll ─────────────────────────────────────────────────────────
 function smoothScroll(el, prop, target, rafRef) {
@@ -214,7 +237,9 @@ function CatalogGrid({ data, colFocus, isActive, onSelect, scrollRef, vertRafRef
     const el = itemRefs.current[colFocus];
     const sc = scrollRef?.current;
     if (!el || !sc) return;
-    const elT = el.offsetTop;
+    // Posição dentro da área rolável medida pela tela (offsetTop não serve: as
+    // linhas da grade têm content-visibility e viram "pai" de posicionamento)
+    const elT = el.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop;
     const elB = elT + el.offsetHeight;
     const scT = sc.scrollTop;
     const scB = scT + sc.clientHeight;
@@ -228,28 +253,35 @@ function CatalogGrid({ data, colFocus, isActive, onSelect, scrollRef, vertRafRef
     if (Math.abs(target - sc.scrollTop) > 1) smoothScroll(sc, 'scrollTop', target, vertRafRef);
   }, [colFocus, isActive, scrollRef, vertRafRef]);
 
+  const rows = [];
+  for (let i = 0; i < data.length; i += CATALOG_COLS) rows.push(data.slice(i, i + CATALOG_COLS));
+  const rowH = CATALOG_CARD_H + 30;
+  // Cada linha só é desenhada quando está perto da tela (content-visibility) —
+  // com centenas de títulos isso é o que deixa a rolagem fluida. O padding
+  // (compensado pela margem) evita cortar o brilho/zoom do card em foco.
   return (
-    <div style={{
-      display: 'grid',
-      gridTemplateColumns: 'repeat(' + CATALOG_COLS + ', ' + CATALOG_CARD_W + 'px)',
-      gap: CARD_GAP,
-      paddingLeft: PAD_L, paddingRight: PAD_L, paddingBottom: 24, paddingTop: 16,
-    }}>
-      {data.map((item, ci) => {
-        const focused = isActive && ci === colFocus;
-        return (
-          <div
-            key={item.id}
-            ref={el => { itemRefs.current[ci] = el; }}
-          >
-            <PortraitCard
-              item={item} focused={focused}
-              width={CATALOG_CARD_W} height={CATALOG_CARD_H}
-              onClick={() => onSelect(item)}
-            />
-          </div>
-        );
-      })}
+    <div style={{ paddingLeft: PAD_L, paddingRight: PAD_L, paddingBottom: 24, paddingTop: 16 }}>
+      {rows.map((row, ri) => (
+        <div key={ri} style={{
+          display: 'flex', gap: CARD_GAP,
+          padding: '20px 30px', margin: '-20px -30px ' + (CARD_GAP - 20) + 'px',
+          contentVisibility: 'auto', containIntrinsicSize: '1px ' + (rowH + 40) + 'px',
+        }}>
+          {row.map((item, k) => {
+            const ci = ri * CATALOG_COLS + k;
+            const focused = isActive && ci === colFocus;
+            return (
+              <div key={item.id} ref={el => { itemRefs.current[ci] = el; }} style={{ width: CATALOG_CARD_W, flexShrink: 0 }}>
+                <PortraitCard
+                  item={item} focused={focused}
+                  width={CATALOG_CARD_W} height={CATALOG_CARD_H}
+                  onClick={() => onSelect(item)}
+                />
+              </div>
+            );
+          })}
+        </div>
+      ))}
     </div>
   );
 }
@@ -763,7 +795,7 @@ export default function HomeScreen() {
 
   const [activeNav,    setActiveNav]    = useState('home');
   const [featured,     setFeatured]     = useState(null);
-  const [sections,     setSections]     = useState([]);
+  const [baseSections, setSections]     = useState([]);
   const [loadingData,  setLoadingData]  = useState(true);
   const [focusArea,    setFocusArea]    = useState('content');
   const [navFocus,     setNavFocus]     = useState(0);
@@ -786,8 +818,46 @@ export default function HomeScreen() {
   // enquanto genreZone === 'button'.
   const [toolbarIdx,     setToolbarIdx]     = useState(0);
   const [searchTypeFilter, setSearchTypeFilter] = useState(null); // 'movie' | 'series' | null
+  const [dateKey,   setDateKey]   = useState('');
+  const [minRating, setMinRating] = useState(0);
+  const [sortKey,   setSortKey]   = useState('az');
+  const [openMenu, setOpenMenu] = useState(null); // qual dropdown está aberto
   const genres = catalogGenres[activeNav] || [];
-  const toolbarItems = genres.length > 0 ? ['genre', 'search'] : ['search'];
+  const toolbarItems = [...(genres.length > 0 ? ['genre'] : []), 'date', 'rating', 'sort', 'search'];
+  // Dropdowns da toolbar (categoria, data, nota, ordem) — mesma lógica para todos
+  const menuOptions = (key) => (
+    key === 'genre'  ? [{ label: 'Todos', value: null }, ...genres.map(g => ({ label: g, value: g }))] :
+    key === 'date'   ? DATE_PRESETS.map(p => ({ label: p.label, value: p.key })) :
+    key === 'rating' ? RATINGS.map(x => ({ label: x ? '★ ' + x + '+' : 'Todas', value: x })) :
+                       SORTS.map(p => ({ label: p.label, value: p.key }))
+  );
+  const menuValue  = (key) => (key === 'genre' ? genreFilter : key === 'date' ? dateKey : key === 'rating' ? minRating : sortKey);
+  const menuActive = (key) => (key === 'genre' ? !!genreFilter : key === 'date' ? !!dateKey : key === 'rating' ? minRating > 0 : sortKey !== 'az');
+  const menuText   = (key) => { const o = menuOptions(key).find(x => x.value === menuValue(key)); return o ? o.label : ''; };
+  const applyMenu  = (key, value) => {
+    if (key === 'genre')  setGenreFilter(value);
+    if (key === 'date')   setDateKey(value);
+    if (key === 'rating') setMinRating(value);
+    if (key === 'sort')   setSortKey(value);
+    setColFocus(0); setRowFocus(1);
+  };
+  const openMenuFor = (key) => {
+    setOpenMenu(key);
+    setGenreIdx(Math.max(0, menuOptions(key).findIndex(x => x.value === menuValue(key))));
+    setGenreZone('open');
+  };
+
+  // Filmes/Séries: os filtros rodam aqui no aparelho (catálogo já carregado), sem rede nem spinner
+  const sections = useMemo(() => {
+    const isCat = activeNav === 'movies' || activeNav === 'series';
+    const sec = baseSections[0];
+    const k = sec && sec.key;
+    // Troca de aba: por um quadro ainda vale a lista da aba anterior — não mostra
+    if (!isCat) return k === 'all' ? [] : baseSections;
+    if (!sec) return baseSections;
+    if (k !== 'all') return [];
+    return [{ ...sec, data: filterCatalog(sec.data, { genre: genreFilter, date: dateKey, rating: minRating, sort: sortKey }) }];
+  }, [baseSections, activeNav, genreFilter, dateKey, minRating, sortKey]);
 
   const dataCache     = useRef({});
 
@@ -857,6 +927,7 @@ export default function HomeScreen() {
     setColFocus(0);
     setBannerBtn(0);
     setGenreFilter(null);
+    setDateKey(''); setMinRating(0); setSortKey('az'); setOpenMenu(null);
     setGenreZone('off');
     setGenreIdx(0);
     setToolbarIdx(0);
@@ -890,89 +961,60 @@ export default function HomeScreen() {
       .finally(() => setLoadingData(false));
   }, [activeNav, activeProfile]);
 
-  // Load content
+  // Conteúdo: tudo vem pré-carregado da tela de abertura (prefetchCache). Aqui só
+  // lê o cache — sem rede ao navegar, e os filtros não recarregam nada.
   useEffect(() => {
-    if (activeNav === 'search') return;
-    if (activeNav === 'minha-lista') return;
-
-    // Quando o perfil muda, invalida o cache para rebuscar o histórico correto
-    const curProfileId = activeProfile?.id ?? null;
-    if (prevProfileId.current !== undefined && prevProfileId.current !== curProfileId) {
-      dataCache.current = {};
-    }
+    if (activeNav === 'search' || activeNav === 'minha-lista') return undefined;
+    const curProfileId = activeProfile ? activeProfile.id : null;
     prevProfileId.current = curProfileId;
-
-    const cacheKey = (activeNav === 'movies' || activeNav === 'series')
-      ? activeNav + '|' + (genreFilter || '')
-      : activeNav;
-
-    if (prefetchCache[cacheKey] && !dataCache.current[cacheKey]) {
-      dataCache.current[cacheKey] = prefetchCache[cacheKey];
-    }
-    // Scroll da pagina anterior nao resetava sozinho - trocar de Filmes (rolado
-    // pra baixo) pra Series entrava direto na posicao antiga, ja "la embaixo".
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
 
-    if (dataCache.current[cacheKey]) {
-      const c = dataCache.current[cacheKey];
+    let alive = true;
+    const apply = (c) => {
       setFeatured(c.featured);
       setSections(c.sections);
+      if (c.genres) setCatalogGenres(prev => ({ ...prev, [activeNav]: c.genres }));
       setLoadingData(false);
-      return;
+    };
+
+    if (activeNav === 'home') {
+      const pid = curProfileId || '';
+      if (dataCache.current.home && dataCache.current.homeProfile === pid) { apply(dataCache.current.home); return undefined; }
+      (async () => {
+        let base = prefetchCache.homeBase;
+        if (!base) { setLoadingData(true); base = await fetchHomeBase(); prefetchCache.homeBase = base; }
+        let prof = prefetchCache['profile:' + pid];
+        if (!prof && activeProfile) {
+          setLoadingData(true);
+          prof = await fetchHomeProfile(curProfileId, true);
+          prefetchCache['profile:' + pid] = prof;
+        }
+        if (!alive) return;
+        const c = assembleHome(base, prof);
+        dataCache.current.home = c; dataCache.current.homeProfile = pid;
+        apply(c);
+      })().catch(() => { if (alive) setLoadingData(false); });
+      return () => { alive = false; };
     }
-    setLoadingData(true);
-    // Limpa o conteudo da pagina anterior imediatamente - sem isso o spinner
-    // so aparecia se "sections" ja estivesse vazio, entao trocar de aba
-    // deixava a listagem VELHA na tela (com o layout errado, tipo CardRow
-    // em vez de CatalogGrid) ate a nova busca terminar, parecendo bugado.
-    setSections([]);
-    setFeatured(null);
-    const profileId = activeProfile && activeProfile.id;
-    const catalogParams = { limit: 500, sort: 'title', order: 'asc', ...(genreFilter ? { genre: genreFilter } : {}) };
-    const isCatalogPage = activeNav === 'movies' || activeNav === 'series';
-    const fullCatalogReq = activeNav === 'movies'
-      ? moviesAPI.list(catalogParams).then(r => r.data?.data || []).catch(() => [])
-      : activeNav === 'series'
-        ? seriesAPI.list(catalogParams).then(r => r.data?.data || []).catch(() => [])
-        : Promise.resolve(null);
-    // Filmes/Series nao usa "populares"/"lançamentos" nem historico (so o
-    // catalogo completo) - pular essas 4 chamadas corta boa parte do tempo
-    // de carregamento nessas paginas.
-    Promise.all([
-      isCatalogPage ? Promise.resolve([]) : moviesAPI.popular().then(r => r.data || []),
-      isCatalogPage ? Promise.resolve([]) : moviesAPI.newReleases().then(r => r.data || []),
-      isCatalogPage ? Promise.resolve([]) : seriesAPI.popular().then(r => r.data || []),
-      isCatalogPage ? Promise.resolve([]) : seriesAPI.newReleases().then(r => r.data || []),
-      (activeProfile && !isCatalogPage)
-        ? api.get('/api/history' + (profileId ? '?profile_id=' + profileId : '')).then(r => r.data || []).catch(() => [])
-        : Promise.resolve([]),
-      fullCatalogReq,
-      (activeNav === 'home')
-        ? recommendationsAPI.get(profileId).then(r => r.data || []).catch(() => [])
-        : Promise.resolve([]),
-    ]).then(([pm, nm, ps, ns, hist, fullCatalog, recs]) => {
-      const history = hist.filter(h => h.progress > 0 && h.duration > 0 && !h.completed).slice(0, 12);
-      const built   = buildSections(activeNav, pm, nm, ps, ns, fullCatalog);
-      // Filmes/Series: so o catalogo, "Continue Assistindo"/"Recomendados"
-      // ficam de fora (pedido explicito - essas paginas devem ter so a
-      // listagem completa).
-      let secs = built.sections;
-      if (activeNav !== 'movies' && activeNav !== 'series') {
-        if (recs.length > 0) secs = [{ key: 'recs', title: 'Recomendados pra você', data: recs }, ...secs];
-        if (history.length > 0) secs = [{ key: 'history', title: 'Continue Assistindo', data: history }, ...secs];
-      }
-      dataCache.current[cacheKey] = { featured: built.featured, sections: secs };
-      setFeatured(built.featured);
-      setSections(secs);
-      // Deriva a lista de generos so a partir do catalogo SEM filtro - senao
-      // filtrar uma vez faz as outras opcoes desaparecerem da lista.
-      if (!genreFilter && (activeNav === 'movies' || activeNav === 'series') && fullCatalog) {
-        const set = new Set();
-        fullCatalog.forEach(it => (it.genres || []).forEach(g => g && set.add(g)));
-        setCatalogGenres(prev => ({ ...prev, [activeNav]: [...set].sort() }));
-      }
-    }).catch(() => {}).finally(() => setLoadingData(false));
-  }, [activeNav, activeProfile, genreFilter, refreshKey]);
+
+    // Filmes / Séries
+    const cached = dataCache.current[activeNav] || prefetchCache['catalog:' + activeNav];
+    if (cached) { dataCache.current[activeNav] = cached; apply(cached); return undefined; }
+    setLoadingData(true); setSections([]); setFeatured(null);
+    fetchCatalog(activeNav).then(c => {
+      if (!alive) return;
+      prefetchCache['catalog:' + activeNav] = c; dataCache.current[activeNav] = c; apply(c);
+    }).catch(() => {}).finally(() => { if (alive) setLoadingData(false); });
+    return () => { alive = false; };
+  }, [activeNav, activeProfile, refreshKey]);
+
+  // Dropdown: mantém a opção em foco visível ao descer a lista
+  useEffect(() => {
+    if (genreZone !== 'open') return;
+    const el = document.getElementById('menu-opt-' + genreIdx);
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+  }, [genreIdx, genreZone]);
+
 
   // Smooth vertical scroll to keep focused row visible
   useEffect(() => {
@@ -1013,6 +1055,7 @@ export default function HomeScreen() {
 
     if (k === KEY.BACK) {
       e.preventDefault();
+      if (genreZone === 'open') { setGenreZone('button'); return; }
       if (genreZone !== 'off') { setGenreZone('off'); return; }
       if (focusArea === 'content') { setFocusArea('sidebar'); setSideExpanded(true); }
       return;
@@ -1036,15 +1079,14 @@ export default function HomeScreen() {
     if (genreZone === 'button') {
       if (k === KEY.ENTER) {
         e.preventDefault();
-        if (toolbarItems[toolbarIdx] === 'search') {
+        const item = toolbarItems[toolbarIdx];
+        if (item === 'search') {
           setSearchTypeFilter(activeNav === 'movies' ? 'movie' : 'series');
           setGenreZone('off');
           setActiveNav('search');
           setFocusArea('content');
         } else {
-          const idx = genreFilter ? genres.indexOf(genreFilter) + 1 : 0;
-          setGenreIdx(idx >= 0 ? idx : 0);
-          setGenreZone('open');
+          openMenuFor(item);
         }
       }
       if (k === KEY.DOWN)  { e.preventDefault(); setGenreZone('off'); }
@@ -1059,10 +1101,11 @@ export default function HomeScreen() {
       return;
     }
     if (genreZone === 'open') {
+      const opts = menuOptions(openMenu);
       if (k === KEY.UP)    { e.preventDefault(); if (genreIdx > 0) setGenreIdx(i => i - 1); }
-      if (k === KEY.DOWN)  { e.preventDefault(); if (genreIdx < genres.length) setGenreIdx(i => i + 1); }
-      if (k === KEY.LEFT)  { e.preventDefault(); setGenreZone('button'); }
-      if (k === KEY.ENTER) { e.preventDefault(); setGenreFilter(genreIdx === 0 ? null : genres[genreIdx - 1]); setGenreZone('off'); }
+      if (k === KEY.DOWN)  { e.preventDefault(); if (genreIdx < opts.length - 1) setGenreIdx(i => i + 1); }
+      if (k === KEY.LEFT || k === KEY.RIGHT) { e.preventDefault(); setGenreZone('button'); }
+      if (k === KEY.ENTER) { e.preventDefault(); if (opts[genreIdx]) applyMenu(openMenu, opts[genreIdx].value); setGenreZone('button'); }
       return;
     }
     if (k === KEY.UP && isCatalogNav && rowFocus === 0) {
@@ -1100,7 +1143,7 @@ export default function HomeScreen() {
     }
     if (k === KEY.DOWN && isCatalogRow) {
       e.preventDefault();
-      setColFocus(c => Math.min(catalogSec.data.length - 1, c + CATALOG_COLS));
+      setColFocus(c => Math.max(0, Math.min(catalogSec.data.length - 1, c + CATALOG_COLS)));
       return;
     }
 
@@ -1174,6 +1217,7 @@ export default function HomeScreen() {
           setColFocus(0);
           setBannerBtn(0);
           setGenreFilter(null);
+          setDateKey(''); setMinRating(0); setSortKey('az');
           setGenreZone('off');
           setGenreIdx(0);
           setToolbarIdx(0);
@@ -1215,39 +1259,66 @@ export default function HomeScreen() {
               </div>
             )}
 
-            {/* Toolbar (categoria + busca) — só Filmes/Séries. Sobe com UP a
-                partir do banner/topo do catalogo. */}
+            {/* Toolbar de Filmes/Séries: Categoria, Data, Nota e Ordem em dropdown + busca */}
             {(activeNav === 'movies' || activeNav === 'series') && (
-              <div ref={genreRowRef} style={{ padding: '18px ' + PAD_L + 'px 4px', display: 'flex', alignItems: 'center', gap: 10, position: 'relative' }}>
-                {genres.length > 0 && (
-                  <div
-                    onClick={() => {
-                      setToolbarIdx(0);
-                      if (genreZone === 'open') { setGenreZone('button'); return; }
-                      const idx = genreFilter ? genres.indexOf(genreFilter) + 1 : 0;
-                      setGenreIdx(idx >= 0 ? idx : 0);
-                      setGenreZone('open');
-                    }}
-                    style={{
-                      display: 'inline-flex', alignItems: 'center', gap: 10,
-                      padding: '10px 20px', borderRadius: 8, cursor: 'pointer',
-                      fontSize: 14, fontWeight: 700, color: '#fff',
-                      background: 'rgba(255,255,255,0.08)',
-                      border: '2px solid ' + (genreZone !== 'off' && toolbarIdx === 0 ? '#fff' : 'rgba(255,255,255,0.14)'),
-                    }}
-                  >
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2">
-                      <path d="M4 6h16M7 12h10M10 18h4" strokeLinecap="round"/>
-                    </svg>
-                    Categoria: {genreFilter || 'Todos'}
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="#fff" style={{ transform: genreZone === 'open' ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>
-                      <path d="M7 10l5 5 5-5z"/>
-                    </svg>
-                  </div>
-                )}
+              <div ref={genreRowRef} style={{ padding: '18px ' + PAD_L + 'px 4px', display: 'flex', alignItems: 'center', gap: 10, position: 'relative', zIndex: 30 }}>
+                {toolbarItems.filter(k => k !== 'search').map(key => {
+                  const isOpen = genreZone === 'open' && openMenu === key;
+                  const isFoc  = genreZone !== 'off' && toolbarItems[toolbarIdx] === key;
+                  return (
+                    <div key={key} style={{ position: 'relative' }}>
+                      <div
+                        onClick={() => { setToolbarIdx(toolbarItems.indexOf(key)); if (isOpen) setGenreZone('button'); else openMenuFor(key); }}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 10,
+                          padding: '10px 20px', borderRadius: 8, cursor: 'pointer',
+                          fontSize: 14, fontWeight: 700, color: '#fff',
+                          background: menuActive(key) ? 'rgba(201,28,44,0.22)' : 'rgba(255,255,255,0.08)',
+                          border: '2px solid ' + (isFoc ? '#fff' : 'rgba(255,255,255,0.14)'),
+                        }}
+                      >
+                        {MENU_LABEL[key]}: {menuText(key)}
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="#fff" style={{ transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>
+                          <path d="M7 10l5 5 5-5z"/>
+                        </svg>
+                      </div>
+                      {isOpen && (
+                        <div style={{
+                          position: 'absolute', top: '100%', left: 0, marginTop: 6, zIndex: 40,
+                          minWidth: 240, maxHeight: 420, overflowY: 'auto',
+                          background: 'rgba(14,14,16,0.98)', borderRadius: 12,
+                          border: '1px solid rgba(255,255,255,0.10)',
+                          boxShadow: '0 20px 60px rgba(0,0,0,0.7)', padding: 8,
+                        }}>
+                          {menuOptions(key).map((o, i) => {
+                            const isSel = genreIdx === i;
+                            const isCur = o.value === menuValue(key);
+                            return (
+                              <div
+                                key={String(o.value) + i}
+                                id={'menu-opt-' + i}
+                                onClick={() => { applyMenu(key, o.value); setGenreZone('button'); }}
+                                style={{
+                                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16,
+                                  padding: '10px 14px', borderRadius: 7, cursor: 'pointer',
+                                  fontSize: 13.5, fontWeight: isCur ? 800 : 500, whiteSpace: 'nowrap',
+                                  color: isSel || isCur ? '#fff' : 'rgba(255,255,255,0.6)',
+                                  background: isSel ? 'rgba(255,255,255,0.10)' : 'transparent',
+                                  border: '2px solid ' + (isSel ? 'rgba(255,255,255,0.5)' : 'transparent'),
+                                }}
+                              >
+                                {o.label}
+                                {isCur && <span style={{ color: ACCENT, fontSize: 15 }}>✓</span>}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
 
-                {/* Busca — pula direto pra tela de Busca já filtrada por
-                    tipo (filme/serie), igual ao padrão do app Android. */}
+                {/* Busca — pula direto pra tela de Busca já filtrada por tipo (filme/série) */}
                 <div
                   onClick={() => {
                     setSearchTypeFilter(activeNav === 'movies' ? 'movie' : 'series');
@@ -1260,7 +1331,6 @@ export default function HomeScreen() {
                     width: 40, height: 40, borderRadius: 8, cursor: 'pointer',
                     background: 'rgba(255,255,255,0.08)',
                     border: '2px solid ' + (genreZone === 'button' && toolbarIdx === toolbarItems.length - 1 ? '#fff' : 'rgba(255,255,255,0.14)'),
-                    marginLeft: genres.length > 0 ? 0 : undefined,
                   }}
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2">
@@ -1268,38 +1338,6 @@ export default function HomeScreen() {
                     <path d="M21 21l-4.35-4.35" strokeLinecap="round"/>
                   </svg>
                 </div>
-
-                {genreZone === 'open' && (
-                  <div style={{
-                    position: 'absolute', top: '100%', left: PAD_L, marginTop: 6, zIndex: 40,
-                    minWidth: 240, maxHeight: 420, overflowY: 'auto',
-                    background: 'rgba(14,14,16,0.98)', borderRadius: 12,
-                    border: '1px solid rgba(255,255,255,0.10)',
-                    boxShadow: '0 20px 60px rgba(0,0,0,0.7)', padding: 8,
-                  }}>
-                    {['Todos', ...genres].map((g, i) => {
-                      const isSel = genreIdx === i;
-                      const isActiveFilter = i === 0 ? !genreFilter : genreFilter === g;
-                      return (
-                        <div
-                          key={g}
-                          onClick={() => { setGenreFilter(i === 0 ? null : g); setGenreZone('off'); }}
-                          style={{
-                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                            padding: '10px 14px', borderRadius: 7, cursor: 'pointer',
-                            fontSize: 13.5, fontWeight: isActiveFilter ? 800 : 500,
-                            color: isSel ? '#fff' : isActiveFilter ? '#fff' : 'rgba(255,255,255,0.6)',
-                            background: isSel ? 'rgba(255,255,255,0.10)' : 'transparent',
-                            border: '2px solid ' + (isSel ? 'rgba(255,255,255,0.5)' : 'transparent'),
-                          }}
-                        >
-                          {g}
-                          {isActiveFilter && <span style={{ color: ACCENT, fontSize: 15 }}>✓</span>}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
               </div>
             )}
 
@@ -1328,7 +1366,9 @@ export default function HomeScreen() {
                     style={{ marginTop: si === 0 ? 12 : 8, marginBottom: 0 }}
                   >
                     <SectionLabel title={sec.title} isActive={isActive} isHistory={isHistory} />
-                    {sec.key === 'all' ? (
+                    {sec.key === 'all' && sec.data.length === 0 ? (
+                      <div style={{ padding: '40px ' + PAD_L + 'px', color: 'rgba(255,255,255,0.4)', fontSize: 18 }}>Nenhum título com esses filtros. Mude a Categoria, Data ou Nota.</div>
+                    ) : sec.key === 'all' ? (
                       <CatalogGrid
                         data={sec.data}
                         colFocus={colFocus}

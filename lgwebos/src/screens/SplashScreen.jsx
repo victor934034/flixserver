@@ -22,10 +22,12 @@ export default function SplashScreen({ onReady }) {
   useEffect(() => {
     // Minimum display time + progress animation
     const steps = [
-      { at: 100,  p: 20, text: 'Conectando…' },
-      { at: 600,  p: 50, text: 'Carregando catálogo…' },
-      { at: 1200, p: 75, text: 'Quase lá…' },
-      { at: 1800, p: 92, text: 'Preparando tudo…' },
+      { at: 100,   p: 10, text: 'Conectando…' },
+      { at: 1500,  p: 30, text: 'Carregando catálogo…' },
+      { at: 4000,  p: 55, text: 'Baixando banners e capas…' },
+      { at: 8000,  p: 75, text: 'Quase lá…' },
+      { at: 14000, p: 88, text: 'Preparando tudo…' },
+      { at: 22000, p: 94, text: 'Só mais um instante…' },
     ];
     const timers = steps.map(s =>
       setTimeout(() => { setProgress(s.p); setLabel(s.text); }, s.at)

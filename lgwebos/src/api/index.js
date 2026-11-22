@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { ageFilter } from '../lib/ageGate.js';
 
 const BASE_URL = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) || '';
 export { BASE_URL };
@@ -28,6 +29,12 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// Classificação até 14 anos (LG Content Store): filtra toda resposta da API
+api.interceptors.response.use((res) => {
+  try { res.data = ageFilter(String((res.config && res.config.url) || ''), res.data); } catch (e) {}
+  return res;
+});
+
 // ── Auth ──────────────────────────────────────────────────────────────────────
 export const authAPI = {
   login:       (email, password) => api.post('/api/auth/login', { email, password }),
@@ -43,6 +50,7 @@ export const moviesAPI = {
   get:         (id)      => api.get('/api/movies/' + id),
   popular:     ()        => api.get('/api/movies/section/popular'),
   newReleases: ()        => api.get('/api/movies/section/new'),
+  released:    ()        => api.get('/api/movies/section/released'),
 };
 
 // ── Series ────────────────────────────────────────────────────────────────────
@@ -52,6 +60,7 @@ export const seriesAPI = {
   get:         (id)      => api.get('/api/series/' + id),
   popular:     ()        => api.get('/api/series/section/popular'),
   newReleases: ()        => api.get('/api/series/section/new'),
+  released:    ()        => api.get('/api/series/section/released'),
   episodes:    (id, s)   => api.get('/api/series/' + id + '/episodes', s ? { params: { season: s } } : {}),
 };
 

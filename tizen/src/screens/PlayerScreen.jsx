@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useTogether } from '../lib/together.js';
 import { KEY, useKeyDown } from '../hooks/useNav.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
-import { historyAPI } from '../api/index.js';
+import api, { historyAPI, BASE_URL } from '../api/index.js';
 
 const SEEK_S             = 10;
 const HIDE_MS            = 5000;
@@ -218,6 +218,7 @@ export default function PlayerScreen() {
   const lastTickRef      = useRef(0);      // throttle react state updates
   const ctRef            = useRef(0);      // current time ref (no re-render)
   const durRef           = useRef(0);      // duration ref
+  const autoRemuxTriedRef = useRef(false); // evita loop se o remux também falhar
 
   // DOM refs for direct updates (bypass React reconciler — critical for TV performance)
   const playFillRef   = useRef(null);
@@ -239,8 +240,16 @@ export default function PlayerScreen() {
   const [paused,       setPaused]       = useState(false);
   const [focusedBtn,   setFocusedBtn]   = useState(2);
   const [focusedPanel, setFocusedPanel] = useState(0);
+  const [remuxActive,  setRemuxActive]  = useState(false);
+  const [streamBlocked, setStreamBlocked] = useState(false);
+  const [streamBlockInfo, setStreamBlockInfo] = useState(null);
+  const sessionIdRef = useRef(Math.random().toString(36).slice(2) + Date.now());
 
-  const currentUrl    = tracks[trackKey] || initialUrl;
+  const rawUrl      = tracks[trackKey] || initialUrl;
+  // Fallback pra AC3/DTS/HE-AAC que o browser não decodifica — reencoda o
+  // áudio pra AAC ao vivo, mesmo endpoint usado pelo player web e pela TV.
+  const remuxUrl    = rawUrl ? `${BASE_URL}/api/remux?url=${encodeURIComponent(rawUrl)}` : null;
+  const currentUrl  = remuxActive ? remuxUrl : rawUrl;
 
   // ── Assistir juntos: sincroniza play/pause/seek com a sala ──
   const tg = useTogether(room ? String(room) : null);
@@ -302,6 +311,49 @@ export default function PlayerScreen() {
   }, [tg.initialState]);
   useEffect(() => { if (tg.status === 'ended') navigate(-1); }, [tg.status]);
 
+
+  const activateRemux = useCallback(() => {
+    if (remuxActive || !rawUrl) return;
+    switchPos.current = ctRef.current;
+    wasLoaded.current = false;
+    initialPlayedRef.current = false;
+    clearTimeout(initPlayTimerRef.current);
+    setError(null);
+    setRemuxActive(true);
+    setPanel(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remuxActive, rawUrl]);
+
+  // Limite de telas simultâneas por conta — mesmo endpoint/regra do app
+  // mobile e da TV Android (backend conta por user_id, sem distinguir
+  // plataforma). Sem isso, assistir pela LG nunca contava nem era
+  // bloqueado pelo limite do plano.
+  useEffect(() => {
+    let alive = true;
+    const sessionId = sessionIdRef.current;
+    api.post('/api/streams/start', { session_id: sessionId, content_title: title })
+      .then(() => {
+        if (!alive) { api.delete('/api/streams/' + sessionId).catch(() => {}); return; }
+      })
+      .catch(e => {
+        if (!alive) return;
+        if (e.response && e.response.status === 429) {
+          const v = videoRef.current;
+          if (v) v.pause();
+          setStreamBlocked(true);
+          setStreamBlockInfo(e.response.data);
+        }
+      });
+    const heartbeat = setInterval(() => {
+      api.post('/api/streams/heartbeat/' + sessionId).catch(() => {});
+    }, 30000);
+    return () => {
+      alive = false;
+      clearInterval(heartbeat);
+      api.delete('/api/streams/' + sessionId).catch(() => {});
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Inicia o primeiro play quando há INITIAL_BUFFER_S disponível (ou no timeout)
   const startInitialPlay = useCallback(() => {
@@ -428,11 +480,14 @@ export default function PlayerScreen() {
   const allBtns = useMemo(() => [...leftBtns, ...rightBtns], [leftBtns, rightBtns]);
 
   const panelOptions = useMemo(() => {
-    if (panel === 'audio')  return availTracks.map(k => ({ key: k, label: TRACK_META[k]?.label, sub: TRACK_META[k]?.sub, active: k === trackKey }));
+    if (panel === 'audio')  return [
+      ...availTracks.map(k => ({ key: k, label: TRACK_META[k]?.label, sub: TRACK_META[k]?.sub, active: k === trackKey })),
+      { key: 'remux', label: 'Sem som?', sub: remuxActive ? 'Já corrigido' : 'Corrigir áudio', active: remuxActive },
+    ];
     if (panel === 'sub')    return availSubs.map(k   => ({ key: k, label: SUB_META[k], active: k === subKey }));
     if (panel === 'config') return [{ key: 'quality', label: 'Qualidade: Auto', sub: 'Ajuste automático de qualidade', active: true }];
     return [];
-  }, [panel, availTracks, availSubs, trackKey, subKey]);
+  }, [panel, availTracks, availSubs, trackKey, subKey, remuxActive]);
 
   const showControls = useCallback(() => {
     setCtrlVisible(true);
@@ -533,6 +588,17 @@ export default function PlayerScreen() {
     };
   }, [currentUrl]);
 
+  function onVideoError() {
+    // Tenta o remux automaticamente uma vez antes de desistir (só uma vez
+    // por vídeo, pra não entrar em loop se o remux também falhar).
+    if (!remuxActive && !autoRemuxTriedRef.current) {
+      autoRemuxTriedRef.current = true;
+      activateRemux();
+    } else {
+      setError('Não foi possível reproduzir o vídeo');
+    }
+  }
+
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
@@ -582,8 +648,11 @@ export default function PlayerScreen() {
         const opt = panelOptions[focusedPanel];
         if (!opt) return;
         if (panel === 'audio') {
-          if (opt.key !== trackKey) { switchPos.current = ctRef.current; setTrackKey(opt.key); }
-          setPanel(null);
+          if (opt.key === 'remux') { activateRemux(); }
+          else {
+            if (opt.key !== trackKey) { switchPos.current = ctRef.current; setTrackKey(opt.key); }
+            setPanel(null);
+          }
         } else if (panel === 'sub') {
           setSubKey(opt.key); setPanel(null);
         }
@@ -597,7 +666,7 @@ export default function PlayerScreen() {
     if (k === KEY.FAST_FWD) { if (v) v.currentTime = Math.min(v.duration || 0, v.currentTime + SEEK_S); }
     if (k === KEY.PLAY || k === KEY.PAUSE) { if (v) { if (paused) v.play(); else v.pause(); } }
     if (k === KEY.ENTER) { execBtn(allBtns[focusedBtn]); }
-  }, [panel, focusedBtn, focusedPanel, panelOptions, paused, currentTime, skipIntroTo, nextEp, prevEp, trackKey, allBtns]);
+  }, [panel, focusedBtn, focusedPanel, panelOptions, paused, currentTime, skipIntroTo, nextEp, prevEp, trackKey, allBtns, activateRemux]);
 
   const subTracks = ['pt','en','es'].filter(k => !!subtitles[k]);
 
@@ -622,6 +691,7 @@ export default function PlayerScreen() {
           if (timeDurRef.current) timeDurRef.current.textContent = fmt(dur);
         }}
         onCanPlay={onCanPlay}
+        onError={onVideoError}
         onPlay={() => { setStarted(true); setPaused(false); bufferingRef.current = false; setBuffering(false); }}
         onPause={() => { if (!forcedPauseRef.current) setPaused(true); }}
         onWaiting={() => {
@@ -636,7 +706,6 @@ export default function PlayerScreen() {
           stallTimerRef.current = setTimeout(checkBuffer, 300);
         }}
         onPlaying={() => { forcedPauseRef.current = false; bufferingRef.current = false; setBuffering(false); }}
-        onError={() => setError('Não foi possível reproduzir o vídeo')}
         onEnded={() => { if (nextEp) navigate('/player', { state: nextEp, replace: true }); else navigate(-1); }}
       >
         {subTracks.map(lang => (
@@ -667,6 +736,19 @@ export default function PlayerScreen() {
           <svg width="60" height="60" viewBox="0 0 24 24" fill={ACCENT}><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
           <div style={{ fontSize: 24, fontWeight: 800, color: '#fff' }}>Não foi possível reproduzir</div>
           <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.45)', maxWidth: 480, textAlign: 'center' }}>{error}</div>
+          <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.25)', marginTop: 8 }}>Pressione Voltar para sair</div>
+        </div>
+      )}
+
+      {/* Limite de telas simultâneas atingido */}
+      {streamBlocked && (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.96)', gap: 18 }}>
+          <svg width="56" height="56" viewBox="0 0 24 24" fill={ACCENT}><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"/></svg>
+          <div style={{ fontSize: 24, fontWeight: 800, color: '#fff' }}>Limite de telas atingido</div>
+          <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.55)', maxWidth: 480, textAlign: 'center' }}>
+            Já há {streamBlockInfo && (streamBlockInfo.active ?? streamBlockInfo.max_streams) || 1}{' '}
+            {streamBlockInfo && streamBlockInfo.active === 1 ? 'dispositivo reproduzindo' : 'dispositivos reproduzindo'} nesta conta.
+          </div>
           <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.25)', marginTop: 8 }}>Pressione Voltar para sair</div>
         </div>
       )}
@@ -761,7 +843,10 @@ export default function PlayerScreen() {
                 active={opt.active}
                 focused={focusedPanel === i}
                 onClick={() => {
-                  if (panel === 'audio') { if (opt.key !== trackKey) { switchPos.current = ctRef.current; setTrackKey(opt.key); } setPanel(null); }
+                  if (panel === 'audio') {
+                    if (opt.key === 'remux') activateRemux();
+                    else { if (opt.key !== trackKey) { switchPos.current = ctRef.current; setTrackKey(opt.key); } setPanel(null); }
+                  }
                   else if (panel === 'sub') { setSubKey(opt.key); setPanel(null); }
                 }}
               />
@@ -771,15 +856,11 @@ export default function PlayerScreen() {
 
         {/* Bottom controls */}
         <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '0 52px 36px' }}>
-          {/* Progress bar */}
+          {/* Progress bar — só visual/informativa. Navegação e avanço/retrocesso
+              acontecem pelos botões de controle, nunca arrastando/clicando a
+              barra diretamente (evita seek acidental pelo D-pad/ponteiro). */}
           <div
-            style={{ height: 6, background: 'rgba(255,255,255,0.18)', borderRadius: 3, marginBottom: 24, position: 'relative', cursor: 'pointer' }}
-            onClick={e => {
-              const rect = e.currentTarget.getBoundingClientRect();
-              const pct  = (e.clientX - rect.left) / rect.width;
-              const v    = videoRef.current;
-              if (v && v.duration) v.currentTime = pct * v.duration;
-            }}
+            style={{ height: 6, background: 'rgba(255,255,255,0.18)', borderRadius: 3, marginBottom: 24, position: 'relative', pointerEvents: 'none' }}
           >
             {/* Buffer fill */}
             <div ref={bufFillRef} style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: '0%', background: 'rgba(255,255,255,0.28)', borderRadius: 3 }} />
