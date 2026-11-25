@@ -171,3 +171,8 @@
 }
 
 .card:hover .label { color: #fff; }
+
+/* ✕ de "tirar do Continuar assistindo": sempre visível (no celular não existe hover) */
+.removeWrap { position: relative; flex-shrink: 0; }
+.removeBtn { position: absolute; top: 6px; right: 6px; z-index: 5; width: 30px; height: 30px; border-radius: 50%; border: 1px solid rgba(255,255,255,.35); background: rgba(0,0,0,.75); color: #fff; font-size: 14px; line-height: 1; cursor: pointer; }
+.removeBtn:hover { background: #E50914; border-color: #E50914; }

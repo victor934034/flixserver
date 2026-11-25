@@ -62,6 +62,8 @@ function attach(httpServer) {
     .map(o => (o || '').trim().replace(/\/$/, '')).filter(Boolean);
   const io = new Server(httpServer, {
     path: '/socket.io',
+    // O proxy do site pode entregar "/socket.io" sem a barra final; sem isto a sala nunca conecta (404)
+    addTrailingSlash: false,
     cors: { origin: origins.length ? origins : true, credentials: true },
     maxHttpBufferSize: 1e5,
     pingInterval: 10000, pingTimeout: 8000,

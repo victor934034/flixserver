@@ -7,6 +7,7 @@ import { useFonts } from 'expo-font';
 import { Ionicons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
 import TogetherInvites from './src/components/TogetherInvites';
+import WhatsNew from './src/components/WhatsNew';
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { ProfileProvider, useProfile } from './src/contexts/ProfileContext';
 
@@ -75,6 +76,7 @@ function AppNavigator() {
       </Stack.Navigator>
     </NavigationContainer>
     <TogetherInvites navigationRef={navRef} />
+    <WhatsNew />
     </>
   );
 }

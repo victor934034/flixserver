@@ -1,0 +1,15 @@
+.overlay { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.78); display: grid; place-items: center; padding: 20px; }
+.card { width: 100%; max-width: 420px; max-height: 85vh; overflow-y: auto; background: #161616; border: 1px solid #2a2a2a; border-radius: 16px; padding: 24px; display: flex; flex-direction: column; gap: 12px; color: #fff; text-align: center; }
+.card h2 { font-size: 20px; font-weight: 800; }
+.card p { color: #a3a3a3; font-size: 14px; }
+.version { color: #E50914; font-size: 12px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
+.list { text-align: left; padding-left: 18px; display: flex; flex-direction: column; gap: 10px; color: #ccc; font-size: 14px; line-height: 1.45; }
+.stars { color: #f5c518; font-size: 34px; letter-spacing: 4px; }
+.primary { background: #E50914; color: #fff; border: 0; border-radius: 12px; padding: 13px 20px; font-weight: 700; font-size: 15px; cursor: pointer; text-decoration: none; display: block; }
+.primary:disabled { opacity: .5; cursor: default; }
+.secondary { background: transparent; color: #fff; border: 1px solid #333; border-radius: 12px; padding: 12px 20px; font-weight: 700; font-size: 15px; cursor: pointer; }
+.secondary:disabled { opacity: .45; cursor: default; }
+.form { display: flex; flex-direction: column; gap: 12px; }
+.input { background: #0f0f0f; border: 1px solid #333; border-radius: 12px; color: #fff; font-size: 24px; letter-spacing: 8px; text-align: center; padding: 12px; width: 100%; text-transform: uppercase; }
+.divider { color: #666; font-size: 12px; }
+.error { color: #f87171; font-size: 14px; }

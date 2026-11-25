@@ -48,6 +48,8 @@ export default function Home() {
         api.get('/history', { params }).then(r =>
           (r.data || [])
             .filter(h => h.progress > 0 && h.duration > 0 && !h.completed)
+            // uma entrada por filme/série (fica a assistida por último)
+            .filter((h, i, all) => all.findIndex(o => (o.series_id || o.content_id) === (h.series_id || h.content_id)) === i)
             .slice(0, 12)
         ).catch(() => [])
       );
@@ -70,6 +72,16 @@ export default function Home() {
       setData({ featured, newMovies, newSeries, popularMovies, history, released, recs });
     });
   }, [activeProfile, reloadKey]);
+
+  async function removeFromContinue(item) {
+    if (!window.confirm(`Tirar "${item.title}" do Continuar assistindo?`)) return;
+    try {
+      await api.delete(`/history/${item.historyId}`);
+      setData(d => ({ ...d, history: d.history.filter(h => h.id !== item.historyId) }));
+    } catch {
+      window.alert('Não foi possível remover. Tente de novo.');
+    }
+  }
 
   return (
     <>
@@ -100,7 +112,8 @@ export default function Home() {
               <ContentRow
                 title="Continue Assistindo"
                 items={data.history.map(h => ({
-                  id: h.content_id || h.id,
+                  id: (h.content_type === 'episode' && h.series_id) || h.content_id,
+                  historyId: h.id,
                   title: h.title || h.episode_title,
                   poster_url: h.poster_url || h.thumbnail_url,
                   type: h.content_type === 'episode' ? 'series' : (h.content_type || 'movie'),
@@ -109,6 +122,7 @@ export default function Home() {
                   genres: h.genres,
                 }))}
                 seeAllHref="/continuar-assistindo"
+                onRemove={removeFromContinue}
               />
             )}
 

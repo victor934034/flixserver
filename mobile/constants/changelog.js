@@ -2,7 +2,18 @@
 // "O que há de novo"). Adicione uma entrada nova no TOPO a cada versão
 // que tiver mudanças relevantes pro usuário — o app mostra só as entradas
 // mais novas que a última vista (guardado no AsyncStorage).
+// REGRA: toda publicação com mudança para o usuário ganha entrada nova aqui.
 export const CHANGELOG = [
+  {
+    version: '1.2.0',
+    items: [
+      'Continuar assistindo: não curtiu? Toque no ✕ do título para tirar da lista.',
+      'Assistir juntos corrigido: a sala volta a conectar.',
+      'No Assistir juntos agora dá para escolher: criar uma sala ou entrar com um código.',
+      'Novo botão para avaliar o app (Perfil → Avaliar o app).',
+      'IPTV: canais que não abriam agora têm um caminho alternativo, e dá para transmitir para a TV pelo Chromecast.',
+    ],
+  },
   {
     version: '1.1.0',
     items: [

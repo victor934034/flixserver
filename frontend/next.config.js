@@ -1,6 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'standalone',
+  // Sem isto o Next redireciona "/socket.io/" (308) e o "Assistir juntos" não conecta
+  skipTrailingSlashRedirect: true,
   images: {
     remotePatterns: [
       { protocol: 'https', hostname: 'image.tmdb.org' },

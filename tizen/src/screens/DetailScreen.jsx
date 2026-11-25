@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import api, { moviesAPI, seriesAPI, watchlistAPI, likesAPI } from '../api/index.js';
 import { startTogetherWeb } from '../lib/together.js';
+import { prefetchCache } from '../App.jsx';
 import { KEY, useKeyDown } from '../hooks/useNav.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 
@@ -230,6 +231,7 @@ export default function DetailScreen() {
   const [epProgress, setEpProgress] = useState({});
   const [epSeconds, setEpSeconds] = useState({});
   const [movieSeconds, setMovieSeconds] = useState(0);
+  const [continueId, setContinueId] = useState(null); // registro que mantém o título no "Continuar assistindo"
 
   const autoPlayedRef = useRef(false);
   // So trava a tela inteira no spinner na PRIMEIRA carga - trocar de
@@ -297,6 +299,8 @@ export default function DetailScreen() {
         });
         setEpProgress(progressMap);
         setEpSeconds(secondsMap);
+        const open = (r.data || []).find(h => h.series_id === id && !h.completed && h.progress > 0);
+        setContinueId(open ? open.id : null);
       }).catch(() => {});
   }, [id, isSeries, activeProfile]);
 
@@ -309,7 +313,7 @@ export default function DetailScreen() {
         const h = (r.data || []).find(item =>
           item.content_id === id && !item.episode_id && !item.completed && item.progress > 5
         );
-        if (h) setMovieSeconds(h.progress);
+        if (h) { setMovieSeconds(h.progress); setContinueId(h.id); }
       }).catch(() => {});
   }, [id, isSeries, activeProfile]);
 
@@ -339,6 +343,7 @@ export default function DetailScreen() {
       });
     }
     acts.push({ id: 'together', label: '👥 Assistir juntos' });
+    if (continueId) acts.push({ id: 'remove_continue', label: 'Tirar do Continuar assistindo', icon: '✕' });
     acts.push({ id: 'watchlist', label: wlItem ? 'Na Minha Lista' : 'Minha Lista', icon: wlItem ? '✓' : '+' });
     acts.push({ id: 'like',    label: 'Gostei' + (likeData.likes > 0 ? ' · ' + likeData.likes : ''), icon: '👍', active: likeData.userVote === 'like' });
     acts.push({ id: 'dislike', label: 'Não gostei' + (likeData.dislikes > 0 ? ' · ' + likeData.dislikes : ''), icon: '👎', active: likeData.userVote === 'dislike', danger: likeData.userVote === 'dislike' });
@@ -394,6 +399,19 @@ export default function DetailScreen() {
       togetherRef.current = true;
       if (isSeries) { if (currentEps[0]) playEpisode(currentEps[0], 0); }
       else if (versions[0]) playMovie(versions[0], 0);
+      return;
+    }
+    if (act.id === 'remove_continue') {
+      try {
+        await api.delete('/api/history/' + continueId);
+        // a Home guarda o histórico já carregado: descarta pra buscar de novo
+        Object.keys(prefetchCache).forEach(k => { if (k.indexOf('profile:') === 0) delete prefetchCache[k]; });
+        setContinueId(null);
+        setMovieSeconds(0);
+        setEpProgress({});
+        setEpSeconds({});
+        setSecIdx(i => Math.max(0, i - 1));
+      } catch {}
       return;
     }
     if (act.id === 'watchlist') {

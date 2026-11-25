@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
-import { Modal, View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { Modal, View, Text, TouchableOpacity, ScrollView, StyleSheet, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CHANGELOG } from '../constants/changelog';
+import { openStoreRating } from '../lib/rate';
 
 const STORAGE_KEY = 'lastSeenChangelogVersion';
 
 export default function WhatsNewModal() {
   const [visible, setVisible] = useState(false);
   const [pending, setPending] = useState([]);
+  const [askRate, setAskRate] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -16,9 +18,9 @@ export default function WhatsNewModal() {
       try {
         const lastSeen = await AsyncStorage.getItem(STORAGE_KEY);
         if (lastSeen === CHANGELOG[0].version) return;
-        // Mostra so as entradas ainda nao vistas (ou tudo, se nunca abriu antes)
+        // Mostra so as entradas ainda nao vistas (so a mais nova, se nunca abriu antes)
         const idx = CHANGELOG.findIndex(c => c.version === lastSeen);
-        const toShow = idx === -1 ? CHANGELOG : CHANGELOG.slice(0, idx);
+        const toShow = idx === -1 ? CHANGELOG.slice(0, 1) : CHANGELOG.slice(0, idx);
         if (toShow.length === 0) return;
         setPending(toShow);
         setVisible(true);
@@ -28,8 +30,32 @@ export default function WhatsNewModal() {
 
   const close = async () => {
     setVisible(false);
+    // Na primeira abertura de cada versao, depois das novidades vem o convite para avaliar
+    if (Platform.OS === 'android') setAskRate(true);
     try { await AsyncStorage.setItem(STORAGE_KEY, CHANGELOG[0].version); } catch {}
   };
+
+  if (askRate) {
+    return (
+      <Modal visible transparent animationType="fade" onRequestClose={() => setAskRate(false)}>
+        <View style={styles.overlay}>
+          <View style={[styles.card, { alignItems: 'center' }]}>
+            <View style={styles.stars}>
+              {[0, 1, 2, 3, 4].map(i => <Ionicons key={i} name="star" size={30} color="#f5c518" />)}
+            </View>
+            <Text style={[styles.title, { textAlign: 'center' }]}>O que está achando do FlixHome?</Text>
+            <Text style={styles.rateText}>Sua avaliação na Play Store ajuda muito.</Text>
+            <TouchableOpacity style={[styles.btn, { alignSelf: 'stretch' }]} onPress={() => { setAskRate(false); openStoreRating(); }} activeOpacity={0.85}>
+              <Text style={styles.btnText}>Avaliar o app</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setAskRate(false)} style={{ padding: 12 }}>
+              <Text style={styles.later}>Agora não</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    );
+  }
 
   if (!visible) return null;
 
@@ -64,6 +90,9 @@ export default function WhatsNewModal() {
 }
 
 const styles = StyleSheet.create({
+  stars: { flexDirection: 'row', gap: 6, marginBottom: 14 },
+  rateText: { color: '#A3A3A3', fontSize: 14, textAlign: 'center', marginTop: 8, marginBottom: 18 },
+  later: { color: '#888', fontSize: 15 },
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'center', alignItems: 'center', padding: 24 },
   card: {
     width: '100%', maxWidth: 420, maxHeight: '75%',

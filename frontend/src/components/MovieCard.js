@@ -16,14 +16,14 @@ function getVersionBadge(item, isSeries) {
   return null;
 }
 
-export default function MovieCard({ item }) {
+export default function MovieCard({ item, onRemove }) {
   const isSeries = item.type === 'series';
   const href  = isSeries ? `/serie/${item.id}` : `/filme/${item.id}`;
   const year  = item.year || item.year_start;
   const label = isSeries ? 'SÉRIE' : 'FILME';
   const versionBadge = getVersionBadge(item, isSeries);
 
-  return (
+  const card = (
     <Link href={href} className={styles.card}>
       <div className={styles.poster}>
         {item.poster_url ? (
@@ -68,5 +68,13 @@ export default function MovieCard({ item }) {
       </div>
       <div className={styles.label}>{item.title}</div>
     </Link>
+  );
+
+  if (!onRemove) return card;
+  return (
+    <div className={styles.removeWrap}>
+      {card}
+      <button type="button" className={styles.removeBtn} onClick={() => onRemove(item)} title="Tirar do Continuar assistindo" aria-label={`Tirar ${item.title || 'título'} do Continuar assistindo`}>✕</button>
+    </div>
   );
 }

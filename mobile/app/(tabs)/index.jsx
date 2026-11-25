@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import HeroBanner from '../../components/HeroBanner';
 import ContentRow from '../../components/ContentRow';
 import SupportBanner from '../../components/SupportBanner';
@@ -12,7 +13,7 @@ import CachedImage from '../../components/CachedImage';
 import api from '../../lib/api';
 import { useProfile } from '../../contexts/ProfileContext';
 
-function ContinueCard({ item }) {
+function ContinueCard({ item, onRemove }) {
   const router = useRouter();
   const [pressing, setPressing] = useState(false);
   const W = 140;
@@ -101,13 +102,16 @@ function ContinueCard({ item }) {
   };
 
   return (
-    <TouchableOpacity onPress={handlePress} style={styles.continueCard} activeOpacity={0.75} disabled={pressing}>
+    <TouchableOpacity onPress={handlePress} onLongPress={() => onRemove(item)} style={styles.continueCard} activeOpacity={0.75} disabled={pressing}>
       <View style={{ width: W, height: H }}>
         {item.poster_url ? (
           <CachedImage source={{ uri: item.poster_url }} style={{ width: W, height: H, borderRadius: 6, opacity: pressing ? 0.5 : 1 }} resizeMode="cover" />
         ) : (
           <View style={[styles.continuePlaceholder, { width: W, height: H }]} />
         )}
+        <TouchableOpacity style={styles.continueRemove} onPress={() => onRemove(item)} hitSlop={10} accessibilityLabel="Tirar do Continuar assistindo">
+          <Ionicons name="close" size={15} color="#fff" />
+        </TouchableOpacity>
         {pressing && (
           <View style={[StyleSheet.absoluteFill, { justifyContent: 'center', alignItems: 'center', borderRadius: 6 }]}>
             <ActivityIndicator size="small" color="#E50914" />
@@ -166,6 +170,23 @@ export default function HomeScreen() {
       setContinueItems(deduped);
     } catch {}
   }, [activeProfile?.id]);
+
+  const removeContinue = useCallback((item) => {
+    Alert.alert('Continuar assistindo', `Tirar "${item.title}" da lista?`, [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Tirar', style: 'destructive', onPress: async () => {
+          try {
+            await api.delete(`/history/${item.id}`);
+            // Em série o servidor tira todos os episódios pela metade, então a tela também
+            setContinueItems(list => list.filter(o => o.id !== item.id && !(item.content_type === 'episode' && item.series_id && o.series_id === item.series_id)));
+          } catch {
+            Alert.alert('Continuar assistindo', 'Não foi possível remover. Tente de novo.');
+          }
+        },
+      },
+    ]);
+  }, []);
 
   const loadHome = useCallback(() => {
     return Promise.all([
@@ -274,7 +295,7 @@ export default function HomeScreen() {
             <Text style={styles.sectionTitle}>Continuar Assistindo</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.continueRow}>
               {continueItems.map(item => (
-                <ContinueCard key={`${item.content_type}-${item.content_id}`} item={item} />
+                <ContinueCard key={`${item.content_type}-${item.content_id}`} item={item} onRemove={removeContinue} />
               ))}
             </ScrollView>
           </View>
@@ -373,6 +394,7 @@ const styles = StyleSheet.create({
   },
   continueRow: { paddingHorizontal: 16, gap: 10 },
   continueCard: { marginRight: 0 },
+  continueRemove: { position: 'absolute', top: 4, right: 4, zIndex: 2, width: 24, height: 24, borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.75)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.35)', alignItems: 'center', justifyContent: 'center' },
   collectionsRow: { paddingHorizontal: 16, gap: 12 },
   collectionCard: { width: 150 },
   collectionCover: { width: 150, height: 90, borderRadius: 8, backgroundColor: '#1a1a1a' },

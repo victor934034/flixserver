@@ -2,7 +2,7 @@
 import MovieCard from './MovieCard';
 import styles from './ContentRow.module.css';
 
-export default function ContentRow({ title, items = [], type = 'movie', seeAllHref }) {
+export default function ContentRow({ title, items = [], type = 'movie', seeAllHref, onRemove }) {
   if (!items.length) return null;
 
   const decorated = items.map(i => ({ ...i, type: i.type || type }));
@@ -26,7 +26,7 @@ export default function ContentRow({ title, items = [], type = 'movie', seeAllHr
       </div>
       <div className={styles.scroll}>
         {decorated.map(item => (
-          <MovieCard key={item.id} item={item} />
+          <MovieCard key={item.id} item={item} onRemove={onRemove} />
         ))}
       </div>
     </section>

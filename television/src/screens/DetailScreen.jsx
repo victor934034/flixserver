@@ -205,6 +205,7 @@ export default function DetailScreen({ navigation, route }) {
   const [season, setSeason]     = useState(null);
   const [loading, setLoading]   = useState(true);
   const [watchlistId, setWatchlistId] = useState(null);
+  const [continueId, setContinueId] = useState(null); // registro que mantém o título no "Continuar assistindo"
   const epListRef  = useRef(null);
   const firstEpRef = useRef(null);
   const [firstEpHandle, setFirstEpHandle] = useState(null);
@@ -224,6 +225,24 @@ export default function DetailScreen({ navigation, route }) {
       })
       .catch(() => {});
   }, [item.id, activeProfile]);
+
+  useEffect(() => {
+    if (!activeProfile?.id) return;
+    api.get('/history', { params: { profile_id: activeProfile.id } })
+      .then(r => {
+        const open = (Array.isArray(r.data) ? r.data : []).find(h =>
+          (isSeries ? h.series_id === item.id : h.content_id === item.id) && !h.completed && h.progress > 0);
+        setContinueId(open ? open.id : null);
+      })
+      .catch(() => {});
+  }, [item.id, activeProfile]);
+
+  async function removeContinue() {
+    try {
+      await api.delete(`/history/${continueId}`);
+      setContinueId(null);
+    } catch {}
+  }
 
   async function toggleWatchlist() {
     try {
@@ -480,6 +499,7 @@ export default function DetailScreen({ navigation, route }) {
                   icon="people"
                   onPress={() => watchTogether(buildMovieParams(versions[0]?.key))}
                 />
+                {!!continueId && <ActionBtn label="Tirar do Continuar" icon="close" onPress={removeContinue} />}
                 <ActionBtn
                   label={watchlistId ? 'Na Minha Lista' : 'Minha Lista'}
                   icon={watchlistId ? 'checkmark' : 'add'}
@@ -505,6 +525,7 @@ export default function DetailScreen({ navigation, route }) {
                   icon="people"
                   onPress={() => watchTogether(buildEpisodeParams(firstEp))}
                 />
+                {!!continueId && <ActionBtn label="Tirar do Continuar" icon="close" onPress={removeContinue} />}
                 <ActionBtn
                   label={watchlistId ? 'Na Minha Lista' : 'Minha Lista'}
                   icon={watchlistId ? 'checkmark' : 'add'}

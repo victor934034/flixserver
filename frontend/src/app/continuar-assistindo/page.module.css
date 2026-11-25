@@ -44,3 +44,7 @@
 .browseBtn:hover { background: #b20710; }
 
 .loading { color: var(--text-secondary); margin-top: 4rem; text-align: center; }
+
+.cardWrap { position: relative; }
+.removeBtn { position: absolute; top: 8px; right: 8px; z-index: 5; width: 32px; height: 32px; border-radius: 50%; border: 1px solid rgba(255,255,255,.35); background: rgba(0,0,0,.75); color: #fff; font-size: 14px; cursor: pointer; }
+.removeBtn:hover { background: #e50914; border-color: #e50914; }

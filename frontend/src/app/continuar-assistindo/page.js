@@ -20,6 +20,17 @@ export default function ContinuarAssistindoPage() {
       .finally(() => setLoading(false));
   }, [activeProfile]);
 
+  async function remove(item) {
+    if (!window.confirm(`Tirar "${item.title}" do Continuar assistindo?`)) return;
+    try {
+      await api.delete(`/history/${item.id}`);
+      const same = o => o.id === item.id || (item.content_type === 'episode' && !!item.series_id && o.series_id === item.series_id);
+      setItems(list => list.filter(o => !same(o)));
+    } catch {
+      window.alert('Não foi possível remover. Tente de novo.');
+    }
+  }
+
   function pct(item) {
     if (!item.duration || !item.progress) return 0;
     return Math.min(100, Math.round((item.progress / item.duration) * 100));
@@ -55,7 +66,9 @@ export default function ContinuarAssistindoPage() {
             const progress = pct(item);
 
             return (
-              <Link key={item.id} href={href} className={styles.card}>
+              <div key={item.id} className={styles.cardWrap}>
+              <button type="button" className={styles.removeBtn} onClick={() => remove(item)} title="Tirar da lista" aria-label={`Tirar ${item.title || 'título'} da lista`}>✕</button>
+              <Link href={href} className={styles.card}>
                 <div className={styles.poster}>
                   {item.poster_url ? (
                     <Image src={item.poster_url} alt={item.title || ''} fill sizes="220px" style={{ objectFit: 'cover' }} />
@@ -78,6 +91,7 @@ export default function ContinuarAssistindoPage() {
                   </span>
                 </div>
               </Link>
+              </div>
             );
           })}
         </div>

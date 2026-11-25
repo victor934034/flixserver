@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Linking, Switch } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Linking, Switch, Platform } from 'react-native';
+import { openStoreRating } from '../../lib/rate';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -254,6 +255,24 @@ export default function PerfilScreen() {
             onPress={() => router.push('/ajuda')}
           />
           <View style={styles.divider} />
+          <MenuItem
+            icon="people-outline"
+            label="Assistir juntos"
+            desc="Entre numa sala com o código"
+            onPress={() => router.push('/juntos')}
+          />
+          <View style={styles.divider} />
+          {Platform.OS === 'android' && (
+            <>
+              <MenuItem
+                icon="thumbs-up-outline"
+                label="Avaliar o app"
+                desc="Deixe sua nota na Play Store"
+                onPress={openStoreRating}
+              />
+              <View style={styles.divider} />
+            </>
+          )}
           <MenuItem
             icon="information-circle-outline"
             label="Sobre o App"

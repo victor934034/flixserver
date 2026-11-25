@@ -76,6 +76,44 @@ router.get('/', async (req, res) => {
   }
 });
 
+// DELETE /api/history/:id — tira o título do "Continuar assistindo".
+// Apaga só o que está pela metade; o que já foi concluído continua no histórico.
+// Em série, vale para todos os episódios dela (senão outro episódio pela metade voltaria).
+router.delete('/:id', async (req, res) => {
+  try {
+    const { data: row } = await supabase.from('watch_history')
+      .select('id, content_type, content_id, series_id, profile_id')
+      .eq('id', req.params.id).eq('user_id', req.user.id).single();
+    if (!row) return res.status(404).json({ error: 'Item não encontrado' });
+
+    let contentIds = [row.content_id];
+    if (row.content_type === 'episode') {
+      const { data: ep } = await supabase.from('episodes').select('series_id').eq('id', row.content_id).single();
+      const seriesId = ep?.series_id || row.series_id;
+      if (seriesId) {
+        const { data: eps } = await supabase.from('episodes').select('id').eq('series_id', seriesId);
+        if (eps?.length) contentIds = eps.map(e => e.id);
+      }
+    }
+
+    // Em lotes: séries longas estourariam o tamanho da URL do banco
+    for (let i = 0; i < contentIds.length; i += 100) {
+      let q = supabase.from('watch_history').delete()
+        .eq('user_id', req.user.id)
+        .in('content_id', contentIds.slice(i, i + 100))
+        .or('completed.is.null,completed.eq.false');
+      q = row.profile_id ? q.eq('profile_id', row.profile_id) : q.is('profile_id', null);
+      const { error } = await q;
+      if (error) throw error;
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[history] DELETE error:', err.message);
+    res.status(500).json({ error: 'Não foi possível remover.' });
+  }
+});
+
 router.post('/', async (req, res) => {
   const { content_type, content_id, episode_id, series_id, progress, duration, profile_id } = req.body;
   if (!content_type || !content_id) {

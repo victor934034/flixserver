@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Navbar from '../../components/Navbar';
 import { getMe, logout } from '../../lib/auth';
+import { PLAY_STORE_URL } from '../../lib/changelog';
 import styles from './page.module.css';
 
 const PLAN_LABELS = { free: 'Gratuito', basic: 'Básico', premium: 'Premium', admin: 'Admin' };
@@ -81,6 +82,9 @@ export default function PerfilPage() {
             </a>
             <a href="/iptv" className={styles.link}>
               <span className={styles.linkIcon}>📡</span> IPTV
+            </a>
+            <a href={PLAY_STORE_URL} target="_blank" rel="noopener noreferrer" className={styles.link}>
+              <span className={styles.linkIcon}>⭐</span> Avaliar o app
             </a>
             {user.is_admin && (
               <a href="/admin" className={styles.link}>

@@ -9,6 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import api from '../../lib/api';
 import { startTogether } from '../../lib/togetherNav';
+import TogetherChooser from '../../components/TogetherChooser';
 import { useDownloads } from '../../contexts/DownloadContext';
 import { useParental } from '../../contexts/ParentalContext';
 import { useProfile } from '../../contexts/ProfileContext';
@@ -28,6 +29,7 @@ export default function SerieDetail() {
   const [likeData, setLikeData] = useState({ likes: 0, dislikes: 0, userVote: null });
   const [likeLoading, setLikeLoading] = useState(false);
   const [seasonModal, setSeasonModal] = useState(false);
+  const [togetherEp, setTogetherEp] = useState(null);
   const [seasonInfo, setSeasonInfo] = useState({}); // nomes das temporadas no TMDB
   const { getStatus, startDownload, cancelDownload, deleteDownload } = useDownloads();
   const { checkAccess } = useParental();
@@ -499,10 +501,7 @@ export default function SerieDetail() {
               {hasFile && (
                 <TouchableOpacity
                   style={styles.epDlBtn}
-                  onPress={async () => {
-                    try { await startTogether(router, { type: 'episode', content: ep, seriesId: id, title: `${serie.title} · T${ep.season_number}E${String(ep.episode_number).padStart(2, '0')}` }); }
-                    catch (e) { Alert.alert('Assistir juntos', e.response?.data?.error || e.message || 'Não foi possível criar a sessão.'); }
-                  }}
+                  onPress={() => setTogetherEp(ep)}
                 >
                   <Ionicons name="people-outline" size={16} color="#888" />
                 </TouchableOpacity>
@@ -529,6 +528,12 @@ export default function SerieDetail() {
           );
         })}
       </View>
+      <TogetherChooser
+        visible={!!togetherEp}
+        title={togetherEp ? `${serie.title} · T${togetherEp.season_number}E${String(togetherEp.episode_number).padStart(2, '0')}` : ''}
+        onClose={() => setTogetherEp(null)}
+        onCreate={() => startTogether(router, { type: 'episode', content: togetherEp, seriesId: id, title: `${serie.title} · T${togetherEp.season_number}E${String(togetherEp.episode_number).padStart(2, '0')}` })}
+      />
     </ScrollView>
   );
 }
