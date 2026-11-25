@@ -382,7 +382,6 @@ export default function DetailScreen() {
       title: (detail ? (detail.title || detail.name || '') : '') + ' · ' + epLabel + (ep.title ? ' · ' + ep.title : ''),
       tracks: { dubbing: ep.file_dubbing || null, subtitled: ep.file_subtitled || null, cinema: ep.file_cinema || null, color: ep.file_color || null, bw: ep.file_bw || null },
       subtitles: { pt: ep.subtitle_pt || null, en: ep.subtitle_en || null, es: ep.subtitle_es || null },
-      skipIntroTo: 90000,
       seriesContext: {
         seriesTitle: detail ? (detail.title || detail.name || '') : '',
         backdropUrl: detail ? (detail.backdrop_url || null) : null,

@@ -5,6 +5,7 @@ import Image from 'next/image';
 import api from '../../../../lib/api';
 import f from '../../filmes/novo/page.module.css';
 import s from './page.module.css';
+import SkipTimesEditor from './SkipTimesEditor';
 
 // ---- Episode inline form ----
 function EpForm({ ep, setEp, onFetchSubs }) {
@@ -742,6 +743,7 @@ export default function EditarSerie() {
                             </button>
                             <button className={s.btnCancelEp} onClick={cancelEdit}>Cancelar</button>
                           </div>
+                          <SkipTimesEditor episodeId={ep.id} />
                         </td>
                       </tr>
                     )}

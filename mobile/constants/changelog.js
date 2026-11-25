@@ -7,6 +7,7 @@ export const CHANGELOG = [
   {
     version: '1.2.0',
     items: [
+      '⏭️ “Pular abertura” e “Próximo episódio” aparecem na hora certa nas séries.',
       '✓ Marque um título como já assistido: ele ganha um selo e sai das recomendações.',
       '🎲 Surpreenda-me: escolha um gênero e a gente sorteia um filme.',
       '🏆 Top 10 da semana na tela inicial.',

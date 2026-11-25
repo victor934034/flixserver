@@ -71,7 +71,6 @@ function ContinueCard({ item, onRemove }) {
             subtitle_pt: nextEp.subtitle_pt || null,
             subtitle_en: nextEp.subtitle_en || null,
             subtitle_es: nextEp.subtitle_es || null,
-            intro_end: nextEp.intro_end || null,
           });
         }
       } catch {}
@@ -96,7 +95,6 @@ function ContinueCard({ item, onRemove }) {
         }),
         seriesId: String(seriesId),
       };
-      if (ep.intro_end) playerParams.introEnd = String(ep.intro_end);
       if (item.progress > 5) playerParams.startAt = String(Math.floor(item.progress));
       if (nextEpisodeParam) playerParams.nextEpisode = nextEpisodeParam;
       router.push({ pathname: '/player', params: playerParams });

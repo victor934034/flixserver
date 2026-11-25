@@ -170,7 +170,6 @@ export default function SerieDetail() {
     subtitle_pt: ep.subtitle_pt || null,
     subtitle_en: ep.subtitle_en || null,
     subtitle_es: ep.subtitle_es || null,
-    intro_end: ep.intro_end || null,
   });
 
   // Baixa a temporada toda em fila (um por vez, pra nao saturar rede/disco).
@@ -287,7 +286,6 @@ export default function SerieDetail() {
       seriesId: id,
     };
     if (nextEp) playerParams.nextEpisode = JSON.stringify(buildEpParam(nextEp));
-    if (ep.intro_end) playerParams.introEnd = String(ep.intro_end);
     if (resumeSec > 5) playerParams.startAt = String(Math.floor(resumeSec));
     if (replace) {
       router.replace({ pathname: '/player', params: playerParams });

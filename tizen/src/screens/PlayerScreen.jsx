@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useTogether } from '../lib/together.js';
+import { introVisible, creditsStart } from '../lib/skipRules.js';
 import { KEY, useKeyDown } from '../hooks/useNav.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import api, { historyAPI, BASE_URL } from '../api/index.js';
@@ -195,7 +196,6 @@ export default function PlayerScreen() {
     title                  = '',
     tracks                 = {},
     subtitles              = {},
-    skipIntroTo            = null,
     seriesContext          = null,
     contentMeta            = null,
     startAt                = null,
@@ -431,7 +431,6 @@ export default function PlayerScreen() {
       title: seriesTitle + ' · ' + epLabel + (next.title ? ' · ' + next.title : ''),
       tracks:    { dubbing: next.file_dubbing||null, subtitled: next.file_subtitled||null, cinema: next.file_cinema||null, color: next.file_color||null, bw: next.file_bw||null },
       subtitles: { pt: next.subtitle_pt||null, en: next.subtitle_en||null, es: next.subtitle_es||null },
-      skipIntroTo: null,
       seriesContext: Object.assign({}, seriesContext, { currentEpId: next.id }),
       contentMeta: { content_type: 'episode', content_id: next.id, episode_id: next.id, series_id: contentMeta && contentMeta.series_id },
     };
@@ -451,11 +450,45 @@ export default function PlayerScreen() {
       title: seriesTitle + ' · ' + epLabel + (prev.title ? ' · ' + prev.title : ''),
       tracks:    { dubbing: prev.file_dubbing||null, subtitled: prev.file_subtitled||null, cinema: prev.file_cinema||null, color: prev.file_color||null, bw: prev.file_bw||null },
       subtitles: { pt: prev.subtitle_pt||null, en: prev.subtitle_en||null, es: prev.subtitle_es||null },
-      skipIntroTo: null,
       seriesContext: Object.assign({}, seriesContext, { currentEpId: prev.id }),
       contentMeta: { content_type: 'episode', content_id: prev.id, episode_id: prev.id, series_id: contentMeta && contentMeta.series_id },
     };
   }, [seriesContext, contentMeta]);
+
+  // ── Pular abertura / Próximo episódio ───────────────────────────────────────
+  // Aviso flutuante, independente dos controles: OK faz a ação, Voltar esconde.
+  const skipEpisodeId = contentMeta && contentMeta.content_type === 'episode' ? contentMeta.content_id : null;
+  const [skipInfo, setSkipInfo] = useState(null);       // { id, times }
+  const [dismissedPrompt, setDismissedPrompt] = useState('');
+
+  useEffect(() => {
+    setSkipInfo(null);
+    setDismissedPrompt('');
+    if (!skipEpisodeId) return undefined;
+    let alive = true;
+    api.get('/api/episodes/' + skipEpisodeId + '/skip-times')
+      .then(r => { if (alive) setSkipInfo({ id: skipEpisodeId, times: r.data }); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [skipEpisodeId]);
+
+  const skipTimes = skipInfo && skipInfo.id === skipEpisodeId ? skipInfo.times : null;
+  const creditsAt = creditsStart(skipTimes, duration);
+  // numa sala "juntos" quem troca de episódio não é o aviso
+  const promptKind = introVisible(skipTimes, currentTime, duration) ? 'intro'
+    : (!room && nextEp && creditsAt !== null && currentTime >= creditsAt ? 'next' : null);
+  const prompt = promptKind && dismissedPrompt !== skipEpisodeId + promptKind && !panel && !error && !streamBlocked ? promptKind : null;
+  const dismissPrompt = () => setDismissedPrompt(skipEpisodeId + prompt);
+
+  function runPrompt() {
+    if (prompt === 'intro') {
+      if (videoRef.current) videoRef.current.currentTime = skipTimes.intro_end;
+      setCurrentTime(skipTimes.intro_end);
+    } else if (prompt === 'next') {
+      saveHistory();
+      navigate('/player', { state: nextEp, replace: true });
+    }
+  }
 
   const leftBtns = useMemo(() => {
     const b = [];
@@ -469,13 +502,11 @@ export default function PlayerScreen() {
 
   const rightBtns = useMemo(() => {
     const b = [];
-    const showSkip = skipIntroTo && currentTime > 8 && currentTime < skipIntroTo / 1000;
-    if (showSkip)              b.push({ id: 'skip',   label: 'Pular Abertura', icon: IC.skip });
     if (availTracks.length > 1) b.push({ id: 'audio', label: 'Áudio',          icon: IC.audio });
     if (availSubs.length > 1)   b.push({ id: 'cc',    label: 'CC',             icon: IC.cc });
     b.push({ id: 'config', label: 'Configurações', icon: IC.config });
     return b;
-  }, [skipIntroTo, currentTime, availTracks.length, availSubs.length]);
+  }, [availTracks.length, availSubs.length]);
 
   const allBtns = useMemo(() => [...leftBtns, ...rightBtns], [leftBtns, rightBtns]);
 
@@ -620,8 +651,6 @@ export default function PlayerScreen() {
       navigate('/player', { state: prevEp, replace: true });
     } else if (btn.id === 'next' && nextEp) {
       navigate('/player', { state: nextEp, replace: true });
-    } else if (btn.id === 'skip' && skipIntroTo) {
-      if (v) v.currentTime = skipIntroTo / 1000;
     } else if (btn.id === 'audio') {
       setPanel(p => p === 'audio' ? null : 'audio'); setFocusedPanel(0);
     } else if (btn.id === 'cc') {
@@ -633,6 +662,12 @@ export default function PlayerScreen() {
 
   useKeyDown(e => {
     const k = e.keyCode;
+    if (prompt) {
+      if (k === KEY.ENTER) { e.preventDefault(); if (!e.repeat) runPrompt(); return; }
+      if (k === KEY.BACK || k === KEY.BACKSPACE) { e.preventDefault(); dismissPrompt(); return; }
+      // andar pelos controles esconde o aviso e devolve o OK pra eles
+      if (k === KEY.LEFT || k === KEY.RIGHT) dismissPrompt();
+    }
     if (k === KEY.BACK || k === KEY.BACKSPACE) {
       e.preventDefault();
       if (panel) { setPanel(null); showControls(); return; }
@@ -666,7 +701,7 @@ export default function PlayerScreen() {
     if (k === KEY.FAST_FWD) { if (v) v.currentTime = Math.min(v.duration || 0, v.currentTime + SEEK_S); }
     if (k === KEY.PLAY || k === KEY.PAUSE) { if (v) { if (paused) v.play(); else v.pause(); } }
     if (k === KEY.ENTER) { execBtn(allBtns[focusedBtn]); }
-  }, [panel, focusedBtn, focusedPanel, panelOptions, paused, currentTime, skipIntroTo, nextEp, prevEp, trackKey, allBtns, activateRemux]);
+  }, [panel, focusedBtn, focusedPanel, panelOptions, paused, currentTime, prompt, nextEp, prevEp, trackKey, allBtns, activateRemux]);
 
   const subTracks = ['pt','en','es'].filter(k => !!subtitles[k]);
 
@@ -675,6 +710,16 @@ export default function PlayerScreen() {
       style={{ width: '100%', height: '100%', background: '#000', position: 'relative', overflow: 'hidden' }}
       onMouseMove={() => { showControls(); if (!paused) scheduleHide(); }}
     >
+      {prompt && (
+        <div onClick={runPrompt} style={{ position: 'absolute', right: 70, bottom: 230, zIndex: 60, cursor: 'pointer', textAlign: 'right' }}>
+          <div style={{ display: 'inline-block', background: '#fff', color: '#0a0a0a', borderRadius: 10, padding: '18px 34px', fontSize: 24, fontWeight: 900, boxShadow: '0 10px 40px rgba(0,0,0,0.6)' }}>
+            {prompt === 'intro' ? 'Pular abertura' : 'Próximo episódio'}  ⏭
+          </div>
+          <div style={{ marginTop: 10, color: '#fff', fontSize: 16, textShadow: '0 2px 6px #000' }}>
+            OK para {prompt === 'intro' ? 'pular' : 'assistir agora'} · Voltar para esconder
+          </div>
+        </div>
+      )}
       <video
         ref={videoRef}
         src={currentUrl}

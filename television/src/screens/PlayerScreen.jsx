@@ -10,6 +10,7 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api, { BASE_URL } from '../lib/api';
 import { useTogether } from '../lib/together';
+import { introVisible, creditsStart } from '../lib/skipRules';
 import { useProfile } from '../contexts/ProfileContext';
 
 const { width: W, height: H } = Dimensions.get('window');
@@ -155,7 +156,6 @@ export default function PlayerScreen({ navigation, route }) {
     title                     = '',
     tracks                    = {},
     subtitles                 = {},
-    skipIntroTo               = null,
     seriesContext             = null,
     contentMeta               = null,
     startAt                   = null,
@@ -188,7 +188,6 @@ export default function PlayerScreen({ navigation, route }) {
       title: `${seriesTitle} · ${epLabel}${next.title ? ` · ${next.title}` : ''}`,
       tracks:    { dubbing: next.file_dubbing||null, subtitled: next.file_subtitled||null, cinema: next.file_cinema||null, color: next.file_color||null, bw: next.file_bw||null },
       subtitles: { pt: next.subtitle_pt||null, en: next.subtitle_en||null, es: next.subtitle_es||null },
-      skipIntroTo: null,
       seriesContext: { ...seriesContext, currentEpId: next.id },
       contentMeta: { content_type: 'episode', content_id: next.id, episode_id: next.id, series_id: contentMeta?.series_id },
     };
@@ -209,7 +208,6 @@ export default function PlayerScreen({ navigation, route }) {
       title: `${seriesTitle} · ${epLabel}${prev.title ? ` · ${prev.title}` : ''}`,
       tracks:    { dubbing: prev.file_dubbing||null, subtitled: prev.file_subtitled||null, cinema: prev.file_cinema||null, color: prev.file_color||null, bw: prev.file_bw||null },
       subtitles: { pt: prev.subtitle_pt||null, en: prev.subtitle_en||null, es: prev.subtitle_es||null },
-      skipIntroTo: null,
       seriesContext: { ...seriesContext, currentEpId: prev.id },
       contentMeta: { content_type: 'episode', content_id: prev.id, episode_id: prev.id, series_id: contentMeta?.series_id },
     };
@@ -247,7 +245,6 @@ export default function PlayerScreen({ navigation, route }) {
   const playBtnRef  = useRef(null);
   const seekFwdRef  = useRef(null);
   const nextBtnRef  = useRef(null);
-  const skipBtnRef  = useRef(null);
   const audioBtnRef = useRef(null);
   const subBtnRef   = useRef(null);
 
@@ -343,17 +340,40 @@ export default function PlayerScreen({ navigation, route }) {
   panelRef.current = panel;
   playingRef.current = isPlaying;
 
-  const showSkip = !!skipIntroTo && displayPos > 8000 && displayPos < skipIntroTo;
+  // ── Pular abertura / Próximo episódio ───────────────────────────────────────
+  const skipEpisodeId = contentMeta?.content_type === 'episode' ? contentMeta.content_id : null;
+  const [skipInfo, setSkipInfo] = useState(null);       // { id, times }
+  const [dismissedPrompt, setDismissedPrompt] = useState('');
+  const promptRef = useRef(null);                       // lido pelo botão Voltar
+
+  useEffect(() => {
+    setSkipInfo(null);
+    setDismissedPrompt('');
+    if (!skipEpisodeId) return undefined;
+    let alive = true;
+    api.get(`/episodes/${skipEpisodeId}/skip-times`)
+      .then(r => { if (alive) setSkipInfo({ id: skipEpisodeId, times: r.data }); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [skipEpisodeId]);
+
+  const skipTimes = skipInfo && skipInfo.id === skipEpisodeId ? skipInfo.times : null;
+  const creditsAt = creditsStart(skipTimes, displayDur / 1000);
+  // numa sala "juntos" quem troca de episódio não é o aviso
+  const promptKind = introVisible(skipTimes, displayPos / 1000, displayDur / 1000) ? 'intro'
+    : (!room && !live && nextEp && creditsAt !== null && displayPos / 1000 >= creditsAt ? 'next' : null);
+  const prompt = promptKind && dismissedPrompt !== skipEpisodeId + promptKind && !panel && !error && !streamBlocked ? promptKind : null;
+  promptRef.current = prompt ? () => { setDismissedPrompt(skipEpisodeId + prompt); setGrabPlay(true); } : null;
 
   // Os refs dos botoes da fileira inferior (usados no focusNav() abaixo) só
   // ficam preenchidos DEPOIS do primeiro commit — no render em que eles
   // aparecem, nextFocusLeft/Right ainda leem null. Sem um re-render seguinte,
   // essa prop fica presa em null pra sempre e trava a navegacao lateral.
   // Mesma causa raiz já corrigida na Home; aqui a cadeia muda de tamanho
-  // conforme prevEp/nextEp/showSkip/availTracks/availSubs ficam disponíveis.
+  // conforme prevEp/nextEp/availTracks/availSubs ficam disponíveis.
   useEffect(() => {
     forceFocusRewire(v => v + 1);
-  }, [loaded, prevEp, nextEp, showSkip, availTracks.length, availSubs.length]);
+  }, [loaded, prevEp, nextEp, availTracks.length, availSubs.length]);
 
   // Limite de telas simultâneas por conta — mesmo endpoint/regra do app
   // mobile (backend conta por user_id, sem distinguir plataforma). Sem
@@ -466,6 +486,7 @@ export default function PlayerScreen({ navigation, route }) {
   useEffect(() => {
     const h = BackHandler.addEventListener('hardwareBackPress', () => {
       if (panelRef.current) { closePanel(); return true; }
+      if (promptRef.current) { promptRef.current(); return true; }
       navigation.goBack();
       return true;
     });
@@ -568,7 +589,6 @@ export default function PlayerScreen({ navigation, route }) {
     { ref: playBtnRef },
     { ref: seekFwdRef },
     nextEp && { ref: nextBtnRef },
-    showSkip && { ref: skipBtnRef },
     availTracks.length > 1 && { ref: audioBtnRef },
     availSubs.length > 1 && { ref: subBtnRef },
   ].filter(Boolean);
@@ -582,7 +602,6 @@ export default function PlayerScreen({ navigation, route }) {
   const idxPlay = chainIdx++;
   const idxSeekFwd = chainIdx++;
   const idxNext = nextEp ? chainIdx++ : -1;
-  const idxSkip = showSkip ? chainIdx++ : -1;
   const idxAudio = availTracks.length > 1 ? chainIdx++ : -1;
   const idxSub = availSubs.length > 1 ? chainIdx++ : -1;
 
@@ -825,16 +844,6 @@ export default function PlayerScreen({ navigation, route }) {
 
             {/* Controles direitos */}
             <View style={s.rightBtns}>
-              {showSkip && (
-                <CtrlBtn
-                  ref={skipBtnRef}
-                  icon="play-skip-forward-outline"
-                  label="Pular Abertura"
-                  onFocus={onBtnFocus}
-                  onPress={() => seekBy(skipIntroTo - displayPos)}
-                  {...focusNav(idxSkip)}
-                />
-              )}
               {availTracks.length > 1 && (
                 <CtrlBtn
                   ref={audioBtnRef}
@@ -866,6 +875,30 @@ export default function PlayerScreen({ navigation, route }) {
           </View>
         </View>
       </Animated.View>
+
+      {!!prompt && (
+        <View style={{ position: 'absolute', right: r(70), bottom: r(240) }}>
+          <Pressable
+            hasTVPreferredFocus
+            onPress={() => {
+              if (prompt === 'intro') {
+                seekBy(skipTimes.intro_end * 1000 - displayPos);
+                setDismissedPrompt(skipEpisodeId + 'intro');
+                setGrabPlay(true);
+              } else {
+                gotoEp(nextEp);
+              }
+            }}
+            style={({ focused }) => ({ backgroundColor: focused ? '#fff' : 'rgba(20,20,20,0.92)', borderRadius: r(10), borderWidth: 2, borderColor: '#fff', paddingHorizontal: r(34), paddingVertical: r(18) })}
+          >
+            {({ focused }) => (
+              <Text style={{ color: focused ? '#0a0a0a' : '#fff', fontSize: r(24), fontWeight: '900' }}>
+                {prompt === 'intro' ? 'Pular abertura' : 'Próximo episódio'}  ⏭
+              </Text>
+            )}
+          </Pressable>
+        </View>
+      )}
     </View>
   );
 }

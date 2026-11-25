@@ -359,3 +359,7 @@
 .tgToasts { position: absolute; top: 76px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; align-items: center; z-index: 8; pointer-events: none; }
 .tgToasts span { padding: 8px 18px; border-radius: 999px; background: rgba(31,31,31,.95); border: 1px solid #2A2A2A; color: #E5E5E5; font-size: 14px; animation: tgIn .2s ease-out; }
 @keyframes tgIn { from { transform: translateY(-10px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* Pular abertura / Próximo episódio nos créditos */
+.skipIntro { position: absolute; bottom: 6.5rem; right: 1.5rem; z-index: 8; animation: nextCardIn 0.35s ease-out; }
+.nextDismiss { display: block; margin: 0 0 8px auto; background: rgba(20,20,20,0.8); color: #bbb; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 0.4rem 0.8rem; font-size: 0.8rem; cursor: pointer; }

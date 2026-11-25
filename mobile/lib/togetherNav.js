@@ -20,7 +20,6 @@ export function buildPlayerParams(type, c, { title, seriesId, room } = {}) {
     room,
   };
   if (type === 'episode' && seriesId) params.seriesId = String(seriesId);
-  if (type === 'episode' && c.intro_end) params.introEnd = String(c.intro_end);
   return params;
 }
 

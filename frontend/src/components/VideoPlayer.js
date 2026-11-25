@@ -1,7 +1,8 @@
 'use client';
 import { useRef, useState, useEffect, useCallback } from 'react';
-import styles from './VideoPlayer.module.css';
 import api from '../lib/api';
+import { introVisible, creditsStart } from '../lib/skipRules';
+import styles from './VideoPlayer.module.css';
 
 // ── SVG Icons ─────────────────────────────────────────────────────────────────
 const IC = {
@@ -57,6 +58,23 @@ export default function VideoPlayer({ content, onProgress, startAt = 0, onClose,
   const [flashIcon,    setFlashIcon]    = useState(null); // 'play' | 'pause'
   const [hoverTime,    setHoverTime]    = useState(null); // { pct, time }
   const [showNextCard, setShowNextCard] = useState(false);
+  const [skipTimes,    setSkipTimes]    = useState(null);  // abertura e créditos deste episódio
+  const [nextDismissed, setNextDismissed] = useState(false);
+
+  // Só episódio tem abertura/créditos
+  const skipEpisodeId = content?.season_number != null ? content.id : null;
+  useEffect(() => {
+    setSkipTimes(null);
+    setNextDismissed(false);
+    if (!skipEpisodeId) return;
+    let alive = true;
+    api.get(`/episodes/${skipEpisodeId}/skip-times`).then(r => { if (alive) setSkipTimes(r.data); }).catch(() => {});
+    return () => { alive = false; };
+  }, [skipEpisodeId]);
+
+  const showIntroSkip = introVisible(skipTimes, currentTime, duration);
+  const credits = creditsStart(skipTimes, duration);
+  const inCredits = credits !== null && currentTime >= credits;
   const [streamBlocked,  setStreamBlocked]  = useState(false);
   const [streamBlockInfo, setStreamBlockInfo] = useState(null);
 
@@ -484,8 +502,19 @@ export default function VideoPlayer({ content, onProgress, startAt = 0, onClose,
       )}
 
       {/* Próximo episódio (aparece perto do fim / quando o vídeo termina) */}
-      {showNextCard && onNextEpisode && (
+      {showIntroSkip && (
+        <div className={styles.skipIntro} onClick={e => e.stopPropagation()}>
+          <button type="button" className={styles.nextCardBtn} onClick={() => { if (videoRef.current) videoRef.current.currentTime = skipTimes.intro_end; }}>
+            Pular abertura
+          </button>
+        </div>
+      )}
+
+      {(showNextCard || (inCredits && !nextDismissed)) && onNextEpisode && (
         <div className={styles.nextCard} onClick={e => e.stopPropagation()}>
+          {!showNextCard && (
+            <button type="button" className={styles.nextDismiss} onClick={() => setNextDismissed(true)}>Ver créditos</button>
+          )}
           <button className={styles.nextCardBtn} onClick={() => { setShowNextCard(false); onNextEpisode(); }}>
             {IC.next}
             <span>Próximo episódio{nextEpisodeLabel ? `: ${nextEpisodeLabel}` : ''}</span>

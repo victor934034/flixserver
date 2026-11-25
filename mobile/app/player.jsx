@@ -7,6 +7,7 @@ import {
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { useEvent } from 'expo';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { introVisible, creditsStart } from '../lib/skipRules';
 import { Ionicons } from '@expo/vector-icons';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import * as KeepAwake from 'expo-keep-awake';
@@ -182,7 +183,15 @@ export default function PlayerScreen() {
     () => (type === 'episode' && episodes.length ? pickAdjacentEp(episodes, id, -1) : null),
     [type, episodes, id],
   );
-  const introEnd = params.introEnd && params.introEnd !== 'undefined' ? Number(params.introEnd) : 0;
+  // Abertura e créditos do episódio (sem internet ou sem dado, os botões não aparecem)
+  const [skipTimes, setSkipTimes] = useState(null);
+  useEffect(() => {
+    setSkipTimes(null);
+    if (type !== 'episode' || !id) return;
+    let alive = true;
+    api.get(`/episodes/${id}/skip-times`).then(r => { if (alive) setSkipTimes(r.data); }).catch(() => {});
+    return () => { alive = false; };
+  }, [type, id]);
   const startAt = params.startAt && params.startAt !== 'undefined' ? Number(params.startAt) : 0;
 
   const initialSource = useRef({ uri: versions[initVer] }).current;
@@ -229,8 +238,12 @@ export default function PlayerScreen() {
   const isEnded = isCasting
     ? remoteFinished
     : (!isPlaying && durSec > 0 && currentTime > 0 && remainSec < 1.5);
-  const showSkipIntro = introEnd > 0 && posSec < introEnd && posSec > 2;
-  const showNextEpCard = nextEp && ((remainSec > 0 && remainSec < 30) || isEnded);
+  const showSkipIntro = introVisible(skipTimes, posSec, durSec);
+  // Com os créditos conhecidos o aviso aparece na hora certa; sem eles, nos últimos 30s
+  const creditsAt = creditsStart(skipTimes, durSec);
+  const showNextEpCard = nextEp && (creditsAt !== null
+    ? posSec >= creditsAt || isEnded
+    : (remainSec > 0 && remainSec < 30) || isEnded);
   const showNextMovieCard = !nextEp && type !== 'episode' && nextMovie && ((remainSec > 0 && remainSec < 60) || isEnded);
   const showNextCard = showNextEpCard;
 
@@ -499,7 +512,8 @@ export default function PlayerScreen() {
 
   // Next ep countdown
   useEffect(() => {
-    if (showNextCard && nextEp && nextCountdown === null) setNextCountdown(5);
+    // nos créditos dá mais tempo pra cancelar (pode ter cena depois deles)
+    if (showNextCard && nextEp && nextCountdown === null) setNextCountdown(creditsAt !== null ? 10 : 5);
     if (!showNextCard) { setNextCountdown(null); clearTimeout(nextCountRef.current); }
   }, [showNextCard]);
 
@@ -855,7 +869,6 @@ export default function PlayerScreen() {
     };
     if (seriesId) navParams.seriesId = seriesId;
     if (after) navParams.nextEpisode = JSON.stringify(buildNavEpParam(after));
-    if (ep.intro_end) navParams.introEnd = String(ep.intro_end);
     router.replace({ pathname: '/player', params: navParams });
   };
 
@@ -898,7 +911,6 @@ export default function PlayerScreen() {
     subtitle_pt: ep.subtitle_pt || null,
     subtitle_en: ep.subtitle_en || null,
     subtitle_es: ep.subtitle_es || null,
-    intro_end: ep.intro_end || null,
   });
 
   const SheetBody = sheet === 'episodes' ? View : ScrollView;
@@ -1128,7 +1140,7 @@ export default function PlayerScreen() {
           {showSkipIntro && (
             <TouchableOpacity
               style={styles.skipIntroBtn}
-              onPress={() => seekTo(introEnd)}
+              onPress={() => seekTo(skipTimes.intro_end)}
               activeOpacity={0.85}
             >
               <Text style={styles.skipIntroText}>Pular Abertura</Text>

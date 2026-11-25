@@ -353,7 +353,6 @@ export default function DetailScreen({ navigation, route }) {
         en: ep.subtitle_en || null,
         es: ep.subtitle_es || null,
       },
-      skipIntroTo: 90_000,
       seriesContext: {
         seriesTitle: detail.title || detail.name,
         backdropUrl: detail.backdrop_url,

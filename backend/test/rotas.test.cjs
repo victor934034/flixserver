@@ -10,7 +10,8 @@ function from(table) {
   const rows = () => (db[table] ||= []);
   const q = {
     select(c, o) { if (op === 'select') opts = o || {}; return q; },
-    update(p) { op = 'update'; payload = p; return q; }, insert(p) { op = 'insert'; payload = p; return q; },
+    update(p) { op = 'update'; payload = p; return q; },
+    upsert(p, o) { op = 'upsert'; payload = p; opts = { ...opts, key: o?.onConflict }; return q; }, insert(p) { op = 'insert'; payload = p; return q; },
     delete() { op = 'delete'; return q; },
     eq(k, v) { f.push(r => r[k] === v); return q; }, neq(k, v) { f.push(r => r[k] !== v); return q; },
     in(k, v) { f.push(r => v.includes(r[k])); return q; }, is(k, v) { f.push(r => (r[k] ?? null) === v); return q; },
@@ -32,6 +33,11 @@ function from(table) {
       let out = rows().filter(r => f.every(fn => fn(r)));
       if (op === 'update') out.forEach(r => Object.assign(r, payload));
       if (op === 'delete') db[table] = rows().filter(r => !out.includes(r));
+      if (op === 'upsert') {
+        const found = rows().find(r => r[opts.key] === payload[opts.key]);
+        if (found) Object.assign(found, payload); else rows().push({ ...payload });
+        out = [payload];
+      }
       if (op === 'insert') { out = [].concat(payload).map(p => ({ id: 'n' + ++seq, ...p })); rows().push(...out); }
       const count = out.length;
       if (rng) out = out.slice(rng[0], rng[1] + 1);
@@ -55,7 +61,7 @@ stub('src/services/titleSearch.js', { searchIds: async () => [], orderByIds: x =
 process.env.JWT_SECRET = 'x'.repeat(40); process.env.FRONTEND_URL = 'https://exemplo.test';
 const express = req('express'), jwt = req('jsonwebtoken');
 const app = express(); app.use(express.json());
-for (const name of ['movies', 'recommendations', 'history', 'referrals', 'suggestions', 'watched']) app.use('/api/' + name, require(`${BE}/src/routes/${name}.js`));
+for (const name of ['movies', 'recommendations', 'history', 'referrals', 'suggestions', 'watched', 'episodes']) app.use('/api/' + name, require(`${BE}/src/routes/${name}.js`));
 const { rewardReferrer } = require(`${BE}/src/services/referrals.js`);
 const alerts = require(`${BE}/src/services/suggestionAlerts.js`);
 const now = new Date().toISOString(), old = '2020-01-01T00:00:00.000Z';
@@ -174,6 +180,57 @@ const U = i => `00000000-0000-0000-0000-00000000000${i}`;
   assert.deepEqual(ins.requests.map(r => r.accounts), [2]);
   assert.deepEqual(ins.most_watched.map(m => m.accounts), [2, 1, 1]);
   console.log('ok painel: mais vistos, abandonados (sem contar quem seguiu a série) e pedidos');
+
+  // Abertura e créditos (o IntroDB e o TMDB são simulados: o teste não sai pra internet)
+  const axios = req('axios');
+  const realGet = axios.get;
+  let introCalls = 0, introReply;
+  axios.get = async (url, cfg) => {
+    if (url.includes('external_ids')) return { data: { imdb_id: 'tt0000001' } };
+    introCalls++;
+    assert.deepEqual(cfg.params, { imdb_id: 'tt0000001', season: 1, episode: 2 });
+    if (introReply instanceof Error) throw introReply;
+    return { data: introReply };
+  };
+  const skip = require(`${BE}/src/services/skipTimes.js`);
+  const E = U(7);
+  db.episodes = [{ id: E, series_id: U(5), season_number: 1, episode_number: 2 }];
+  db.series = [{ id: U(5), tmdb_id: 20 }];
+  db.episode_skip_times = [];
+  db.users = [{ id: U(1), is_admin: true }, { id: U(2), is_admin: false }];
+  const url = `/episodes/${E}/skip-times`;
+  assert.equal((await call('GET', url)).status, 401);
+
+  introReply = Object.assign(new Error('rede'), { response: { status: 500 } });
+  assert.equal((await call('GET', url, U(2))).body.intro_end, null);
+  assert.equal(db.episode_skip_times.length, 0); // falha não vira "não tem"
+
+  introReply = { intro: { start_sec: 314.5, end_sec: 331 }, outro: { start_sec: 2843 } };
+  const first = (await call('GET', url, U(2))).body;
+  assert.deepEqual(first, { intro_start: 314.5, intro_end: 331, credits_start: 2843, source: 'introdb' });
+  const callsAfterFirst = introCalls;
+  await Promise.all([call('GET', url, U(2)), call('GET', url, U(1))]);
+  assert.equal(introCalls, callsAfterFirst); // veio do que já estava guardado
+
+  assert.equal((await call('PUT', url, U(2), { intro_start: 1, intro_end: 60 })).status, 403);
+  assert.equal((await call('PUT', url, U(1), { intro_start: 100, intro_end: 101 })).status, 400);
+  assert.equal((await call('PUT', url, U(1), { intro_start: 10, intro_end: 70, credits_start: 1200 })).status, 200);
+  db.episode_skip_times[0].checked_at = '2020-01-01T00:00:00.000Z';
+  assert.equal((await call('GET', url, U(2))).body.source, 'manual'); // correção nunca é sobrescrita
+  assert.equal((await call('DELETE', url, U(1))).status, 200);
+  assert.equal((await call('GET', url, U(2))).body.source, 'introdb');
+
+  assert.deepEqual(skip.sanitize({ intro_start: null, intro_end: 23.7, credits_start: 1311 }), { intro_start: 0, intro_end: 23.7, credits_start: 1311 });
+  assert.deepEqual(skip.sanitize({ intro_start: 0, intro_end: 900, credits_start: 0 }), { intro_start: null, intro_end: null, credits_start: null });
+
+  skip._reset(); db.episode_skip_times = [];
+  introReply = Object.assign(new Error('devagar'), { response: { status: 429 } });
+  await call('GET', url, U(2));
+  const callsAtBlock = introCalls;
+  await call('GET', url, U(2));
+  assert.equal(introCalls, callsAtBlock); // respeita o "pare" do IntroDB
+  axios.get = realGet;
+  console.log('ok abertura: guarda o resultado, respeita correção manual, limite e falhas');
 
   srv.close(); console.log('TODOS OS TESTES PASSARAM');
 })().catch(e => { console.error(e); process.exit(1); });

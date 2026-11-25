@@ -8,6 +8,7 @@ import { useProfile } from '../contexts/ProfileContext';
 // A CADA versão com mudança para o usuário, troque VERSION e ITEMS.
 const VERSION = '1.2.0';
 const ITEMS = [
+  'Pular abertura e Próximo episódio aparecem na hora certa nas séries.',
   'Marque como já assistido, e no Assistir juntos agora dá para entrar com o código.',
   'Surpreenda-me: botão no topo do Início sorteia um filme pelo gênero.',
   'Top 10 da semana e aviso quando um título que você pediu chega.',
