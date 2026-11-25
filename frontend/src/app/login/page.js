@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { login, register } from '../../lib/auth';
@@ -13,6 +13,11 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+
+  // link de convite abre direto no cadastro
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('modo') === 'cadastro') setMode('register');
+  }, []);
 
   async function handleSubmit(e) {
     e.preventDefault();

@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import api, { moviesAPI, seriesAPI, watchlistAPI, likesAPI } from '../api/index.js';
-import { startTogetherWeb } from '../lib/together.js';
+import { startTogetherWeb, joinTogetherWeb } from '../lib/together.js';
+import TogetherChooser from '../components/TogetherChooser.jsx';
+import { useWatched } from '../lib/watched.js';
 import { prefetchCache } from '../App.jsx';
 import { KEY, useKeyDown } from '../hooks/useNav.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
@@ -207,6 +209,8 @@ export default function DetailScreen() {
     navigate0(path, opts);
   };
   const { activeProfile } = useAuth();
+  const watched = useWatched();
+  const [chooser, setChooser] = useState(false); // "Assistir juntos": criar ou entrar
   const type = params.get('type') || 'movie';
   const id   = params.get('id');
   const startAt   = params.get('startAt') ? Number(params.get('startAt')) : null;
@@ -344,6 +348,10 @@ export default function DetailScreen() {
     }
     acts.push({ id: 'together', label: '👥 Assistir juntos' });
     if (continueId) acts.push({ id: 'remove_continue', label: 'Tirar do Continuar assistindo', icon: '✕' });
+    if (watched.enabled) {
+      const seen = watched.has(isSeries ? 'series' : 'movie', id);
+      acts.push({ id: 'watched', label: seen ? 'Já assisti' : 'Marcar como assistido', icon: seen ? '✓' : '○' });
+    }
     acts.push({ id: 'watchlist', label: wlItem ? 'Na Minha Lista' : 'Minha Lista', icon: wlItem ? '✓' : '+' });
     acts.push({ id: 'like',    label: 'Gostei' + (likeData.likes > 0 ? ' · ' + likeData.likes : ''), icon: '👍', active: likeData.userVote === 'like' });
     acts.push({ id: 'dislike', label: 'Não gostei' + (likeData.dislikes > 0 ? ' · ' + likeData.dislikes : ''), icon: '👎', active: likeData.userVote === 'dislike', danger: likeData.userVote === 'dislike' });
@@ -395,10 +403,17 @@ export default function DetailScreen() {
     if (!act) return;
     if (act.id.startsWith('play_')) { playMovie(act.id.replace('play_', ''), startAt || movieSeconds); return; }
     if (act.id === 'play') { if (firstEp) playEpisode(firstEp, startAt || epSeconds[firstEp.id] || 0); return; }
-    if (act.id === 'together') {
-      togetherRef.current = true;
-      if (isSeries) { if (currentEps[0]) playEpisode(currentEps[0], 0); }
-      else if (versions[0]) playMovie(versions[0], 0);
+    if (act.id === 'together') { setChooser(true); return; }
+    if (act.id === 'watched') {
+      try {
+        const now = await watched.toggle(isSeries ? 'series' : 'movie', id);
+        // marcar tira do "Continuar assistindo" no servidor: a Home e esta tela acompanham
+        if (now) {
+          Object.keys(prefetchCache).forEach(k => { if (k.indexOf('profile:') === 0) delete prefetchCache[k]; });
+          setContinueId(null);
+          setMovieSeconds(0);
+        }
+      } catch {}
       return;
     }
     if (act.id === 'remove_continue') {
@@ -434,6 +449,13 @@ export default function DetailScreen() {
         setLikeData(r.data);
       } catch {}
     }
+  }
+
+  // Anfitrião: abre o player já numa sala nova
+  function createRoom() {
+    togetherRef.current = true;
+    if (isSeries) { if (currentEps[0]) playEpisode(currentEps[0], 0); }
+    else if (versions[0]) playMovie(versions[0], 0);
   }
 
   const st = useRef({});
@@ -518,6 +540,14 @@ export default function DetailScreen() {
 
   return (
     <div style={{ width: '100%', height: '100%', background: '#000', position: 'relative', overflow: 'hidden' }}>
+      {chooser && (
+        <TogetherChooser
+          title={detail ? (detail.title || detail.name || '') : ''}
+          onCreate={createRoom}
+          onJoin={code => joinTogetherWeb(navigate0, code)}
+          onClose={() => setChooser(false)}
+        />
+      )}
       {/* Full-screen backdrop */}
       {detail.backdrop_url
         ? <img src={detail.backdrop_url} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />

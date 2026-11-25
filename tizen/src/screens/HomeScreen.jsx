@@ -5,6 +5,8 @@ import { moviesAPI, seriesAPI, watchlistAPI, recommendationsAPI } from '../api/i
 import api from '../api/index.js';
 import { prefetchCache } from '../App.jsx';
 import Sidebar from '../components/Sidebar.jsx';
+import Surprise from '../components/Surprise.jsx';
+import { useWatched } from '../lib/watched.js';
 import { fetchHomeBase, fetchHomeProfile, fetchCatalog, assembleHome, filterCatalog } from '../lib/homeData.js';
 import { KEY, useKeyDown } from '../hooks/useNav.js';
 
@@ -78,6 +80,9 @@ const PortraitCard = React.memo(function PortraitCard({ item, focused, onClick, 
   const title = item.title || item.name || item.episode_title || '';
   const isHighlit = focused;
   const versionBadge = getVersionBadge(item);
+  const watchedMarks = useWatched();
+  const isSerieCard = item.content_type === 'series' || item.total_seasons !== undefined;
+  const seen = !item.progress && watchedMarks.has(isSerieCard ? 'series' : 'movie', item.id);
 
   // Sombra/glow e a transicao de scale so custam caro quando aplicadas nos
   // ~460 cards do catalogo de uma vez (box-shadow forca rasterizacao por
@@ -120,6 +125,21 @@ const PortraitCard = React.memo(function PortraitCard({ item, focused, onClick, 
             width: '100%', height: '100%',
             background: 'linear-gradient(135deg,#1c1c1c,#2a2a2a)',
           }} />
+        )}
+
+        {seen && (
+          <div style={{ position: 'absolute', right: 8, bottom: 8, background: '#4ade80', color: '#052e12', borderRadius: 4, padding: '3px 7px', fontSize: 11, fontWeight: 900 }}>✓ VISTO</div>
+        )}
+
+        {/* Posição no Top 10 */}
+        {item.rank && (
+          <div style={{
+            position: 'absolute', left: 8, bottom: 0,
+            fontSize: 92, lineHeight: '86px', fontWeight: 900, color: '#fff',
+            textShadow: '0 0 14px #000, 3px 3px 0 #000',
+          }}>
+            {item.rank}
+          </div>
         )}
 
         {/* Selo DUB/LEG/CAM/P&B */}
@@ -287,7 +307,7 @@ function CatalogGrid({ data, colFocus, isActive, onSelect, scrollRef, vertRafRef
 }
 
 // ── Hero Banner ───────────────────────────────────────────────────────────────
-function HeroBanner({ item, focusedBtn, onWatch, onDetail }) {
+function HeroBanner({ item, focusedBtn, onWatch, onDetail, onSurprise }) {
   if (!item) return null;
   const title    = item.title || item.name || '';
   const backdrop = item.backdrop_url;
@@ -409,6 +429,25 @@ function HeroBanner({ item, focusedBtn, onWatch, onDetail }) {
               <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/>
             </svg>
             Mais Info
+          </button>
+
+          {/* Surpreenda-me */}
+          <button
+            onClick={onSurprise}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 10,
+              background: 'rgba(255,255,255,0.12)', color: '#fff',
+              border: focusedBtn === 2
+                ? '2px solid rgba(255,255,255,0.85)'
+                : '2px solid rgba(255,255,255,0.2)',
+              borderRadius: 8, padding: '14px 28px',
+              fontSize: 17, fontWeight: 700, cursor: 'pointer',
+              outline: focusedBtn === 2 ? '3px solid rgba(255,255,255,0.7)' : 'none',
+              outlineOffset: '3px',
+              boxShadow: 'none',
+            }}
+          >
+            🎲 Surpreenda-me
           </button>
         </div>
       </div>
@@ -790,6 +829,7 @@ function buildSections(activeNav, pm, nm, ps, ns, fullCatalog) {
 
 // ── HomeScreen ────────────────────────────────────────────────────────────────
 export default function HomeScreen() {
+  const [surprise, setSurprise] = useState(false);
   const { logout, activeProfile, setActiveProfile } = useAuth();
   const navigate = useNavigate();
 
@@ -894,7 +934,7 @@ export default function HomeScreen() {
   const openDetail = useCallback((item) => {
     if (!item) return;
     if (item.content_type === 'movie' || item.content_type === 'episode') {
-      const id   = item.series_id || item.content_id;
+      const id   = item.series_id || item.content_id || item.id; // recomendados e Top 10 só têm id
       const type = item.content_type === 'episode' ? 'series' : 'movie';
       let url = '/detail?type=' + type + '&id=' + id;
       if (item.progress > 5) url += '&startAt=' + Math.floor(item.progress);
@@ -1181,7 +1221,7 @@ export default function HomeScreen() {
     if (k === KEY.RIGHT) {
       e.preventDefault();
       if (hasBanner && rowFocus === 0) {
-        setBannerBtn(f => Math.min(1, f + 1));
+        setBannerBtn(f => Math.min(2, f + 1));
       } else {
         const secIdx = hasBanner ? rowFocus - 1 : rowFocus;
         const sec = sections[secIdx];
@@ -1192,7 +1232,8 @@ export default function HomeScreen() {
       e.preventDefault();
       if (hasBanner && rowFocus === 0) {
         if (bannerBtn === 0) openWatch(featured);
-        else openDetail(featured);
+        else if (bannerBtn === 1) openDetail(featured);
+        else setSurprise(true);
         return;
       }
       const secIdx = hasBanner ? rowFocus - 1 : rowFocus;
@@ -1203,6 +1244,7 @@ export default function HomeScreen() {
 
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', background: '#0a0a0a' }}>
+      {surprise && <Surprise onClose={() => setSurprise(false)} onPick={openDetail} />}
       <Sidebar
         activeNav={activeNav}
         focusIdx={focusArea === 'sidebar' ? navFocus : -1}
@@ -1255,6 +1297,7 @@ export default function HomeScreen() {
                   focusedBtn={focusArea === 'content' && rowFocus === 0 ? bannerBtn : -1}
                   onWatch={() => openWatch(featured)}
                   onDetail={() => openDetail(featured)}
+                  onSurprise={() => setSurprise(true)}
                 />
               </div>
             )}

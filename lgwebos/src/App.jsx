@@ -8,6 +8,7 @@ import DetailScreen                 from './screens/DetailScreen.jsx';
 import PlayerScreen                 from './screens/PlayerScreen.jsx';
 import TogetherInvites from './components/TogetherInvites.jsx';
 import WhatsNew from './components/WhatsNew.jsx';
+import ArrivedNotice from './components/ArrivedNotice.jsx';
 import SubscriptionScreen           from './screens/SubscriptionScreen.jsx';
 import ProfileSelectScreen          from './screens/ProfileSelectScreen.jsx';
 import SplashScreen                 from './screens/SplashScreen.jsx';
@@ -176,7 +177,7 @@ function SplashOrchestrator({ children }) {
   }
 
   // Novidades só depois da abertura, pra não ficar atrás da tela de carregamento
-  return <>{children}<WhatsNew /></>;
+  return <>{children}<WhatsNew /><ArrivedNotice /></>;
 }
 
 // ── Root ──────────────────────────────────────────────────────────────────────

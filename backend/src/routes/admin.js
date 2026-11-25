@@ -644,6 +644,18 @@ router.delete('/collections/:id/items/:itemId', async (req, res) => {
 
 // ---- LIKES STATS ----
 // ---- ATIVIDADE (quem assistiu o que) ----
+router.get('/insights', async (req, res) => {
+  try {
+    const { buildInsights } = require('../services/insights');
+    const days = Math.min(365, Math.max(1, parseInt(req.query.days) || 30));
+    res.set('Cache-Control', 'no-store');
+    res.json(await buildInsights(supabase, days));
+  } catch (e) {
+    console.error('[admin] insights:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 router.get('/activity', async (req, res) => {
   try {
     const page = Number(req.query.page) || 1;

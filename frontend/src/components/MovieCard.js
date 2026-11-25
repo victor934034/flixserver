@@ -2,6 +2,7 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import styles from './MovieCard.module.css';
+import { useWatched } from '../lib/watched';
 
 // Series so mostra selo quando P&B (audio DUB/LEG/CAM varia por episodio,
 // nao faz sentido resumir num card so). Filme mostra a versao mais notavel.
@@ -22,6 +23,7 @@ export default function MovieCard({ item, onRemove }) {
   const year  = item.year || item.year_start;
   const label = isSeries ? 'SÉRIE' : 'FILME';
   const versionBadge = getVersionBadge(item, isSeries);
+  const seen = useWatched().has(isSeries ? 'series' : 'movie', item.id);
 
   const card = (
     <Link href={href} className={styles.card}>
@@ -39,6 +41,7 @@ export default function MovieCard({ item, onRemove }) {
         )}
 
         <div className={styles.typeBadge}>{label}</div>
+        {seen && <div className={styles.seenBadge}>✓ VISTO</div>}
 
         {item.rating && (
           <div className={styles.ratingBadge}>

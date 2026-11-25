@@ -81,7 +81,9 @@ export default function PerfilScreen() {
   const [chatUnread, setChatUnread] = useState(0);
   const [adminUnread, setAdminUnread] = useState(0);
   const [telegram, setTelegram] = useState('');
+  const [referral, setReferral] = useState(false); // só aparece quando o admin liga
   useFocusEffect(useCallback(() => {
+    api.get('/referrals/me').then(r => setReferral(!!r.data?.enabled)).catch(() => {});
     api.get('/chat/unread').then(r => setChatUnread(r.data?.unread || 0)).catch(() => {});
     api.get('/settings').then(r => setTelegram(r.data?.telegram_link || '')).catch(() => {});
     if (user?.is_admin) api.get('/chat/admin/unread').then(r => setAdminUnread(r.data?.unread || 0)).catch(() => {});
@@ -150,6 +152,17 @@ export default function PerfilScreen() {
             onPress={() => router.push('/minha-assinatura')}
           />
           <View style={styles.divider} />
+          {referral && (
+            <>
+              <MenuItem
+                icon="gift-outline"
+                label="Indique um amigo"
+                desc="Ganhe dias grátis quando ele assinar"
+                onPress={() => router.push('/indicar')}
+              />
+              <View style={styles.divider} />
+            </>
+          )}
           <MenuItem
             icon="heart-outline"
             label="Minha Lista"

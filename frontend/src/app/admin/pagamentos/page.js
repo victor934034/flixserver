@@ -139,7 +139,7 @@ export default function PagamentosPage() {
 
       {tab === 'iptv' && <IptvPending onDone={load} full />}
       {tab === 'plans' && <><SubscriptionSwitch /><PlansEditor /></>}
-      {tab === 'trial' && <TrialCard />}
+      {tab === 'trial' && <><TrialCard /><ReferralCard /></>}
     </div>
   );
 }
@@ -307,6 +307,32 @@ function SubscriptionSwitch() {
 function Toggle({ on, onChange, label }) {
   return (
     <button type="button" role="switch" aria-checked={on} aria-label={label} className={`${s.sw} ${on ? s.swOn : ''}`} onClick={() => onChange(!on)}><i /></button>
+  );
+}
+
+// ── Indique um amigo: quem indica ganha dias quando o amigo paga ──
+function ReferralCard() {
+  const [cfg, setCfg] = useState(null);
+  const [msg, setMsg] = useState('');
+  useEffect(() => { api.get('/settings').then(r => setCfg(r.data)).catch(() => setCfg({})); }, []);
+  async function save(key, value) {
+    setCfg(c => ({ ...c, [key]: String(value) }));
+    try { await api.put(`/settings/${key}`, { value: String(value) }); setMsg('Salvo'); } catch { setMsg('Erro ao salvar'); }
+    setTimeout(() => setMsg(''), 1800);
+  }
+  if (!cfg) return null;
+  const days = parseInt(cfg.referral_days) || 7;
+  return (
+    <section className={s.card}>
+      <div className={s.cardHead}><h2>Indique um amigo</h2>{msg && <span className={s.ok}>{msg}</span>}</div>
+      <div className={s.row}><div><b>Indicações ativas</b><small>Rode a migração 20261127_referrals no Supabase antes de ligar</small></div><Toggle on={cfg.referral_enabled === 'true'} onChange={v => save('referral_enabled', v)} label="Indicações ativas" /></div>
+      <div className={s.row}><div><b>Prêmio</b><small>Dias para quem indicou, na primeira assinatura paga do amigo</small></div>
+        <span className={s.stepper}>
+          <button aria-label="Menos" onClick={() => save('referral_days', Math.max(1, days - 1))}>−</button>
+          <b>{days} dias</b>
+          <button aria-label="Mais" onClick={() => save('referral_days', Math.min(90, days + 1))}>+</button>
+        </span></div>
+    </section>
   );
 }
 

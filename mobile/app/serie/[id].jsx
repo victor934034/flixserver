@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import api from '../../lib/api';
 import { startTogether } from '../../lib/togetherNav';
 import TogetherChooser from '../../components/TogetherChooser';
+import WatchedButton from '../../components/WatchedButton';
 import { useDownloads } from '../../contexts/DownloadContext';
 import { useParental } from '../../contexts/ParentalContext';
 import { useProfile } from '../../contexts/ProfileContext';
@@ -368,6 +369,8 @@ export default function SerieDetail() {
             <Ionicons name="share-social-outline" size={22} color="#fff" />
           </TouchableOpacity>
         </View>
+
+        <WatchedButton type="series" id={serie.id} />
 
         <View style={styles.likeRow}>
           <TouchableOpacity

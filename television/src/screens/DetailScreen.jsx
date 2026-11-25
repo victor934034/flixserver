@@ -5,7 +5,9 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { startTogether } from '../lib/together';
+import { startTogether, joinTogether } from '../lib/together';
+import TogetherChooser from '../components/TogetherChooser';
+import { useWatched } from '../lib/watched';
 import api from '../lib/api';
 import { useProfile } from '../contexts/ProfileContext';
 
@@ -206,6 +208,8 @@ export default function DetailScreen({ navigation, route }) {
   const [loading, setLoading]   = useState(true);
   const [watchlistId, setWatchlistId] = useState(null);
   const [continueId, setContinueId] = useState(null); // registro que mantém o título no "Continuar assistindo"
+  const [chooser, setChooser] = useState(null); // params do "Assistir juntos" enquanto a pessoa escolhe
+  const watched = useWatched();
   const epListRef  = useRef(null);
   const firstEpRef = useRef(null);
   const [firstEpHandle, setFirstEpHandle] = useState(null);
@@ -317,6 +321,11 @@ export default function DetailScreen({ navigation, route }) {
   function playMovie(version) {
     const p = buildMovieParams(version);
     if (p) navigation.navigate('Player', p);
+  }
+
+  const watchedType = () => (isSeries ? 'series' : 'movie');
+  async function toggleWatched() {
+    try { if (await watched.toggle(watchedType(), item.id)) setContinueId(null); } catch {}
   }
 
   async function watchTogether(params) {
@@ -497,9 +506,16 @@ export default function DetailScreen({ navigation, route }) {
                 <ActionBtn
                   label="Assistir juntos"
                   icon="people"
-                  onPress={() => watchTogether(buildMovieParams(versions[0]?.key))}
+                  onPress={() => setChooser(buildMovieParams(versions[0]?.key))}
                 />
                 {!!continueId && <ActionBtn label="Tirar do Continuar" icon="close" onPress={removeContinue} />}
+                {watched.enabled && (
+                  <ActionBtn
+                    label={watched.has(watchedType(), item.id) ? 'Já assisti' : 'Marcar como assistido'}
+                    icon={watched.has(watchedType(), item.id) ? 'checkmark-circle' : 'checkmark-circle-outline'}
+                    onPress={toggleWatched}
+                  />
+                )}
                 <ActionBtn
                   label={watchlistId ? 'Na Minha Lista' : 'Minha Lista'}
                   icon={watchlistId ? 'checkmark' : 'add'}
@@ -523,9 +539,16 @@ export default function DetailScreen({ navigation, route }) {
                 <ActionBtn
                   label="Assistir juntos"
                   icon="people"
-                  onPress={() => watchTogether(buildEpisodeParams(firstEp))}
+                  onPress={() => setChooser(buildEpisodeParams(firstEp))}
                 />
                 {!!continueId && <ActionBtn label="Tirar do Continuar" icon="close" onPress={removeContinue} />}
+                {watched.enabled && (
+                  <ActionBtn
+                    label={watched.has(watchedType(), item.id) ? 'Já assisti' : 'Marcar como assistido'}
+                    icon={watched.has(watchedType(), item.id) ? 'checkmark-circle' : 'checkmark-circle-outline'}
+                    onPress={toggleWatched}
+                  />
+                )}
                 <ActionBtn
                   label={watchlistId ? 'Na Minha Lista' : 'Minha Lista'}
                   icon={watchlistId ? 'checkmark' : 'add'}
@@ -535,6 +558,14 @@ export default function DetailScreen({ navigation, route }) {
             )}
           </View>
         </View>
+
+        <TogetherChooser
+          visible={!!chooser}
+          title={chooser?.title}
+          onCreate={() => watchTogether(chooser)}
+          onJoin={code => joinTogether(navigation, code)}
+          onClose={() => setChooser(null)}
+        />
 
         {/* ── Right: episode list ── */}
         {isSeries && (

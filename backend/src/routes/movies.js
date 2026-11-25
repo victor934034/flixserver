@@ -59,6 +59,37 @@ router.get('/search', async (req, res) => {
   }
 });
 
+// "Surpreenda-me": sorteia um filme, com filtro de gênero opcional.
+// exclude = ids já sorteados nesta rodada, pra "Sortear outro" não repetir.
+router.get('/surprise', async (req, res) => {
+  try {
+    const genre = String(req.query.genre || '').trim();
+    const exclude = String(req.query.exclude || '').split(',')
+      .filter(id => /^[0-9a-f-]{36}$/i.test(id)).slice(-50);
+
+    const build = (columns, options) => {
+      let q = supabase.from('movies').select(columns, options).eq('is_active', true)
+        .or('file_dubbing.not.is.null,file_subtitled.not.is.null,file_cinema.not.is.null,file_4k.not.is.null,file_color.not.is.null,file_bw.not.is.null');
+      if (genre) q = q.contains('genres', [genre]);
+      if (exclude.length) q = q.not('id', 'in', `(${exclude.join(',')})`);
+      return q;
+    };
+
+    const { count, error: countError } = await build('id', { count: 'exact', head: true });
+    if (countError) throw countError;
+    if (!count) return res.status(404).json({ error: 'Nenhum filme encontrado' });
+
+    const offset = Math.floor(Math.random() * count);
+    const { data, error } = await build(PUBLIC_FIELDS).order('id').range(offset, offset);
+    if (error) throw error;
+    if (!data?.length) return res.status(404).json({ error: 'Nenhum filme encontrado' });
+    res.set('Cache-Control', 'no-store');
+    res.json(data[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Detalhes de um filme
 router.get('/:id', optionalAuth, async (req, res) => {
   try {

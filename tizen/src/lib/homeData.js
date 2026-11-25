@@ -19,17 +19,20 @@ export async function fetchHomeBase() {
 
 // Parte do perfil: continuar assistindo e recomendações
 export async function fetchHomeProfile(profileId, hasUser) {
-  const [hist, recs] = await Promise.all([
+  const [hist, recs, top10] = await Promise.all([
     hasUser ? list(api.get('/api/history' + (profileId ? '?profile_id=' + profileId : ''))) : Promise.resolve([]),
     list(recommendationsAPI.get(profileId)),
+    hasUser ? list(api.get('/api/recommendations/top10')) : Promise.resolve([]),
   ]);
-  return { history: hist.filter(h => h.progress > 0 && h.duration > 0 && !h.completed).slice(0, 12), recs };
+  return { history: hist.filter(h => h.progress > 0 && h.duration > 0 && !h.completed).slice(0, 12), recs, top10 };
 }
 
 export function assembleHome(base, prof) {
   const p = prof || { history: [], recs: [] };
   const sections = [
     { key: 'history', title: 'Continue Assistindo', data: p.history },
+    // com menos de 3 a lista não diz nada
+    { key: 'top10',   title: 'Top 10 da semana',    data: p.top10 && p.top10.length >= 3 ? p.top10 : [] },
     { key: 'rel',     title: 'Recém lançados',      data: base.rel },
     { key: 'recs',    title: 'Recomendados pra você', data: p.recs },
     { key: 'pm',      title: 'Filmes em Alta',      data: base.pm },

@@ -4,6 +4,8 @@ import Navbar from '../components/Navbar';
 import HeroBanner from '../components/HeroBanner';
 import TrialBar from '../components/TrialBar';
 import ContentRow from '../components/ContentRow';
+import SurpriseButton from '../components/SurpriseButton';
+import Top10Row from '../components/Top10Row';
 import api from '../lib/api';
 import { getToken } from '../lib/auth';
 import { useProfile } from '../contexts/ProfileContext';
@@ -14,6 +16,13 @@ export default function Home() {
   const { activeProfile } = useProfile();
 
   const [reloadKey, setReloadKey] = useState(0);
+  const [top10, setTop10] = useState([]);
+
+  // Carrega à parte: não atrasa o resto da página
+  useEffect(() => {
+    if (!getToken()) return;
+    api.get('/recommendations/top10').then(r => setTop10(Array.isArray(r.data) ? r.data : [])).catch(() => {});
+  }, [reloadKey]);
 
   // Atualiza sozinho quando o admin adiciona conteúdo/troca banner
   useEffect(() => {
@@ -108,6 +117,8 @@ export default function Home() {
           <div style={!data.featured.length ? { paddingTop: '5rem' } : undefined}>
             <HeroBanner items={data.featured} />
 
+            <SurpriseButton />
+
             {data.history?.length > 0 && (
               <ContentRow
                 title="Continue Assistindo"
@@ -125,6 +136,8 @@ export default function Home() {
                 onRemove={removeFromContinue}
               />
             )}
+
+            <Top10Row items={top10} />
 
             {data.released?.length > 0 && (
               <ContentRow title="Recém lançados" items={data.released} />

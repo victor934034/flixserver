@@ -5,6 +5,7 @@ import Image from 'next/image';
 import Navbar from '../../../components/Navbar';
 import VideoPlayer from '../../../components/VideoPlayer';
 import TogetherButton from '../../../components/TogetherButton';
+import WatchedButton from '../../../components/WatchedButton';
 import api from '../../../lib/api';
 import { getToken } from '../../../lib/auth';
 import { useProfile } from '../../../contexts/ProfileContext';
@@ -172,6 +173,7 @@ export default function SeriePage() {
                   <button className={`${styles.btnList} ${watchlistId ? styles.inList : ''}`} onClick={toggleList}>
                     {watchlistId ? '✓ Na Minha Lista' : '+ Minha Lista'}
                   </button>
+                  <WatchedButton type="series" id={serie.id} />
                   {serie.trailer_url && (
                     <a href={serie.trailer_url} target="_blank" rel="noreferrer" className={styles.btnTrailer}>Trailer</a>
                   )}

@@ -31,6 +31,8 @@ const helpRouter = require('./routes/help');
 const chatRouter = require('./routes/chat');
 const securityRouter = require('./routes/security');
 const togetherRouter = require('./routes/together');
+const referralsRouter = require('./routes/referrals');
+const watchedRouter = require('./routes/watched');
 const { blocklistMiddleware } = require('./services/guard');
 
 const REQUIRED_ENV = ['JWT_SECRET', 'SUPABASE_URL', 'SUPABASE_SERVICE_KEY'];
@@ -127,6 +129,7 @@ app.use('/api/auth/forgot-password', strictLimiter(10));
 app.use('/api/auth/reset-password', strictLimiter(15));
 app.use('/api/payments/checkout', strictLimiter(15));
 app.use('/api/payments/trial/start', strictLimiter(10));
+app.use('/api/referrals/apply', strictLimiter(10));
 app.use('/api/admin', strictLimiter(1500));
 
 app.use('/api/movies', moviesRouter);
@@ -155,6 +158,8 @@ app.use('/api/collections', collectionsRouter);
 app.use('/api/help', helpRouter);
 app.use('/api/security', securityRouter);
 app.use('/api/together', togetherRouter);
+app.use('/api/referrals', referralsRouter);
+app.use('/api/watched', watchedRouter);
 
 // ── Versão do conteúdo: apps/site consultam isso e recarregam a Home sozinhos
 // quando você adiciona filme, troca banner etc. (sem precisar fechar o app).
@@ -409,4 +414,11 @@ httpServer.listen(PORT, () => {
     sendNewEpisodeAlerts(supabase).catch(e => console.error('[cron] episode alerts:', e.message));
   setTimeout(runEpisodeAlerts, 3 * 60 * 1000);
   setInterval(runEpisodeAlerts, 30 * 60 * 1000);
+
+  // Cron: avisa quem teve o pedido (sugestão) atendido
+  const { checkFulfilledSuggestions } = require('./services/suggestionAlerts');
+  const runSuggestionAlerts = () =>
+    checkFulfilledSuggestions(supabase).catch(e => console.error('[cron] pedidos atendidos:', e.message));
+  setTimeout(runSuggestionAlerts, 4 * 60 * 1000);
+  setInterval(runSuggestionAlerts, 15 * 60 * 1000);
 });

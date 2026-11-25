@@ -7,6 +7,9 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../lib/api';
+import Surprise from '../components/Surprise';
+import { useWatched } from '../lib/watched';
+import ArrivedNotice from '../components/ArrivedNotice';
 import { useAuth } from '../contexts/AuthContext';
 import { useProfile } from '../contexts/ProfileContext';
 
@@ -126,6 +129,7 @@ const ContentCard = React.forwardRef(function ContentCard({ item, onPress, onFoc
   const title = item.title || item.name || '';
   const versionBadge = getVersionBadge(item);
   const isSer = item.total_seasons !== undefined || item.content_type === 'series';
+  const seen = useWatched().has(isSer ? 'series' : 'movie', item.id);
 
   return (
     <TVPressable
@@ -146,6 +150,8 @@ const ContentCard = React.forwardRef(function ContentCard({ item, onPress, onFoc
               </View>
             )
           }
+          {!!item.rank && <Text style={s.cardRank}>{item.rank}</Text>}
+          {seen && <Text style={{ position: 'absolute', right: 5, bottom: 5, zIndex: 2, backgroundColor: '#4ade80', color: '#052e12', fontSize: 10, fontWeight: '900', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4 }}>✓ VISTO</Text>}
           {versionBadge && (
             <View style={s.cardVerBadge}>
               <Text style={s.cardVerBadgeTxt}>{versionBadge}</Text>
@@ -577,6 +583,7 @@ export default function HomeScreen({ navigation }) {
   const [genreOpen, setGenreOpen]         = useState(false);
   const [searchTypeFilter, setSearchTypeFilter] = useState(null); // 'movie' | 'series' | null
   const [recommendations, setRecommendations] = useState([]);
+  const [surprise, setSurprise] = useState(false);
 
   const sidebarW  = useRef(new Animated.Value(SIDEBAR_SM)).current;
   const overlayOp = useRef(new Animated.Value(0)).current;
@@ -767,7 +774,7 @@ export default function HomeScreen({ navigation }) {
         ? api.get('/history', { params: profileParams }).catch(() => ({ data: [] }))
         : Promise.resolve({ data: [] });
       const recsReq = api.get('/recommendations', { params: profileParams }).catch(() => ({ data: [] }));
-      const [feat, nm, ns, pm, ps, hist, recs, relM, relS] = await Promise.all([
+      const [feat, nm, ns, pm, ps, hist, recs, relM, relS, top] = await Promise.all([
         api.get('/featured').catch(() => ({ data: [] })),
         api.get('/movies/section/new').catch(() => ({ data: [] })),
         api.get('/series/section/new').catch(() => ({ data: [] })),
@@ -777,8 +784,10 @@ export default function HomeScreen({ navigation }) {
         recsReq,
         api.get('/movies/section/released').catch(() => ({ data: [] })),
         api.get('/series/section/released').catch(() => ({ data: [] })),
+        api.get('/recommendations/top10').catch(() => ({ data: [] })),
       ]);
       const a = d => (Array.isArray(d.data) ? d.data : []);
+      const top10 = a(top);
       const [fl, nm2, ns2, pm2, ps2, hist2, recs2, relM2, relS2] = [feat, nm, ns, pm, ps, hist, recs, relM, relS].map(a);
       // Recém lançados: pela data real de lançamento (filmes + séries misturados)
       const released2 = [...relM2, ...relS2]
@@ -807,6 +816,8 @@ export default function HomeScreen({ navigation }) {
 
       setSections([
         ...(continuing.length > 0 ? [{ title: 'Continuar Assistindo', data: continuing, type: 'mixed' }] : []),
+        // com menos de 3 a lista não diz nada
+        ...(top10.length >= 3 ? [{ title: 'Top 10 da semana', data: top10, type: 'mixed' }] : []),
         ...(released2.length > 0 ? [{ title: 'Recém lançados', data: released2, type: 'mixed' }] : []),
         ...(recs2.length > 0 ? [{ title: 'Recomendados pra você', data: recs2, type: 'mixed' }] : []),
         { title: 'Lançamentos — Filmes', data: nm2, type: 'movie'  },
@@ -1049,6 +1060,9 @@ export default function HomeScreen({ navigation }) {
           </Animated.View>
         </View>
 
+        <Surprise visible={surprise} onClose={() => setSurprise(false)} onPick={m => openDetail(m, 'movie')} />
+        <ArrivedNotice profileId={activeProfile?.id} onOpen={openDetail} />
+
         {/* ── Content ── */}
         <View style={s.content}>
           {/* Invisible focus landing — grabs focus when a sidebar item is pressed */}
@@ -1114,6 +1128,11 @@ export default function HomeScreen({ navigation }) {
                         onPress={() => openDetail(heroItem, isSeries(heroItem) ? 'series' : 'movie')} onFocus={() => { onContentFoc(); homeScrollRef.current?.scrollTo({ y: 0, animated: true }); }}
                         nextFocusDown={findNodeHandle(catalogFirstFocusRef())}
                         nextFocusUp={findNodeHandle(maisInfoRef.current)}
+                      />
+                      <HeroBtn
+                        icon="dice-outline" label="Surpreenda-me"
+                        onPress={() => setSurprise(true)} onFocus={() => { onContentFoc(); homeScrollRef.current?.scrollTo({ y: 0, animated: true }); }}
+                        nextFocusDown={findNodeHandle(catalogFirstFocusRef())}
                       />
                     </View>
                   </>
@@ -1480,6 +1499,7 @@ const s = StyleSheet.create({
     borderRadius: r(6), overflow: 'hidden', backgroundColor: '#1a1a1a',
   },
   cardOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' },
+  cardRank: { position: 'absolute', left: r(8), bottom: r(2), color: '#fff', fontSize: r(72), fontWeight: '900', textShadowColor: '#000', textShadowOffset: { width: 2, height: 2 }, textShadowRadius: 10, zIndex: 2 },
   cardVerBadge: {
     position: 'absolute', top: r(6), right: r(6),
     backgroundColor: 'rgba(0,0,0,0.75)', borderRadius: r(4),

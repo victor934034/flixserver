@@ -5,6 +5,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
+    "test": "node test/rotas.test.cjs",
     "dev": "nodemon src/index.js",
     "bot": "node tmdb-bot.js",
     "seed:plans": "node scripts/seed-plans.js"

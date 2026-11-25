@@ -4,6 +4,7 @@ import { ParentalProvider } from '../contexts/ParentalContext';
 import ProfileGate from './ProfileGate';
 import BrowserNotice from './BrowserNotice';
 import WhatsNew from './WhatsNew';
+import ArrivedNotice from './ArrivedNotice';
 
 export default function Providers({ children }) {
   return (
@@ -12,6 +13,7 @@ export default function Providers({ children }) {
         <ProfileGate />
         {children}
         <BrowserNotice />
+        <ArrivedNotice />
         <WhatsNew />
       </ParentalProvider>
     </ProfileProvider>

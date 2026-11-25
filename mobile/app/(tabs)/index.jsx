@@ -10,6 +10,9 @@ import HeroBanner from '../../components/HeroBanner';
 import ContentRow from '../../components/ContentRow';
 import SupportBanner from '../../components/SupportBanner';
 import CachedImage from '../../components/CachedImage';
+import SurpriseSheet from '../../components/SurpriseSheet';
+import Top10Row from '../../components/Top10Row';
+import ArrivedNotice from '../../components/ArrivedNotice';
 import api from '../../lib/api';
 import { useProfile } from '../../contexts/ProfileContext';
 
@@ -145,6 +148,7 @@ export default function HomeScreen() {
   const [recentEpisodes, setRecentEpisodes] = useState([]);
   const [released, setReleased] = useState([]);
   const [recommended, setRecommended] = useState([]);
+  const [top10, setTop10] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const fetchHistory = useCallback(async () => {
@@ -189,6 +193,8 @@ export default function HomeScreen() {
   }, []);
 
   const loadHome = useCallback(() => {
+    // fora do Promise.all pra não atrasar a Home
+    api.get('/recommendations/top10').then(r => setTop10(Array.isArray(r.data) ? r.data : [])).catch(() => {});
     return Promise.all([
       api.get('/featured').catch(() => ({ data: [] })),
       api.get('/movies?limit=20').catch(() => ({ data: [] })),
@@ -290,6 +296,9 @@ export default function HomeScreen() {
       {hero && <HeroBanner items={featured.length ? featured : movies} />}
 
       <View style={styles.rows}>
+        <ArrivedNotice />
+        <SurpriseSheet />
+
         {continueItems.length > 0 && (
           <View style={styles.continueSection}>
             <Text style={styles.sectionTitle}>Continuar Assistindo</Text>
@@ -300,6 +309,8 @@ export default function HomeScreen() {
             </ScrollView>
           </View>
         )}
+
+        <Top10Row items={top10} />
 
         {released.length > 0 && (
           <ContentRow title="Recém lançados" items={released} type="mixed" />

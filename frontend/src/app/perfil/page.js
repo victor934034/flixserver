@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import Navbar from '../../components/Navbar';
 import { getMe, logout } from '../../lib/auth';
 import { PLAY_STORE_URL } from '../../lib/changelog';
+import api from '../../lib/api';
 import styles from './page.module.css';
 
 const PLAN_LABELS = { free: 'Gratuito', basic: 'Básico', premium: 'Premium', admin: 'Admin' };
@@ -12,6 +13,7 @@ const PLAN_COLORS = { free: '#888', basic: '#4a90e2', premium: '#e5b300', admin:
 export default function PerfilPage() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [referral, setReferral] = useState(false); // só aparece quando o admin liga
   const router = useRouter();
 
   useEffect(() => {
@@ -20,6 +22,10 @@ export default function PerfilPage() {
       .catch(() => router.push('/login'))
       .finally(() => setLoading(false));
   }, [router]);
+
+  useEffect(() => {
+    if (user) api.get('/referrals/me').then(r => setReferral(!!r.data?.enabled)).catch(() => {});
+  }, [user]);
 
   if (loading) return (
     <>
@@ -83,6 +89,11 @@ export default function PerfilPage() {
             <a href="/iptv" className={styles.link}>
               <span className={styles.linkIcon}>📡</span> IPTV
             </a>
+            {referral && (
+              <a href="/indicar" className={styles.link}>
+                <span className={styles.linkIcon}>🎁</span> Indique um amigo
+              </a>
+            )}
             <a href={PLAY_STORE_URL} target="_blank" rel="noopener noreferrer" className={styles.link}>
               <span className={styles.linkIcon}>⭐</span> Avaliar o app
             </a>

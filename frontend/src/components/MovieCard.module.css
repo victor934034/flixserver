@@ -176,3 +176,6 @@
 .removeWrap { position: relative; flex-shrink: 0; }
 .removeBtn { position: absolute; top: 6px; right: 6px; z-index: 5; width: 30px; height: 30px; border-radius: 50%; border: 1px solid rgba(255,255,255,.35); background: rgba(0,0,0,.75); color: #fff; font-size: 14px; line-height: 1; cursor: pointer; }
 .removeBtn:hover { background: #E50914; border-color: #E50914; }
+
+/* Selo de "já assistido" */
+.seenBadge { position: absolute; bottom: 8px; right: 8px; z-index: 3; font-size: 0.62rem; font-weight: 800; color: #052e12; background: #4ade80; padding: 2px 6px; border-radius: 3px; }

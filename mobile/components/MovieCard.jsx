@@ -2,6 +2,7 @@ import { memo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, useWindowDimensions } from 'react-native';
 import { useRouter } from 'expo-router';
 import CachedImage from './CachedImage';
+import { useWatched } from '../lib/watched';
 
 const DEFAULT_CARD_W = 110;
 const DEFAULT_CARD_H = 165;
@@ -27,6 +28,7 @@ function MovieCard({ item, type, compact = false, cardWidth, progress }) {
   const { width: screenWidth } = useWindowDimensions();
   const isSeries = type === 'series' || (type === 'mixed' && (item.total_seasons != null || item.year_start != null));
   const versionBadge = getVersionBadge(item, isSeries);
+  const seen = useWatched().has(isSeries ? 'series' : 'movie', item.id);
   const route = isSeries ? `/serie/${item.id}` : `/filme/${item.id}`;
   const name = item.title || item.name || '';
 
@@ -55,6 +57,12 @@ function MovieCard({ item, type, compact = false, cardWidth, progress }) {
         {item.rating > 0 && !compact && (
           <View style={styles.ratingBadge}>
             <Text style={styles.ratingText}>★ {Number(item.rating).toFixed(1)}</Text>
+          </View>
+        )}
+
+        {seen && (
+          <View style={styles.seenBadge}>
+            <Text style={styles.seenBadgeText}>✓ VISTO</Text>
           </View>
         )}
 
@@ -99,6 +107,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6, paddingVertical: 3, borderRadius: 5,
   },
   verBadgeText: { color: '#fff', fontSize: 9, fontWeight: '700' },
+  seenBadge: { position: 'absolute', bottom: 6, right: 6, backgroundColor: '#4ade80', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4 },
+  seenBadgeText: { color: '#052e12', fontSize: 9, fontWeight: '800' },
   progressTrack: {
     height: 3, backgroundColor: '#222', borderRadius: 1.5, marginTop: 5,
   },

@@ -1,0 +1,37 @@
+/* Surpreenda-me */
+.surpriseBar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 0 clamp(1.5rem, 4vw, 4rem); margin: 0 0 2rem; color: #8a8a8a; font-size: 14px; }
+.surpriseBtn { background: #E50914; color: #fff; border: 0; border-radius: 999px; padding: 12px 22px; font-weight: 800; font-size: 15px; cursor: pointer; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.chip { background: transparent; color: #ccc; border: 1px solid #333; border-radius: 999px; padding: 7px 13px; font-size: 13px; cursor: pointer; }
+.chipOn { background: #fff; border-color: #fff; color: #000; font-weight: 700; }
+.result { display: flex; gap: 12px; text-align: left; }
+.result img { width: 96px; height: 144px; object-fit: cover; border-radius: 8px; flex-shrink: 0; }
+.result div { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.result small { color: #a3a3a3; font-size: 12px; }
+.result p { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; font-size: 13px; line-height: 1.4; }
+
+/* Top 10 */
+.topItem { display: flex; align-items: flex-end; flex-shrink: 0; }
+.rank { font-size: 112px; line-height: .78; font-weight: 900; color: #0b0b0b; -webkit-text-stroke: 3px #8a8a8a; margin: 0 -14px 24px 0; user-select: none; letter-spacing: -8px; }
+.topItem > a { position: relative; z-index: 1; }
+
+/* Pedido atendido */
+.arrived { position: fixed; right: 16px; bottom: 16px; left: 16px; max-width: 360px; margin-left: auto; z-index: 900; display: flex; gap: 12px; padding: 14px; background: #161616; border: 1px solid #2a2a2a; border-radius: 14px; box-shadow: 0 14px 40px rgba(0,0,0,.7); color: #fff; }
+.arrived img { width: 60px; height: 90px; object-fit: cover; border-radius: 6px; }
+.arrived > div { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.arrived span { color: #ccc; font-size: 14px; }
+.arrived > div > div { display: flex; gap: 8px; }
+.arrivedGo, .arrivedClose { border-radius: 8px; padding: 8px 14px; font-weight: 700; font-size: 13px; cursor: pointer; }
+.arrivedGo { background: #E50914; color: #fff; border: 0; }
+.arrivedClose { background: transparent; color: #fff; border: 1px solid #333; }
+
+/* Indique um amigo */
+.page { min-height: 100vh; display: flex; justify-content: center; padding: 96px 16px 48px; }
+.panel { width: 100%; max-width: 480px; align-self: flex-start; background: #141414; border: 1px solid #262626; border-radius: 16px; padding: 24px; display: flex; flex-direction: column; gap: 14px; text-align: center; color: #fff; }
+.panel p { color: #a3a3a3; font-size: 14px; line-height: 1.5; }
+.code { font-size: 32px; font-weight: 900; letter-spacing: 6px; background: #0b0b0b; border: 1px dashed #444; border-radius: 12px; padding: 14px; }
+.counters { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.counters div { background: #0f0f0f; border-radius: 10px; padding: 10px 4px; }
+.counters b { display: block; font-size: 22px; }
+.counters span { color: #8a8a8a; font-size: 12px; }
+.ok { color: #4ade80; font-size: 14px; }

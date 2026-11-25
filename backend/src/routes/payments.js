@@ -199,6 +199,14 @@ async function fulfill(row) {
   } else {
     console.log(`[payments] apoio recebido user=${row.user_id} valor=${row.amount}`);
   }
+
+  // Indique um amigo: a primeira compra do amigo premia quem indicou
+  if (row.kind === 'plan' || row.kind === 'iptv') {
+    try {
+      const { rewardReferrer } = require('../services/referrals');
+      await rewardReferrer(supabase, row.user_id, getPlansConfig);
+    } catch (e) { console.error('[payments] indicação:', e.message); }
+  }
   return true;
 }
 

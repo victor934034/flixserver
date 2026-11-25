@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { supabase } = require('../services/supabase');
 const { authMiddleware } = require('../middleware/auth');
+const { removeFromContinue } = require('../services/continueWatching');
 
 router.use(authMiddleware);
 
@@ -86,26 +87,13 @@ router.delete('/:id', async (req, res) => {
       .eq('id', req.params.id).eq('user_id', req.user.id).single();
     if (!row) return res.status(404).json({ error: 'Item não encontrado' });
 
-    let contentIds = [row.content_id];
+    let type = 'movie', id = row.content_id;
     if (row.content_type === 'episode') {
       const { data: ep } = await supabase.from('episodes').select('series_id').eq('id', row.content_id).single();
       const seriesId = ep?.series_id || row.series_id;
-      if (seriesId) {
-        const { data: eps } = await supabase.from('episodes').select('id').eq('series_id', seriesId);
-        if (eps?.length) contentIds = eps.map(e => e.id);
-      }
+      if (seriesId) { type = 'series'; id = seriesId; }
     }
-
-    // Em lotes: séries longas estourariam o tamanho da URL do banco
-    for (let i = 0; i < contentIds.length; i += 100) {
-      let q = supabase.from('watch_history').delete()
-        .eq('user_id', req.user.id)
-        .in('content_id', contentIds.slice(i, i + 100))
-        .or('completed.is.null,completed.eq.false');
-      q = row.profile_id ? q.eq('profile_id', row.profile_id) : q.is('profile_id', null);
-      const { error } = await q;
-      if (error) throw error;
-    }
+    await removeFromContinue(supabase, { userId: req.user.id, profileId: row.profile_id, type, id });
 
     res.json({ ok: true });
   } catch (err) {

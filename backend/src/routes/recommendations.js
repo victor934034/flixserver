@@ -1,5 +1,5 @@
 const router = require('express').Router();
-const { supabase } = require('../services/supabase');
+const { supabase, fetchAll } = require('../services/supabase');
 const { authMiddleware } = require('../middleware/auth');
 
 router.use(authMiddleware);
@@ -77,6 +77,68 @@ async function fetchTmdbSimilar(tmdbId, type) {
   }
 }
 
+// GET /api/recommendations/top10
+// Os mais assistidos dos últimos 7 dias, contando CONTAS diferentes (a mesma
+// pessoa vendo vários episódios conta uma vez). Filmes e séries juntos.
+const TOP_TTL_MS = 30 * 60 * 1000;
+let topCache = { at: 0, data: null };
+
+router.get('/top10', async (req, res) => {
+  try {
+    if (topCache.data && Date.now() - topCache.at < TOP_TTL_MS) return res.json(topCache.data);
+
+    const since = new Date(Date.now() - 7 * 86400000).toISOString();
+    const { data: rows, error } = await fetchAll(() => supabase
+      .from('watch_history')
+      .select('id, user_id, content_type, content_id, series_id, progress, completed')
+      .gte('last_watched', since)
+      .order('id'));
+    if (error) throw error;
+
+    const viewers = new Map(); // "movie:id" | "series:id" -> Set de contas
+    for (const r of rows || []) {
+      if (!r.completed && (r.progress || 0) < 60) continue; // abriu e fechou não conta
+      const id = r.content_type === 'movie' ? r.content_id : r.series_id;
+      if (!id) continue;
+      const key = `${r.content_type === 'movie' ? 'movie' : 'series'}:${id}`;
+      if (!viewers.has(key)) viewers.set(key, new Set());
+      viewers.get(key).add(r.user_id);
+    }
+
+    // Pega folga (30) porque alguns títulos podem ter sido desativados
+    const ranked = [...viewers.entries()]
+      .sort((a, b) => b[1].size - a[1].size || a[0].localeCompare(b[0]))
+      .slice(0, 30)
+      .map(([key]) => { const [content_type, id] = key.split(':'); return { content_type, id }; });
+
+    const idsOf = type => ranked.filter(r => r.content_type === type).map(r => r.id);
+    const [movies, series] = await Promise.all([
+      idsOf('movie').length
+        ? supabase.from('movies').select('id, title, synopsis, year, rating, genres, poster_url, backdrop_url, age_rating').eq('is_active', true).in('id', idsOf('movie'))
+        : { data: [] },
+      idsOf('series').length
+        ? supabase.from('series').select('id, title, synopsis, year_start, rating, genres, poster_url, backdrop_url, age_rating, total_seasons').eq('is_active', true).in('id', idsOf('series'))
+        : { data: [] },
+    ]);
+    const detail = new Map([
+      ...(movies.data || []).map(m => [`movie:${m.id}`, { ...m, content_type: 'movie' }]),
+      ...(series.data || []).map(s => [`series:${s.id}`, { ...s, content_type: 'series' }]),
+    ]);
+
+    const top = ranked
+      .map(r => detail.get(`${r.content_type}:${r.id}`))
+      .filter(Boolean)
+      .slice(0, 10)
+      .map((item, i) => ({ ...item, rank: i + 1 }));
+
+    topCache = { at: Date.now(), data: top };
+    res.json(top);
+  } catch (err) {
+    console.error('[top10] error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/recommendations?profile_id=X&limit=20
 // Recomendação baseada em conteúdo: perfil de afinidade por gênero calculado
 // a partir do watch_history (mesma tabela do "Continuar Assistindo"), sem
@@ -97,8 +159,14 @@ router.get('/', async (req, res) => {
     const { data: history, error: histErr } = await histQ;
     if (histErr) throw histErr;
 
+    // Títulos marcados como "já assistido" não voltam como recomendação
+    let marksQ = supabase.from('watched_marks').select('content_type, content_id').eq('user_id', req.user.id);
+    marksQ = profileId ? marksQ.eq('profile_id', profileId) : marksQ.is('profile_id', null);
+    const { data: marks } = await marksQ; // tabela ausente = nenhuma marca
+    const marked = new Set((marks || []).map(m => `${m.content_type}:${m.content_id}`));
+
     // Assinatura do histórico: mesma lista de títulos => mesmo resultado (estável).
-    const sig = history.slice(0, 30).map(h => `${h.content_type}:${h.series_id || h.content_id}`).join('|');
+    const sig = history.slice(0, 30).map(h => `${h.content_type}:${h.series_id || h.content_id}`).join('|') + '#' + [...marked].sort().join('|');
     const cacheKey = `${req.user.id}:${profileId || 'default'}:${limit}:${require('crypto').createHash('md5').update(sig).digest('hex')}`;
     const cached = getCached(cacheKey);
     if (cached) return res.json(cached);
@@ -187,12 +255,12 @@ router.get('/', async (req, res) => {
     }
 
     const scoredMovies = (allMoviesRes.data || [])
-      .filter(m => !watchedMovieSet.has(m.id))
+      .filter(m => !watchedMovieSet.has(m.id) && !marked.has(`movie:${m.id}`))
       .map(m => ({ id: m.id, content_type: 'movie', _score: scoreOf(m.genres, 'movie', m.tmdb_id) }))
       .filter(m => m._score > 0);
 
     const scoredSeries = (allSeriesRes.data || [])
-      .filter(s => !watchedSeriesSet.has(s.id))
+      .filter(s => !watchedSeriesSet.has(s.id) && !marked.has(`series:${s.id}`))
       .map(s => ({ id: s.id, content_type: 'series', _score: scoreOf(s.genres, 'series', s.tmdb_id) }))
       .filter(s => s._score > 0);
 

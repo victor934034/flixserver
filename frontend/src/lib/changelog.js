@@ -7,6 +7,10 @@ export const CHANGELOG = [
   {
     version: '1.2.0',
     items: [
+      '✓ Marque um título como já assistido: ele ganha um selo e sai das recomendações.',
+      '🎲 Surpreenda-me: escolha um gênero e a gente sorteia um filme.',
+      '🏆 Top 10 da semana na tela inicial.',
+      '🎉 Aviso quando um título que você pediu entra no catálogo.',
       'Continuar assistindo: não curtiu? Toque no ✕ para tirar o título da lista.',
       'Assistir juntos corrigido: a sala volta a conectar no site, no celular e na TV.',
       'No site e no celular, o Assistir juntos deixa escolher entre criar uma sala ou entrar com um código.',

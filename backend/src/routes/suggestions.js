@@ -3,6 +3,7 @@ const { supabase } = require('../services/supabase');
 const { authMiddleware } = require('../middleware/auth');
 const { adminMiddleware } = require('../middleware/admin');
 const { sendPush } = require('../services/notifications');
+const { findInCatalog, markAdded } = require('../services/suggestionAlerts');
 
 // GET /api/suggestions/search-tmdb — busca no TMDB (filme+série juntos) pro
 // usuário escolher o que sugerir. A tela de sugestão buscava no catálogo
@@ -106,6 +107,31 @@ async function notifyAdmins(userName, title) {
   await sendPush(tokens, '💡 Nova sugestão', `${userName} sugeriu: ${title}`, { screen: 'suggestions' });
 }
 
+// GET /api/suggestions/arrived — pedidos DESTE usuário que entraram no catálogo
+// nos últimos 30 dias. É o aviso dentro do app/site/TV (o push só chega no celular).
+router.get('/arrived', authMiddleware, async (req, res) => {
+  try {
+    const since = new Date(Date.now() - 30 * 86400000).toISOString();
+    const { data, error } = await supabase
+      .from('suggestions')
+      .select('id, title, type, tmdb_id, poster_url, updated_at')
+      .eq('user_id', req.user.id)
+      .eq('status', 'added')
+      .gte('updated_at', since)
+      .order('updated_at', { ascending: false })
+      .limit(10);
+    if (error) throw error;
+    const items = await Promise.all((data || []).map(async s => {
+      const content = await findInCatalog(supabase, s);
+      return content ? { id: s.id, title: content.title, poster_url: s.poster_url, content_type: content.content_type, content_id: content.id } : null;
+    }));
+    res.set('Cache-Control', 'no-store');
+    res.json(items.filter(Boolean));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/suggestions — lista todas as sugestões (admin)
 router.get('/', adminMiddleware, async (req, res) => {
   const { status } = req.query;
@@ -130,6 +156,15 @@ router.put('/:id', adminMiddleware, async (req, res) => {
   if (!allowed.includes(status)) return res.status(400).json({ error: 'status inválido' });
 
   try {
+    // Marcou como "adicionado" pela primeira vez: avisa quem pediu
+    if (status === 'added') {
+      const { data: suggestion } = await supabase.from('suggestions')
+        .select('id, user_id, title, type, tmdb_id, status').eq('id', req.params.id).maybeSingle();
+      if (suggestion && suggestion.status !== 'added') {
+        await markAdded(supabase, suggestion, await findInCatalog(supabase, suggestion), note || null);
+        return res.json({ ok: true });
+      }
+    }
     const { error } = await supabase
       .from('suggestions')
       .update({ status, admin_note: note || null, updated_at: new Date().toISOString() })

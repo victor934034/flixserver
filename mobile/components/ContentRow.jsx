@@ -5,13 +5,16 @@ import MovieCard from './MovieCard';
 
 function ContentRow({ title, items, type, seeAllRoute }) {
   const router = useRouter();
-  if (!items?.length) return null;
 
   const renderItem = useCallback(({ item }) => (
     <MovieCard item={item} type={type} />
   ), [type]);
 
   const keyExtractor = useCallback(item => String(item.id), []);
+
+  // o "return" vem depois dos hooks: o React exige a mesma quantidade em todo desenho,
+  // senão a tela fecha quando uma fileira vazia recebe títulos
+  if (!items?.length) return null;
 
   return (
     <View style={styles.container}>
