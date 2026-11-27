@@ -1,8 +1,9 @@
 'use client';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import api from '../lib/api';
+import { SURPRISE_EVENT, consumeSurprise } from '../lib/tutorial';
 import d from './Dialog.module.css';
 import s from './Extras.module.css';
 
@@ -17,6 +18,14 @@ export default function SurpriseButton() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const drawn = useRef([]); // já sorteados, pra não repetir
+
+  // Atalho "Surpreenda-me" do último passo do passo a passo
+  useEffect(() => {
+    const run = () => { if (consumeSurprise()) { setOpen(true); pickGenre(''); } };
+    run();
+    window.addEventListener(SURPRISE_EVENT, run);
+    return () => window.removeEventListener(SURPRISE_EVENT, run);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function draw() {
     setBusy(true);

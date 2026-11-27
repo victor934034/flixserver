@@ -5,6 +5,7 @@ import { moviesAPI, seriesAPI, watchlistAPI, recommendationsAPI } from '../api/i
 import api from '../api/index.js';
 import { prefetchCache } from '../App.jsx';
 import Sidebar from '../components/Sidebar.jsx';
+import { openTutorial, SURPRISE_EVENT, HOME_EVENT } from '../lib/tutorial.js';
 import Surprise from '../components/Surprise.jsx';
 import { useWatched } from '../lib/watched.js';
 import { fetchHomeBase, fetchHomeProfile, fetchCatalog, assembleHome, filterCatalog } from '../lib/homeData.js';
@@ -957,6 +958,7 @@ export default function HomeScreen() {
 
   const goToNav = useCallback((idx) => {
     if (idx === NAV.length) { setActiveProfile(null); navigate('/profile-select', { replace: true }); return; }
+    if (idx === NAV.length + 1) { openTutorial(); return; }
     if (idx > NAV.length)   { logout(); navigate('/login', { replace: true }); return; }
     const key = NAV[idx];
     if (key === 'iptv') { navigate('/iptv'); return; }
@@ -973,6 +975,15 @@ export default function HomeScreen() {
     setToolbarIdx(0);
     setSearchTypeFilter(null);
   }, [logout, navigate, setActiveProfile]);
+
+  // Atalhos do último passo do passo a passo: voltar ao Início e Surpreenda-me
+  useEffect(() => {
+    const home = () => goToNav(0);
+    const draw = () => setSurprise(true);
+    window.addEventListener(HOME_EVENT, home);
+    window.addEventListener(SURPRISE_EVENT, draw);
+    return () => { window.removeEventListener(HOME_EVENT, home); window.removeEventListener(SURPRISE_EVENT, draw); };
+  }, [goToNav]);
 
   // Load watchlist when minha-lista is active
   useEffect(() => {
@@ -1102,7 +1113,7 @@ export default function HomeScreen() {
     }
 
     if (focusArea === 'sidebar') {
-      const total = NAV.length + 2;
+      const total = NAV.length + 3;
       if (k === KEY.UP)    { e.preventDefault(); setNavFocus(f => Math.max(0, f - 1)); }
       if (k === KEY.DOWN)  { e.preventDefault(); setNavFocus(f => Math.min(total - 1, f + 1)); }
       if (k === KEY.RIGHT) { e.preventDefault(); setFocusArea('content'); setSideExpanded(false); }
@@ -1266,6 +1277,7 @@ export default function HomeScreen() {
           setSearchTypeFilter(null);
         }}
         onLogout={() => { logout(); navigate('/login', { replace: true }); }}
+        onHelp={openTutorial}
         onSwitchProfile={() => { setActiveProfile(null); navigate('/profile-select', { replace: true }); }}
         activeProfile={activeProfile}
         onMouseEnter={() => setSideHovered(true)}

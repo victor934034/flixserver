@@ -8,6 +8,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../lib/api';
 import Surprise from '../components/Surprise';
+import { openTutorial, onHome, onSurprise } from '../lib/tutorial';
 import { useWatched } from '../lib/watched';
 import ArrivedNotice from '../components/ArrivedNotice';
 import { useAuth } from '../contexts/AuthContext';
@@ -19,7 +20,7 @@ const S = Math.min(W / 1920, H / 1080);
 const r = v => Math.max(1, Math.round(v * S));
 
 const SIDEBAR_SM = r(72);
-const SIDEBAR_LG = r(240);
+const SIDEBAR_LG = r(290);
 // Pôster 2:3 (padrão de capa) em vez de miniatura 16:9 — a maioria dos
 // títulos só tem poster_url preenchido, então cover 16:9 cortava/mostrava
 // vazio boa parte do tempo.
@@ -560,7 +561,7 @@ function EmptyState({ icon, title, desc }) {
 // ─── HomeScreen ───────────────────────────────────────────────────────────────
 export default function HomeScreen({ navigation }) {
   const { logout, user } = useAuth();
-  const { activeProfile } = useProfile();
+  const { activeProfile, clearProfile } = useProfile();
 
   const [activeNav, setActiveNav]       = useState(0);
   const [featured, setFeatured]         = useState(null);
@@ -601,6 +602,8 @@ export default function HomeScreen({ navigation }) {
   // segundo "baixo" extra.
   const navRefs = useRef(NAV.map(() => React.createRef())).current;
   const sairRef = useRef(null);
+  const trocarRef = useRef(null);
+  const ajudaRef = useRef(null);
   const contentLandingRef = useRef(null);
   // Primeiro card focável abaixo do herói (linha 0 do carrossel, ou primeiro
   // item da grade de catálogo) — o botão "Assistir" aponta pra ele
@@ -906,6 +909,12 @@ export default function HomeScreen({ navigation }) {
     return featured;
   }, [activeNav, featured, watchlist, catalogMovies, catalogSeries]);
 
+  // Atalhos do último passo do passo a passo (a ref evita usar uma versão antiga de selectNav)
+  const homeRef = useRef(null);
+  homeRef.current = () => selectNav(0);
+  useEffect(() => onHome(() => homeRef.current()), []);
+  useEffect(() => onSurprise(() => setSurprise(true)), []);
+
   function openDetail(item, type) {
     navigation.navigate('Detail', { item, type: type || item.content_type || 'movie' });
   }
@@ -1035,13 +1044,40 @@ export default function HomeScreen({ navigation }) {
                 onBlur={onSidebarBlur}
                 onPress={() => selectNav(n.idx)}
                 nextFocusUp={i > 0 ? findNodeHandle(navRefs[i - 1].current) : undefined}
-                nextFocusDown={findNodeHandle(i < NAV.length - 1 ? navRefs[i + 1].current : sairRef.current)}
+                nextFocusDown={findNodeHandle(i < NAV.length - 1 ? navRefs[i + 1].current : trocarRef.current)}
                 nextFocusRight={findNodeHandle(contentLandingRef.current)}
               />
             ))}
 
-            <View style={{ height: r(24) }} />
+            <View style={{ height: r(8) }} />
             <View style={s.navDivider} />
+
+            <NavItem
+              ref={trocarRef}
+              icon="people-outline"
+              label="Trocar perfil"
+              labelOp={labelOp}
+              focusable={sidebarOpen}
+              onFocus={onOtherNavFoc}
+              onBlur={onSidebarBlur}
+              onPress={clearProfile}
+              nextFocusUp={findNodeHandle(navRefs[NAV.length - 1].current)}
+              nextFocusDown={findNodeHandle(ajudaRef.current)}
+              nextFocusRight={findNodeHandle(contentLandingRef.current)}
+            />
+            <NavItem
+              ref={ajudaRef}
+              icon="help-circle-outline"
+              label="Como usar o FlixHome"
+              labelOp={labelOp}
+              focusable={sidebarOpen}
+              onFocus={onOtherNavFoc}
+              onBlur={onSidebarBlur}
+              onPress={() => { setSidebarOpen(false); openTutorial(); }}
+              nextFocusUp={findNodeHandle(trocarRef.current)}
+              nextFocusDown={findNodeHandle(sairRef.current)}
+              nextFocusRight={findNodeHandle(contentLandingRef.current)}
+            />
 
             <NavItem
               ref={sairRef}
@@ -1053,7 +1089,7 @@ export default function HomeScreen({ navigation }) {
               onFocus={onOtherNavFoc}
               onBlur={onSidebarBlur}
               onPress={logout}
-              nextFocusUp={findNodeHandle(navRefs[NAV.length - 1].current)}
+              nextFocusUp={findNodeHandle(ajudaRef.current)}
               nextFocusRight={findNodeHandle(contentLandingRef.current)}
             />
             <View style={{ height: r(16) }} />

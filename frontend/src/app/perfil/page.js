@@ -5,6 +5,7 @@ import Navbar from '../../components/Navbar';
 import { getMe, logout } from '../../lib/auth';
 import { PLAY_STORE_URL } from '../../lib/changelog';
 import api from '../../lib/api';
+import { openTutorial } from '../../lib/tutorial';
 import styles from './page.module.css';
 
 const PLAN_LABELS = { free: 'Gratuito', basic: 'Básico', premium: 'Premium', admin: 'Admin' };
@@ -83,6 +84,9 @@ export default function PerfilPage() {
             <a href="/autorizar-tv" className={styles.link}>
               <span className={styles.linkIcon}>📺</span> Autorizar TV
             </a>
+            <button type="button" className={styles.link} onClick={openTutorial}>
+              <span className={styles.linkIcon}>❓</span> Como usar o FlixHome
+            </button>
             <a href="/subscription" className={styles.link}>
               <span className={styles.linkIcon}>💳</span> Assinatura
             </a>

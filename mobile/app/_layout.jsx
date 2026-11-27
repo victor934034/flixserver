@@ -12,6 +12,7 @@ import { DownloadProvider } from '../contexts/DownloadContext';
 import { ParentalProvider } from '../contexts/ParentalContext';
 import { ProfileProvider, useProfile } from '../contexts/ProfileContext';
 import WhatsNewModal from '../components/WhatsNewModal';
+import TutorialHost from '../components/TutorialHost';
 import api from '../lib/api';
 
 const isExpoGo = Constants.executionEnvironment === 'storeClient';
@@ -228,7 +229,12 @@ function AppGate() {
 
   // So mostra "novidades" depois de logado e com perfil escolhido - senao
   // o modal aparece por cima da tela de login/selecao de perfil.
-  return token && activeProfile ? <WhatsNewModal /> : null;
+  // O passo a passo vem antes das novidades (que esperam ele decidir se abre).
+  return token && activeProfile ? (
+    <TutorialHost userId={user?.id} name={activeProfile.name}>
+      <WhatsNewModal />
+    </TutorialHost>
+  ) : null;
 }
 
 function RootLayout() {

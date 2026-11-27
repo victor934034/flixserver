@@ -5,8 +5,11 @@ import { useAuth } from '../contexts/AuthContext.jsx';
 
 // Novidades mostradas na primeira abertura de cada versão.
 // A CADA versão com mudança para o usuário, troque VERSION e ITEMS.
-const VERSION = '1.2.1';
+export const VERSION = '1.3.0';
 const ITEMS = [
+  'Corrigido: dezenas de filmes que não davam play no Dublado ou no Legendado.',
+  'Passo a passo novo: veja em um minuto como usar o FlixHome.',
+  'Para abrir: menu lateral, “Como usar o FlixHome”.',
   'Corrigido: episódio já assistido recomeça do início, em vez de abrir no final.',
   'Pular abertura e Próximo episódio aparecem na hora certa nas séries.',
   'Marque como já assistido, e no Assistir juntos agora dá para entrar com o código.',

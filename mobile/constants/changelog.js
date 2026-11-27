@@ -5,6 +5,14 @@
 // REGRA: toda publicação com mudança para o usuário ganha entrada nova aqui.
 export const CHANGELOG = [
   {
+    version: '1.3.0',
+    items: [
+      'Corrigido: dezenas de filmes que não davam play no Dublado ou no Legendado.',
+      '👋 Passo a passo novo: veja em um minuto como usar o FlixHome.',
+      'Para abrir: aba Perfil → “Como usar o FlixHome”.',
+    ],
+  },
+  {
     version: '1.2.1',
     items: [
       'Corrigido: o “Pular abertura” e o “Próximo episódio” não ficam mais em cima da linha do tempo.',

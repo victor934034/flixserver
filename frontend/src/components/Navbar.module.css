@@ -187,3 +187,19 @@
   min-width: 18px; height: 18px; padding: 0 5px; margin-left: 5px; border-radius: 9px;
   background: var(--accent); color: #fff; font-size: 0.68rem; font-weight: 700; vertical-align: middle;
 }
+
+/* Menu do perfil */
+.userMenu { position: relative; }
+button.profileSwitch { background: none; border: 0; cursor: pointer; font-family: inherit; }
+.caret { font-size: 0.7rem; color: var(--text-secondary); }
+.menu {
+  position: absolute; top: calc(100% + 8px); right: 0; width: 240px; padding: 8px; z-index: 200;
+  display: flex; flex-direction: column; background: #1f1f1f; border: 1px solid var(--border);
+  border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,0.6);
+}
+.menu a, .menu button {
+  padding: 10px 12px; border: 0; border-radius: 8px; background: none; text-align: left;
+  color: #e5e5e5; font-size: 0.9rem; font-weight: 600; font-family: inherit; cursor: pointer;
+}
+.menu a:hover, .menu button:hover { background: rgba(255,255,255,0.08); }
+.menu hr { border: 0; border-top: 1px solid var(--border); margin: 6px 0; }

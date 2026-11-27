@@ -1,9 +1,10 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Modal, View, Text, ScrollView, TouchableOpacity, Pressable, ActivityIndicator, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import CachedImage from './CachedImage';
 import api from '../lib/api';
+import { onSurprise } from '../lib/tutorial';
 
 const GENRES = ['Ação', 'Aventura', 'Animação', 'Comédia', 'Crime', 'Documentário', 'Drama', 'Fantasia', 'Ficção Científica', 'Mistério', 'Romance', 'Terror', 'Thriller'];
 
@@ -20,6 +21,9 @@ export default function SurpriseSheet() {
 
   const pickGenre = (g) => { setGenre(g); setMovie(null); setError(''); drawn.current = []; };
   const close = () => setOpen(false);
+
+  // Atalho "Surpreenda-me" do último passo do passo a passo
+  useEffect(() => onSurprise(() => { pickGenre(''); setOpen(true); }), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const draw = async () => {
     if (busy) return;

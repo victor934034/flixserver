@@ -5,6 +5,14 @@ export const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com
 
 export const CHANGELOG = [
   {
+    version: '1.3.0',
+    items: [
+      'Corrigido: dezenas de filmes que não davam play no Dublado ou no Legendado.',
+      '👋 Passo a passo novo: veja em um minuto como usar o FlixHome.',
+      'Para abrir: no menu do seu perfil → “Como usar o FlixHome”.',
+    ],
+  },
+  {
     version: '1.2.1',
     items: [
       'Corrigido: o “Pular abertura” e o “Próximo episódio” não ficam mais em cima da linha do tempo.',

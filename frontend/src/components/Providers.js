@@ -5,6 +5,7 @@ import ProfileGate from './ProfileGate';
 import BrowserNotice from './BrowserNotice';
 import WhatsNew from './WhatsNew';
 import ArrivedNotice from './ArrivedNotice';
+import TutorialHost from './TutorialHost';
 
 export default function Providers({ children }) {
   return (
@@ -13,8 +14,10 @@ export default function Providers({ children }) {
         <ProfileGate />
         {children}
         <BrowserNotice />
-        <ArrivedNotice />
-        <WhatsNew />
+        <TutorialHost>
+          <ArrivedNotice />
+          <WhatsNew />
+        </TutorialHost>
       </ParentalProvider>
     </ProfileProvider>
   );

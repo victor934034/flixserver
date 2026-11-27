@@ -7,7 +7,8 @@ import { useFonts } from 'expo-font';
 import { Ionicons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
 import TogetherInvites from './src/components/TogetherInvites';
-import WhatsNew from './src/components/WhatsNew';
+import WhatsNew, { VERSION as CHANGELOG_VERSION } from './src/components/WhatsNew';
+import TutorialHost from './src/components/TutorialHost';
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { ProfileProvider, useProfile } from './src/contexts/ProfileContext';
 
@@ -51,11 +52,13 @@ function ProfileGate({ navigation }) {
 function AppNavigator() {
   const { user, loading } = useAuth();
   const navRef = React.useRef(null);
+  const [route, setRoute] = React.useState(null);
+  const trackRoute = () => setRoute(navRef.current?.getCurrentRoute()?.name || null);
   if (loading) return null;
 
   return (
     <>
-    <NavigationContainer theme={navTheme} ref={navRef}>
+    <NavigationContainer theme={navTheme} ref={navRef} onReady={trackRoute} onStateChange={trackRoute}>
       <Stack.Navigator
         screenOptions={{
           headerShown: false,
@@ -76,7 +79,9 @@ function AppNavigator() {
       </Stack.Navigator>
     </NavigationContainer>
     <TogetherInvites navigationRef={navRef} />
-    <WhatsNew />
+    <TutorialHost atHome={route === 'Home'} version={CHANGELOG_VERSION}>
+      <WhatsNew />
+    </TutorialHost>
     </>
   );
 }

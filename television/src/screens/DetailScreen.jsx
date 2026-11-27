@@ -507,7 +507,7 @@ export default function DetailScreen({ navigation, route }) {
                   icon="people"
                   onPress={() => setChooser(buildMovieParams(versions[0]?.key))}
                 />
-                {!!continueId && <ActionBtn label="Tirar do Continuar" icon="close" onPress={removeContinue} />}
+                {!!continueId && <ActionBtn label="Tirar do Continuar assistindo" icon="close" onPress={removeContinue} />}
                 {watched.enabled && (
                   <ActionBtn
                     label={watched.has(watchedType(), item.id) ? 'Já assisti' : 'Marcar como assistido'}
@@ -540,7 +540,7 @@ export default function DetailScreen({ navigation, route }) {
                   icon="people"
                   onPress={() => setChooser(buildEpisodeParams(firstEp))}
                 />
-                {!!continueId && <ActionBtn label="Tirar do Continuar" icon="close" onPress={removeContinue} />}
+                {!!continueId && <ActionBtn label="Tirar do Continuar assistindo" icon="close" onPress={removeContinue} />}
                 {watched.enabled && (
                   <ActionBtn
                     label={watched.has(watchedType(), item.id) ? 'Já assisti' : 'Marcar como assistido'}

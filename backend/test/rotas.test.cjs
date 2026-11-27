@@ -61,7 +61,7 @@ stub('src/services/titleSearch.js', { searchIds: async () => [], orderByIds: x =
 process.env.JWT_SECRET = 'x'.repeat(40); process.env.FRONTEND_URL = 'https://exemplo.test';
 const express = req('express'), jwt = req('jsonwebtoken');
 const app = express(); app.use(express.json());
-for (const name of ['movies', 'recommendations', 'history', 'referrals', 'suggestions', 'watched', 'episodes']) app.use('/api/' + name, require(`${BE}/src/routes/${name}.js`));
+for (const name of ['movies', 'recommendations', 'history', 'referrals', 'suggestions', 'watched', 'episodes', 'auth']) app.use('/api/' + name, require(`${BE}/src/routes/${name}.js`));
 const { rewardReferrer } = require(`${BE}/src/services/referrals.js`);
 const alerts = require(`${BE}/src/services/suggestionAlerts.js`);
 const now = new Date().toISOString(), old = '2020-01-01T00:00:00.000Z';
@@ -231,6 +231,28 @@ const U = i => `00000000-0000-0000-0000-00000000000${i}`;
   assert.equal(introCalls, callsAtBlock); // respeita o "pare" do IntroDB
   axios.get = realGet;
   console.log('ok abertura: guarda o resultado, respeita correção manual, limite e falhas');
+
+  // Passo a passo: só conta nova, uma vez só
+  const meta = {};
+  supabase.auth = { admin: {
+    getUserById: async id => ({ data: { user: { user_metadata: meta[id] || {} } }, error: null }),
+    updateUserById: async (id, u) => { meta[id] = { ...meta[id], ...u.user_metadata }; return { data: {}, error: null }; },
+  } };
+  db.users = [{ id: U(1), created_at: new Date('2026-12-01').toISOString() }, { id: U(2), created_at: old }];
+  assert.equal((await call('GET', '/auth/tutorial')).status, 401);
+  assert.equal((await call('GET', '/auth/tutorial', U(1))).body.show, true);
+  assert.equal((await call('GET', '/auth/tutorial', U(2))).body.show, false);
+  assert.equal((await call('POST', '/auth/tutorial/seen', U(1))).status, 200);
+  assert.equal((await call('GET', '/auth/tutorial', U(1))).body.show, false);
+  console.log('ok passo a passo: abre só para conta nova e não repete');
+
+  // Conversão de .mkv para .mp4: o arquivo dual muda no Dublado e no Legendado
+  const { replaceMediaUrl } = require(`${BE}/src/services/mediaLinks.js`);
+  db.movies = [{ id: U(1), file_dubbing: 'a.mkv', file_subtitled: 'a.mkv', file_cinema: 'outro.mkv' }];
+  db.episodes = [{ id: 'e1', file_dubbing: 'a.mkv' }];
+  await replaceMediaUrl(supabase, 'a.mkv', 'a.mp4');
+  assert.deepEqual([db.movies[0].file_dubbing, db.movies[0].file_subtitled, db.movies[0].file_cinema, db.episodes[0].file_dubbing], ['a.mp4', 'a.mp4', 'outro.mkv', 'a.mp4']);
+  console.log('ok conversão: atualiza todos os campos que usavam o arquivo antigo');
 
   srv.close(); console.log('TODOS OS TESTES PASSARAM');
 })().catch(e => { console.error(e); process.exit(1); });

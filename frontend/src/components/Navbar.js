@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { getMe, logout } from '../lib/auth';
 import api from '../lib/api';
 import { useProfile, getAvatar } from '../contexts/ProfileContext';
+import { openTutorial } from '../lib/tutorial';
 import styles from './Navbar.module.css';
 
 const isUrl = (s) => typeof s === 'string' && s.startsWith('http');
@@ -24,6 +25,18 @@ export default function Navbar() {
   const wrapRef = useRef(null);
   const { activeProfile } = useProfile();
   const [chatUnread, setChatUnread] = useState(0);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+
+  // Menu do perfil: fecha ao clicar fora ou com Esc
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    const outside = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); };
+    const esc = (e) => { if (e.key === 'Escape') setMenuOpen(false); };
+    document.addEventListener('mousedown', outside);
+    document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('mousedown', outside); document.removeEventListener('keydown', esc); };
+  }, [menuOpen]);
 
   useEffect(() => {
     getMe().then(setUser).catch(() => setUser(null));
@@ -78,6 +91,17 @@ export default function Navbar() {
     setShowSug(false);
     setSearch('');
     router.push(item._type === 'series' ? `/serie/${item.id}` : `/filme/${item.id}`);
+  }
+
+  // Avatar do perfil ativo (ou a inicial da conta)
+  function renderAvatar() {
+    if (activeProfile && isUrl(activeProfile.avatar)) return <img src={activeProfile.avatar} alt="" className={styles.profileAvatarImg} />;
+    const av = activeProfile ? getAvatar(activeProfile.avatar) : null;
+    return (
+      <span className={styles.profileAvatarEmoji} style={{ background: av ? av.color : '#333' }}>
+        {av ? av.emoji : (user?.name?.[0] || '').toUpperCase()}
+      </span>
+    );
   }
 
   const isLoggedIn = !!user;
@@ -139,27 +163,26 @@ export default function Navbar() {
         </div>
 
         {isLoggedIn ? (
-          <div className={styles.userMenu}>
-            {activeProfile && (
-              <Link href="/perfis" className={styles.profileSwitch} title="Trocar perfil">
-                {isUrl(activeProfile.avatar) ? (
-                  <img src={activeProfile.avatar} alt="" className={styles.profileAvatarImg} />
-                ) : (
-                  <span className={styles.profileAvatarEmoji} style={{ background: getAvatar(activeProfile.avatar).color }}>
-                    {getAvatar(activeProfile.avatar).emoji}
-                  </span>
-                )}
-                <span className={styles.profileSwitchName}>{activeProfile.name}</span>
-              </Link>
-            )}
-            {isPending
-              ? <span className={styles.userNamePending} />
-              : <Link href="/perfil" className={styles.userName}>{user.name?.split(' ')[0]}</Link>
-            }
+          <div className={styles.userMenu} ref={menuRef}>
             {!isPending && user.is_admin && (
               <Link href="/admin" className={styles.adminLink}>Admin</Link>
             )}
-            <button onClick={logout} className={styles.logoutBtn}>Sair</button>
+            <button type="button" className={styles.profileSwitch} onClick={() => setMenuOpen(o => !o)} aria-haspopup="menu" aria-expanded={menuOpen} aria-label="Menu do perfil">
+              {renderAvatar()}
+              <span className={styles.profileSwitchName}>{activeProfile?.name || (isPending ? '' : user.name?.split(' ')[0])}</span>
+              <span className={styles.caret}>▾</span>
+            </button>
+            {menuOpen && (
+              <div className={styles.menu} role="menu" onClick={() => setMenuOpen(false)}>
+                <Link href="/perfil" role="menuitem">Minha conta</Link>
+                <Link href="/perfis" role="menuitem">Trocar perfil</Link>
+                <Link href="/autorizar-tv" role="menuitem">Autorizar TV</Link>
+                <Link href="/suporte" role="menuitem">Suporte</Link>
+                <button type="button" role="menuitem" onClick={openTutorial}>ⓘ Como usar o FlixHome</button>
+                <hr />
+                <button type="button" role="menuitem" onClick={logout}>Sair</button>
+              </div>
+            )}
           </div>
         ) : (
           <Link href="/login" className={styles.loginBtn}>Entrar</Link>

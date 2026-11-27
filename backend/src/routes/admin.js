@@ -1,4 +1,5 @@
 const router = require('express').Router();
+const { replaceMediaUrl } = require('../services/mediaLinks');
 const { supabase, fetchAll } = require('../services/supabase');
 const { adminMiddleware } = require('../middleware/admin');
 const { sendPushToAll } = require('../services/notifications');
@@ -1417,8 +1418,11 @@ router.post('/audio-fix/fix', async (req, res) => {
   (async () => {
     const { getDirectDownloadInfo, uploadFileFromPath, deleteFile, getLatestFileVersion } = require('../services/backblaze');
 
+    // O mesmo arquivo dual aparece duas vezes na lista (Dublado e Legendado): converte uma vez só
+    const converted = new Set();
     for (const item of items) {
       if (item.needsTranscode) { job.skipped = (job.skipped || 0) + 1; continue; } // HEVC: pula por enquanto
+      if (converted.has(item.url)) { job.done++; continue; }
       const baseName = path.basename(item.b2Name, path.extname(item.b2Name));
       const inputExt = path.extname(item.b2Name) || '.mp4';
       const outExt = item.needsRemux ? '.mp4' : inputExt;
@@ -1442,15 +1446,19 @@ router.post('/audio-fix/fix', async (req, res) => {
           : item.b2Name;
 
         await uploadFileFromPath(outputTmp, newB2Name, 'video/mp4');
-        if (oldVer) await deleteFile(oldVer.fileId, oldVer.fileName);
 
+        // Primeiro o banco, em todos os campos que usam este arquivo; só depois apaga o original
         if (newB2Name !== item.b2Name) {
           const CDN = process.env.CDN_BASE_URL || '';
           const newUrl = CDN + '/' + newB2Name.split('/').map(encodeURIComponent).join('/');
+          await replaceMediaUrl(supabase, item.url, newUrl);
           const table = item.type === 'movie' ? 'movies' : 'episodes';
-          await supabase.from(table).update({ [item.field]: newUrl }).eq('id', item.id);
+          const { error } = await supabase.from(table).update({ [item.field]: newUrl }).eq('id', item.id);
+          if (error) throw new Error(error.message);
         }
+        if (oldVer) await deleteFile(oldVer.fileId, oldVer.fileName);
 
+        converted.add(item.url);
         job.done++;
       } catch (e) {
         job.errors++;

@@ -13,6 +13,7 @@ import CachedImage from '../../components/CachedImage';
 import { usePrefs, setPref } from '../../lib/prefs';
 import SupportBanner from '../../components/SupportBanner';
 import api from '../../lib/api';
+import { openTutorial } from '../../lib/tutorial';
 
 const APP_VERSION = Constants.expoConfig?.version ?? '1.0.5';
 
@@ -261,6 +262,13 @@ export default function PerfilScreen() {
               />
             </>
           )}
+          <View style={styles.divider} />
+          <MenuItem
+            icon="compass-outline"
+            label="Como usar o FlixHome"
+            desc="Veja o passo a passo de novo"
+            onPress={openTutorial}
+          />
           <View style={styles.divider} />
           <MenuItem
             icon="help-circle-outline"

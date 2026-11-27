@@ -269,6 +269,38 @@ router.post('/reset-password', async (req, res) => {
   }
 });
 
+// ─── Passo a passo para novos usuários ───────────────────────────────────────
+// O "já viu" fica na conta (metadados do Supabase Auth, sem migração), para não
+// repetir na TV depois de visto no celular. Só abre sozinho para contas criadas
+// a partir desta data; quem já usa o app reabre pelo Perfil / menu.
+const TUTORIAL_SINCE = Date.parse('2026-11-26T00:00:00Z');
+
+router.get('/tutorial', authMiddleware, async (req, res) => {
+  try {
+    const { data: user } = await supabase.from('users').select('created_at').eq('id', req.user.id).maybeSingle();
+    if (!user || !(Date.parse(user.created_at) >= TUTORIAL_SINCE)) return res.json({ show: false });
+    const { data, error } = await supabase.auth.admin.getUserById(req.user.id);
+    if (error) throw error;
+    res.json({ show: !data?.user?.user_metadata?.tutorial_seen_at });
+  } catch (err) {
+    // Na dúvida não abre: melhor do que repetir a cada entrada
+    console.error('[auth] tutorial:', err.message);
+    res.json({ show: false });
+  }
+});
+
+router.post('/tutorial/seen', authMiddleware, async (req, res) => {
+  try {
+    const { error } = await supabase.auth.admin.updateUserById(req.user.id, {
+      user_metadata: { tutorial_seen_at: new Date().toISOString() },
+    });
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /auth/me
 router.get('/me', authMiddleware, async (req, res) => {
   try {

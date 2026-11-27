@@ -1,4 +1,5 @@
 const router = require('express').Router();
+const { replaceMediaUrl } = require('../services/mediaLinks');
 const { fetchAll } = require('../services/supabase');
 const multer = require('multer');
 const { execFile } = require('child_process');
@@ -1184,6 +1185,7 @@ router.post('/fix-series-audio', async (req, res) => {
         const result = await uploadFileFromPath(tmpOut, finalName, badContainer ? 'video/mp4' : contentTypeFor(ext));
 
         if (result.cdnUrl !== item.cdnUrl) {
+          await replaceMediaUrl(supabase, item.cdnUrl, result.cdnUrl);
           await supabase.from('episodes').update({ [item.field]: result.cdnUrl }).eq('id', item.id);
         }
         job.done++;
