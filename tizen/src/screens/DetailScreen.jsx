@@ -4,6 +4,7 @@ import api, { moviesAPI, seriesAPI, watchlistAPI, likesAPI } from '../api/index.
 import { startTogetherWeb, joinTogetherWeb } from '../lib/together.js';
 import TogetherChooser from '../components/TogetherChooser.jsx';
 import { useWatched } from '../lib/watched.js';
+import { resumeFrom } from '../lib/skipRules.js';
 import { prefetchCache } from '../App.jsx';
 import { KEY, useKeyDown } from '../hooks/useNav.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
@@ -298,7 +299,7 @@ export default function DetailScreen() {
         (r.data || []).forEach(h => {
           if (h.episode_id && h.duration > 0) {
             progressMap[h.episode_id] = h.progress / h.duration;
-            secondsMap[h.episode_id] = h.progress;
+            secondsMap[h.episode_id] = resumeFrom(h.progress, h.duration, h.completed);
           }
         });
         setEpProgress(progressMap);

@@ -241,9 +241,8 @@ export default function PlayerScreen() {
   const showSkipIntro = introVisible(skipTimes, posSec, durSec);
   // Com os créditos conhecidos o aviso aparece na hora certa; sem eles, nos últimos 30s
   const creditsAt = creditsStart(skipTimes, durSec);
-  const showNextEpCard = nextEp && (creditsAt !== null
-    ? posSec >= creditsAt || isEnded
-    : (remainSec > 0 && remainSec < 30) || isEnded);
+  const nearEnd = (durSec > 0 && remainSec > 0 && remainSec < 30) || isEnded;
+  const showNextEpCard = nextEp && ((creditsAt !== null && posSec >= creditsAt) || nearEnd);
   const showNextMovieCard = !nextEp && type !== 'episode' && nextMovie && ((remainSec > 0 && remainSec < 60) || isEnded);
   const showNextCard = showNextEpCard;
 
@@ -256,6 +255,8 @@ export default function PlayerScreen() {
   const [subtitleCues, setSubtitleCues] = useState([]);
   const [speed, setSpeed] = useState(1);
   const [ctrlVisible, setCtrlVisible] = useState(true);
+  // Botões flutuantes (pular abertura, próximo): com os controles abertos ficam acima da linha do tempo
+  const floatingBottom = Math.max(insets.bottom, 14) + (ctrlVisible ? 124 : 24);
   const [locked, setLocked] = useState(false);
   const [brightness, setBrightness] = useState(0.8);
   const [sheet, setSheet] = useState(null);
@@ -512,10 +513,11 @@ export default function PlayerScreen() {
 
   // Next ep countdown
   useEffect(() => {
-    // nos créditos dá mais tempo pra cancelar (pode ter cena depois deles)
-    if (showNextCard && nextEp && nextCountdown === null) setNextCountdown(creditsAt !== null ? 10 : 5);
-    if (!showNextCard) { setNextCountdown(null); clearTimeout(nextCountRef.current); }
-  }, [showNextCard]);
+    // A troca automática só começa no fim de verdade. Nos créditos aparece o botão:
+    // se o tempo dos créditos estiver errado, o episódio não é cortado sozinho.
+    if (showNextCard && nearEnd && nextEp && nextCountdown === null) setNextCountdown(5);
+    if (!showNextCard || !nearEnd) { setNextCountdown(null); clearTimeout(nextCountRef.current); }
+  }, [showNextCard, nearEnd]);
 
   useEffect(() => {
     if (nextCountdown === null) return;
@@ -1136,18 +1138,6 @@ export default function PlayerScreen() {
             <View style={{ width: 44 }} />
           </View>
 
-          {/* SKIP INTRO */}
-          {showSkipIntro && (
-            <TouchableOpacity
-              style={styles.skipIntroBtn}
-              onPress={() => seekTo(skipTimes.intro_end)}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.skipIntroText}>Pular Abertura</Text>
-              <Ionicons name="play-skip-forward-outline" size={13} color="#fff" />
-            </TouchableOpacity>
-          )}
-
           {/* BOTTOM */}
           <View style={[styles.bottomArea, { paddingBottom: Math.max(insets.bottom, 14) }]}>
             {/* Progress bar */}
@@ -1243,9 +1233,21 @@ export default function PlayerScreen() {
         </TouchableOpacity>
       )}
 
+      {/* ── PULAR ABERTURA ── fora dos controles: aparece mesmo com eles escondidos */}
+      {showSkipIntro && !locked && !sheet && status !== 'error' && (
+        <TouchableOpacity
+          style={[styles.skipIntroBtn, { bottom: floatingBottom }]}
+          onPress={() => seekTo(skipTimes.intro_end)}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.skipIntroText}>Pular Abertura</Text>
+          <Ionicons name="play-skip-forward-outline" size={13} color="#fff" />
+        </TouchableOpacity>
+      )}
+
       {/* ── PRÓXIMO EPISÓDIO ── */}
       {showNextCard && !locked && !sheet && (
-        <View style={[styles.nextCard, { bottom: Math.max(insets.bottom, 14) + 78 }]}>
+        <View style={[styles.nextCard, { bottom: floatingBottom }]}>
           {nextEp.thumbnail_url && <Image source={{ uri: nextEp.thumbnail_url }} style={styles.nextThumb} />}
           <View style={styles.nextInfo}>
             <Text style={styles.nextLabel}>PRÓXIMO EPISÓDIO</Text>
@@ -1267,7 +1269,7 @@ export default function PlayerScreen() {
 
       {/* ── PRÓXIMO FILME ── */}
       {showNextMovieCard && !locked && !sheet && nextMovie && (
-        <View style={[styles.nextCard, { bottom: Math.max(insets.bottom, 14) + 78 }]}>
+        <View style={[styles.nextCard, { bottom: floatingBottom }]}>
           {nextMovie.poster_url && <Image source={{ uri: nextMovie.poster_url }} style={styles.nextThumb} />}
           <View style={styles.nextInfo}>
             <Text style={styles.nextLabel}>EM SEGUIDA</Text>
@@ -1663,7 +1665,7 @@ const styles = StyleSheet.create({
   playPauseBtn: { width: 76, height: 76, borderRadius: 38, backgroundColor: 'rgba(255,255,255,0.16)', alignItems: 'center', justifyContent: 'center' },
 
   skipIntroBtn: {
-    position: 'absolute', right: 20, bottom: 90,
+    position: 'absolute', right: 20,
     flexDirection: 'row', alignItems: 'center', gap: 8,
     backgroundColor: 'rgba(0,0,0,0.55)',
     borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.7)',

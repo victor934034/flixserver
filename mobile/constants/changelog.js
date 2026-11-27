@@ -5,6 +5,14 @@
 // REGRA: toda publicação com mudança para o usuário ganha entrada nova aqui.
 export const CHANGELOG = [
   {
+    version: '1.2.1',
+    items: [
+      'Corrigido: o “Pular abertura” e o “Próximo episódio” não ficam mais em cima da linha do tempo.',
+      'Corrigido: episódio já assistido recomeça do início, em vez de abrir no final.',
+      'O episódio não pula mais sozinho nos créditos, só quando termina.',
+    ],
+  },
+  {
     version: '1.2.0',
     items: [
       '⏭️ “Pular abertura” e “Próximo episódio” aparecem na hora certa nas séries.',

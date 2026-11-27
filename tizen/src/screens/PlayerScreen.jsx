@@ -711,7 +711,7 @@ export default function PlayerScreen() {
       onMouseMove={() => { showControls(); if (!paused) scheduleHide(); }}
     >
       {prompt && (
-        <div onClick={runPrompt} style={{ position: 'absolute', right: 70, bottom: 230, zIndex: 60, cursor: 'pointer', textAlign: 'right' }}>
+        <div onClick={runPrompt} style={{ position: 'absolute', right: 70, bottom: 300, zIndex: 60, cursor: 'pointer', textAlign: 'right' }}>
           <div style={{ display: 'inline-block', background: '#fff', color: '#0a0a0a', borderRadius: 10, padding: '18px 34px', fontSize: 24, fontWeight: 900, boxShadow: '0 10px 40px rgba(0,0,0,0.6)' }}>
             {prompt === 'intro' ? 'Pular abertura' : 'Próximo episódio'}  ⏭
           </div>

@@ -877,7 +877,7 @@ export default function PlayerScreen({ navigation, route }) {
       </Animated.View>
 
       {!!prompt && (
-        <View style={{ position: 'absolute', right: r(70), bottom: r(240) }}>
+        <View style={{ position: 'absolute', right: r(70), bottom: r(320) }}>
           <Pressable
             hasTVPreferredFocus
             onPress={() => {

@@ -11,6 +11,7 @@ import api from '../../lib/api';
 import { startTogether } from '../../lib/togetherNav';
 import TogetherChooser from '../../components/TogetherChooser';
 import WatchedButton from '../../components/WatchedButton';
+import { resumeFrom } from '../../lib/skipRules';
 import { useDownloads } from '../../contexts/DownloadContext';
 import { useParental } from '../../contexts/ParentalContext';
 import { useProfile } from '../../contexts/ProfileContext';
@@ -130,7 +131,7 @@ export default function SerieDetail() {
         // episodio DESTA serie ainda em andamento e o que "continua".
         (r.data || []).forEach(h => {
           const epId = h.episode_id || (h.content_type === 'episode' ? h.content_id : null);
-          if (epId && h.progress > 5 && !h.completed) {
+          if (epId && resumeFrom(h.progress, h.duration, h.completed) > 0) {
             map[String(epId)] = h.progress;
             if (!resume && inSeries.has(String(epId))) resume = String(epId);
           }

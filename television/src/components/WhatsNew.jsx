@@ -6,8 +6,9 @@ import { useProfile } from '../contexts/ProfileContext';
 
 // Novidades mostradas na primeira abertura de cada versão.
 // A CADA versão com mudança para o usuário, troque VERSION e ITEMS.
-const VERSION = '1.2.0';
+const VERSION = '1.2.1';
 const ITEMS = [
+  'Corrigido: episódio já assistido recomeça do início, em vez de abrir no final.',
   'Pular abertura e Próximo episódio aparecem na hora certa nas séries.',
   'Marque como já assistido, e no Assistir juntos agora dá para entrar com o código.',
   'Surpreenda-me: botão no topo do Início sorteia um filme pelo gênero.',

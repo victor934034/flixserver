@@ -11,6 +11,7 @@ import { getToken } from '../../../lib/auth';
 import { useProfile } from '../../../contexts/ProfileContext';
 import { useParental } from '../../../contexts/ParentalContext';
 import styles from './page.module.css';
+import { resumeFrom } from '../../../lib/skipRules';
 
 export default function SeriePage() {
   const { id } = useParams();
@@ -24,6 +25,7 @@ export default function SeriePage() {
   const [error, setError] = useState(null);
   const [watchlistId, setWatchlistId] = useState(null);
   const [epProgress, setEpProgress] = useState({}); // episode_id -> segundos assistidos
+  const [epResume, setEpResume] = useState({}); // de onde retomar (0 = do começo)
   const [nextUp, setNextUp] = useState(null); // episódio sugerido pro botão "Assistir"
   const [seasonInfo, setSeasonInfo] = useState({}); // season_number -> { name, overview, poster_url }
 
@@ -56,6 +58,7 @@ export default function SeriePage() {
           const forThisSeries = (r.data || []).filter(h => h.content_type === 'episode' && h.series_id === id);
           const map = {};
           forThisSeries.forEach(h => { map[h.content_id] = h.progress; });
+          setEpResume(Object.fromEntries(forThisSeries.map(h => [h.content_id, resumeFrom(h.progress, h.duration, h.completed)])));
           setEpProgress(map);
           const inProgress = forThisSeries.find(h => !h.completed && h.progress > 5);
           if (inProgress) setNextUp({ episode_id: inProgress.content_id, progress: inProgress.progress });
@@ -79,6 +82,7 @@ export default function SeriePage() {
 
   function saveProgress(current, total, ep) {
     if (!current || !total || !ep) return;
+    setEpResume(m => ({ ...m, [ep.id]: resumeFrom(Math.floor(current), Math.floor(total)) }));
     api.post('/history', {
       content_type: 'episode',
       content_id: ep.id,
@@ -92,7 +96,7 @@ export default function SeriePage() {
   async function playEpisode(ep) {
     const allowed = await checkAccess(serie);
     if (!allowed) return;
-    setPlayingResume(epProgress[ep.id] > 5 ? epProgress[ep.id] : 0);
+    setPlayingResume(epResume[ep.id] || 0);
     setPlaying(ep);
   }
 
