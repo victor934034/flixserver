@@ -8,5 +8,7 @@
   "icon": "icon.png",
   "largeIcon": "icon_large.png",
   "transparent": false,
-  "disableBackHistoryAPI": true
+  "disableBackHistoryAPI": true,
+  "iconColor": "#030303",
+  "bgColor": "#030303"
 }

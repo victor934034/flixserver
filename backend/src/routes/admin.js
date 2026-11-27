@@ -5,6 +5,7 @@ const { adminMiddleware } = require('../middleware/admin');
 const { sendPushToAll } = require('../services/notifications');
 
 router.use(adminMiddleware);
+router.use('/audio-51', require('./audio51'));
 
 
 // ---- helpers da lista de conteúdo (filmes/séries) ----
@@ -1255,6 +1256,7 @@ const fs = require('fs');
 const { spawn: spawnProc } = require('child_process');
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 const ffprobePath = require('ffprobe-static').path;
+const { LAYOUTS } = require('../services/aacRepair');
 
 const AAC_OK    = new Set(['aac', 'mp3', 'opus', 'vorbis', 'flac', 'pcm_s16le', 'pcm_s24le']);
 const VIDEO_OK  = new Set(['h264', 'vp8', 'vp9', 'av1', 'theora']);
@@ -1310,7 +1312,9 @@ function remuxFile(inputPath, tmpPath, { fixAudio, fixContainer }) {
   args.push('-map', '0:v', '-map', '0:a');
   args.push('-c:v', 'copy');
   if (fixAudio) {
-    args.push('-c:a', 'aac', '-b:a', '192k'); // sem -ac 2 para preservar canais originais
+    // Surround vira o 5.1 padrão: o 5.1 "(side)" gerava AAC fora do padrão
+    // (channelConfig 0), que o decodificador de vários Androids recusa
+    args.push('-c:a', 'aac', '-profile:a', 'aac_low', '-b:a', '384k', '-filter:a', LAYOUTS);
   } else {
     args.push('-c:a', 'copy');
   }

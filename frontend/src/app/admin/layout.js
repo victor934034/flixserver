@@ -25,6 +25,7 @@ const NAV = [
   { href: '/admin/iptv', label: 'IPTV' },
   { href: '/admin/pagamentos', label: 'Assinaturas' },
   { href: '/admin/seguranca', label: 'Bloqueios e segurança' },
+  { href: '/admin/audio-51', label: 'Áudio com defeito' },
   { href: '/admin/ajuda', label: 'Ajuda/FAQ' },
   { href: '/admin/configuracoes', label: 'Configurações e banners' },
 ];

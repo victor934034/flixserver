@@ -254,5 +254,23 @@ const U = i => `00000000-0000-0000-0000-00000000000${i}`;
   assert.deepEqual([db.movies[0].file_dubbing, db.movies[0].file_subtitled, db.movies[0].file_cinema, db.episodes[0].file_dubbing], ['a.mp4', 'a.mp4', 'outro.mkv', 'a.mp4']);
   console.log('ok conversão: atualiza todos os campos que usavam o arquivo antigo');
 
+  // Áudio com defeito: só a faixa AAC com channelConfig 0 é convertida
+  const aac = require(`${BE}/src/services/aacRepair.js`);
+  assert.equal(aac.channelConfigOf('11b0'), 6); // AAC LC 48 kHz, 5.1 padrão
+  assert.equal(aac.channelConfigOf('1180'), 0); // canais descritos à parte: o defeito
+  const info = { duration: 100, videos: 1, audio: [
+    { codec: 'aac', channels: 6, config: 0, broken: true, language: 'por' },
+    { codec: 'aac', channels: 6, config: 6, broken: false, language: 'eng' },
+  ] };
+  const argv = aac.buildArgs('a', 'b', info).join(' ');
+  assert.ok(argv.includes('-c:a:0 aac') && !argv.includes('-c:a:1') && argv.includes('-c copy') && !argv.includes('-ac '));
+  const good = { ...info, audio: [{ ...info.audio[0], config: 6, broken: false }, info.audio[1]] };
+  assert.equal(aac.verify(info, good), null);
+  assert.match(aac.verify(info, info), /continua/);
+  assert.match(aac.verify(info, { ...good, audio: [good.audio[0]] }), /faixas/);
+  assert.match(aac.verify(info, { ...good, audio: [good.audio[0], { ...good.audio[1], channels: 2, config: 2 }] }), /estava boa/);
+  assert.match(aac.verify(info, { ...good, audio: [{ ...good.audio[0], channels: 2, config: 2 }, good.audio[1]] }), /surround/);
+  console.log('ok áudio 5.1: converte só a faixa com defeito e recusa arquivo diferente');
+
   srv.close(); console.log('TODOS OS TESTES PASSARAM');
 })().catch(e => { console.error(e); process.exit(1); });
