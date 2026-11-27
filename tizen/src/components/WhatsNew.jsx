@@ -5,8 +5,9 @@ import { useAuth } from '../contexts/AuthContext.jsx';
 
 // Novidades mostradas na primeira abertura de cada versão.
 // A CADA versão com mudança para o usuário, troque VERSION e ITEMS.
-export const VERSION = '1.4.0';
+export const VERSION = '1.4.1';
 const ITEMS = [
+  'Continuar assistindo: cada série aparece uma vez só, no último episódio que você assistiu.',
   'Passar de episódio ficou mais estável, e a série continua no Continuar assistindo.',
   'Vídeo travado carregando ou sem imagem: o player tenta se recuperar sozinho.',
   'Nas séries: selo “Visto” nos episódios assistidos, barra nos que ficaram pela metade e aviso de qual foi o último.',

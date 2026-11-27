@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import Navbar from '../../components/Navbar';
+import { onePerTitle } from '../../lib/skipRules';
 import api from '../../lib/api';
 import { useProfile } from '../../contexts/ProfileContext';
 import styles from './page.module.css';
@@ -15,7 +16,7 @@ export default function ContinuarAssistindoPage() {
   useEffect(() => {
     const params = activeProfile ? { profile_id: activeProfile.id } : undefined;
     api.get('/history', { params })
-      .then(r => setItems((r.data || []).filter(i => !i.completed)))
+      .then(r => setItems(onePerTitle((r.data || []).filter(i => !i.completed))))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [activeProfile]);

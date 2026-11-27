@@ -1,6 +1,7 @@
 // Dados do app carregados UMA vez na tela de abertura (splash), para a navegação nunca esperar rede.
 import api, { moviesAPI, seriesAPI, recommendationsAPI } from '../api/index.js';
 import { mergeReleased, mapRecentEpisodes } from './released.js';
+import { onePerTitle } from './skipRules.js';
 
 const list = (p) => p.then(r => r.data || []).catch(() => []);
 
@@ -24,7 +25,7 @@ export async function fetchHomeProfile(profileId, hasUser) {
     list(recommendationsAPI.get(profileId)),
     hasUser ? list(api.get('/api/recommendations/top10')) : Promise.resolve([]),
   ]);
-  return { history: hist.filter(h => h.progress > 0 && !h.completed && h.title).slice(0, 12), recs, top10 };
+  return { history: onePerTitle(hist.filter(h => h.progress > 0 && !h.completed && h.title)).slice(0, 12), recs, top10 };
 }
 
 export function assembleHome(base, prof) {

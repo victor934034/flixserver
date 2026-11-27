@@ -14,6 +14,7 @@ import SurpriseSheet from '../../components/SurpriseSheet';
 import Top10Row from '../../components/Top10Row';
 import ArrivedNotice from '../../components/ArrivedNotice';
 import api from '../../lib/api';
+import { onePerTitle } from '../../lib/skipRules';
 import { useProfile } from '../../contexts/ProfileContext';
 
 function ContinueCard({ item, onRemove }) {
@@ -159,17 +160,7 @@ export default function HomeScreen() {
       const hRes = await api.get(`/history?limit=10&profile_id=${activeProfile.id}`);
       const history = Array.isArray(hRes.data) ? hRes.data : [];
       const filtered = history.filter(h => !h.completed && h.progress > 0 && h.title);
-      // O backend pode devolver mais de uma linha pro mesmo conteúdo (ex: progresso
-      // salvo em sessões diferentes) — remove duplicatas mantendo a mais recente
-      // (a lista já vem ordenada por recência), senão a key do map se repete.
-      const seen = new Set();
-      const deduped = filtered.filter(h => {
-        const key = `${h.content_type}-${h.content_id}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-      setContinueItems(deduped);
+      setContinueItems(onePerTitle(filtered));
     } catch {}
   }, [activeProfile?.id]);
 

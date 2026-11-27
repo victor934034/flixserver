@@ -5,6 +5,12 @@ export const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com
 
 export const CHANGELOG = [
   {
+    version: '1.4.1',
+    items: [
+      'Continuar assistindo: cada série aparece uma vez só, no último episódio que você assistiu.',
+    ],
+  },
+  {
     version: '1.4.0',
     items: [
       '✓ Nas séries: selo “Visto” nos episódios assistidos, barra nos que ficaram pela metade e aviso de qual foi o último.',

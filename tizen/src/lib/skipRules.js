@@ -41,3 +41,15 @@ export function episodeMarks(rows, seriesId) {
   }
   return { marks, last };
 }
+
+// "Continuar assistindo": um cartão por filme ou série. O histórico vem do mais
+// recente pro mais antigo, então fica o último episódio assistido de cada série.
+export function onePerTitle(rows) {
+  const seen = new Set();
+  return (rows || []).filter(h => {
+    const key = (h.content_type === 'episode' && h.series_id) || h.content_id;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
