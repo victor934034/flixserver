@@ -316,11 +316,18 @@ async function uploadFileFromPath(filePath, filename, contentType = 'video/mp4')
   const fd = fs.openSync(filePath, 'r');
 
   try {
+    // Um único espaço de memória para todas as partes. Antes cada parte ganhava
+    // 100 MB novos e o envio de um filme podia derrubar o servidor.
+    const buffer = Buffer.allocUnsafe(Math.min(PART_SIZE, fileSize));
     for (let i = 0; i < partCount; i++) {
       const offset = i * PART_SIZE;
       const length = Math.min(PART_SIZE, fileSize - offset);
-      const chunk = Buffer.alloc(length);
-      fs.readSync(fd, chunk, 0, length, offset);
+      for (let read = 0; read < length;) {
+        const n = fs.readSync(fd, buffer, read, length - read, offset + read);
+        if (!n) throw new Error('O arquivo mudou de tamanho durante o envio');
+        read += n;
+      }
+      const chunk = buffer.subarray(0, length);
 
       const sha1 = crypto.createHash('sha1').update(chunk).digest('hex');
 
@@ -339,6 +346,9 @@ async function uploadFileFromPath(filePath, filename, contentType = 'video/mp4')
         },
         maxContentLength: Infinity,
         maxBodyLength: Infinity,
+        // sem isso a biblioteca guarda uma cópia de tudo que envia (para o caso de redirecionamento)
+        maxRedirects: 0,
+        timeout: 15 * 60_000,
       });
 
       partSha1Array.push(sha1);

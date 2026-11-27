@@ -11,7 +11,8 @@ import { getToken } from '../../../lib/auth';
 import { useProfile } from '../../../contexts/ProfileContext';
 import { useParental } from '../../../contexts/ParentalContext';
 import styles from './page.module.css';
-import { resumeFrom } from '../../../lib/skipRules';
+import { resumeFrom, episodeMarks } from '../../../lib/skipRules';
+import { useWatched } from '../../../lib/watched';
 
 export default function SeriePage() {
   const { id } = useParams();
@@ -24,7 +25,8 @@ export default function SeriePage() {
   const [playingResume, setPlayingResume] = useState(0);
   const [error, setError] = useState(null);
   const [watchlistId, setWatchlistId] = useState(null);
-  const [epProgress, setEpProgress] = useState({}); // episode_id -> segundos assistidos
+  const [history, setHistory] = useState({ marks: {}, last: null }); // visto / pela metade / último
+  const watched = useWatched();
   const [epResume, setEpResume] = useState({}); // de onde retomar (0 = do começo)
   const [nextUp, setNextUp] = useState(null); // episódio sugerido pro botão "Assistir"
   const [seasonInfo, setSeasonInfo] = useState({}); // season_number -> { name, overview, poster_url }
@@ -53,19 +55,20 @@ export default function SeriePage() {
           if (entry) setWatchlistId(entry.watchlist_id || entry.id);
         })
         .catch(() => {});
-      api.get('/history', { params })
+      api.get('/history', { params: { ...params, series_id: id } })
         .then(r => {
           const forThisSeries = (r.data || []).filter(h => h.content_type === 'episode' && h.series_id === id);
-          const map = {};
-          forThisSeries.forEach(h => { map[h.content_id] = h.progress; });
           setEpResume(Object.fromEntries(forThisSeries.map(h => [h.content_id, resumeFrom(h.progress, h.duration, h.completed)])));
-          setEpProgress(map);
+          const found = episodeMarks(forThisSeries, id);
+          setHistory(found);
+          if (found.last?.season) setSeason(found.last.season);
           const inProgress = forThisSeries.find(h => !h.completed && h.progress > 5);
           if (inProgress) setNextUp({ episode_id: inProgress.content_id, progress: inProgress.progress });
         })
         .catch(() => {});
     }
-  }, [id, activeProfile]);
+  // `playing` na lista: ao fechar o player as marcações são lidas de novo
+  }, [id, activeProfile, playing]);
 
   async function toggleList() {
     if (!getToken()) { window.location.href = '/login'; return; }
@@ -220,8 +223,10 @@ export default function SeriePage() {
               ) : (
                 <div className={styles.epList}>
                   {currentEps.map(ep => {
-                    const prog = epProgress[ep.id];
-                    const pct = prog && ep.duration ? Math.min(100, (prog / (ep.duration * 60)) * 100) : 0;
+                    const mark = history.marks[String(ep.id)];
+                    const seen = !!mark?.done || watched.has('series', id);
+                    const isLast = history.last?.id === String(ep.id);
+                    const pct = !seen && mark ? mark.ratio * 100 : 0;
                     return (
                     <div key={ep.id} className={styles.epCard} onClick={() => playEpisode(ep)}>
                       <div className={styles.epThumb}>
@@ -231,14 +236,20 @@ export default function SeriePage() {
                           <div className={styles.epThumbPlaceholder}>▶</div>
                         )}
                         <div className={styles.playOverlay}>▶</div>
-                        {pct > 3 && (
+                        {seen && (
+                          <span style={{ position: 'absolute', top: 6, left: 6, background: '#16A34A', color: '#fff', borderRadius: 4, padding: '2px 7px', fontSize: 11, fontWeight: 800, zIndex: 2 }}>✓ Visto</span>
+                        )}
+                        {pct > 1 && (
                           <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 3, background: 'rgba(255,255,255,0.25)' }}>
                             <div style={{ width: `${pct}%`, height: '100%', background: 'var(--accent)' }} />
                           </div>
                         )}
                       </div>
                       <div className={styles.epInfo}>
-                        <div className={styles.epNum}>E{ep.episode_number}</div>
+                        <div className={styles.epNum}>
+                          E{ep.episode_number}
+                          {isLast && <span style={{ color: 'var(--accent)', marginLeft: 8, fontWeight: 800 }}>ÚLTIMO ASSISTIDO</span>}
+                        </div>
                         <div className={styles.epTitle}>{ep.title || `Episódio ${ep.episode_number}`}</div>
                         {ep.duration && <div className={styles.epDur}>{ep.duration} min</div>}
                         {ep.synopsis && <p className={styles.epSyn}>{ep.synopsis}</p>}

@@ -368,7 +368,7 @@ export default function UploadDesenhosPage() {
         const { data: saveResult } = await api.post('/admin/episodes', epData);
         updateEp(ep.episode_number, { status: 'done', progress: 100, cdnUrl, error: null, dbId: saveResult?.id });
 
-        // Verifica/corrige audio (AC3/DTS/5.1/HE-AAC -> AAC estereo) e so
+        // Verifica/corrige audio (AC3/DTS/HE-AAC -> AAC, mantendo o 5.1) e so
         // depois faststart/cues. Espera terminar (nao dispara em segundo
         // plano) - como cada episodio ja processa em sequencia aqui, isso
         // garante que so 1 ffmpeg de remux roda por vez no servidor.

@@ -24,7 +24,7 @@ export async function fetchHomeProfile(profileId, hasUser) {
     list(recommendationsAPI.get(profileId)),
     hasUser ? list(api.get('/api/recommendations/top10')) : Promise.resolve([]),
   ]);
-  return { history: hist.filter(h => h.progress > 0 && h.duration > 0 && !h.completed).slice(0, 12), recs, top10 };
+  return { history: hist.filter(h => h.progress > 0 && !h.completed && h.title).slice(0, 12), recs, top10 };
 }
 
 export function assembleHome(base, prof) {

@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import api from '../lib/api';
+import { AppState } from 'react-native';
+import api, { onSessionExpired, renewSession } from '../lib/api';
 
 const AuthContext = createContext(null);
 
@@ -26,6 +27,23 @@ export function AuthProvider({ children }) {
       setLoading(false);
     })();
   }, []);
+
+  // Acesso recusado pelo servidor: vai direto pro login em vez de ficar meio logado
+  useEffect(() => onSessionExpired(() => { setToken(null); setUser(null); }), []);
+
+  // Renova ao abrir e ao voltar pro app (no máximo a cada 12 horas)
+  useEffect(() => {
+    if (!token) return;
+    let last = 0;
+    const renew = () => {
+      if (Date.now() - last < 12 * 3600 * 1000) return;
+      last = Date.now();
+      renewSession();
+    };
+    renew();
+    const sub = AppState.addEventListener('change', s => { if (s === 'active') renew(); });
+    return () => sub.remove();
+  }, [token]);
 
   const login = async (email, password) => {
     const res = await api.post('/auth/login', { email: email.trim().toLowerCase(), password });

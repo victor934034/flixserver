@@ -24,20 +24,45 @@ const dumpToHex = dump => String(dump || '').split('\n')
   .map(line => (line.split(': ')[1] || '').split('  ')[0].replace(/\s+/g, ''))
   .join('');
 
+function parseTrack(s) {
+  const config = s.codec_name === 'aac' ? channelConfigOf(dumpToHex(s.extradata)) : null;
+  return {
+    codec: s.codec_name, profile: s.profile || '', channels: s.channels || 0, config,
+    language: s.tags?.language || '', broken: s.codec_name === 'aac' && config === 0,
+  };
+}
+
 function parseProbe(data) {
   const streams = data.streams || [];
   return {
     duration: Number(data.format?.duration) || 0,
     videos: streams.filter(s => s.codec_type === 'video').length,
-    audio: streams.filter(s => s.codec_type === 'audio').map(s => {
-      const config = s.codec_name === 'aac' ? channelConfigOf(dumpToHex(s.extradata)) : null;
-      return {
-        codec: s.codec_name, channels: s.channels || 0, config,
-        language: s.tags?.language || '', broken: s.codec_name === 'aac' && config === 0,
-      };
-    }),
+    audio: streams.filter(s => s.codec_type === 'audio').map(parseTrack),
   };
 }
+
+// Envios novos: a faixa precisa ser convertida se não for AAC comum, se tiver o
+// defeito dos canais ou mais de 6 canais. AAC 5.1 no padrão fica como está.
+function needsAudioFix(track) {
+  const p = String(track.profile || '').toLowerCase();
+  const heAac = p.includes('he') || p === 'lc+sbr' || p === 'lc+sbr+ps';
+  return (!!track.codec && track.codec !== 'aac') || heAac || track.broken || track.channels > 6;
+}
+
+// Argumentos de áudio: copia tudo e converte só o que precisa, mantendo o 5.1.
+// Sem a lista de faixas (formato que o ffprobe não lê), converte todas.
+function audioArgs(tracks) {
+  if (!tracks?.length) return ['-c:a', 'aac', '-profile:a', 'aac_low', '-b:a', '192k', '-filter:a', LAYOUTS];
+  const args = ['-c:a', 'copy'];
+  tracks.forEach((track, i) => {
+    if (!needsAudioFix(track)) return;
+    args.push(`-c:a:${i}`, 'aac', `-profile:a:${i}`, 'aac_low', `-b:a:${i}`, track.channels > 2 ? '384k' : '192k', `-filter:a:${i}`, LAYOUTS);
+  });
+  return args;
+}
+
+// Primeiro vídeo e TODAS as faixas de áudio (sem isso o dual áudio perde uma)
+const mapArgs = output => ['-map', '0:v:0', '-map', '0:a', ...(/\.mkv$/i.test(output) ? ['-map', '0:s?', '-c:s', 'copy'] : [])];
 
 function run(bin, args, timeout) {
   return new Promise((resolve, reject) => {
@@ -54,7 +79,7 @@ async function probe(ffprobePath, input) {
 }
 
 function buildArgs(input, output, info) {
-  const args = ['-hide_banner', '-loglevel', 'error', '-i', input, '-map', '0:v', '-map', '0:a', '-map', '0:s?', '-c', 'copy'];
+  const args = ['-hide_banner', '-i', input, '-map', '0:v', '-map', '0:a', '-map', '0:s?', '-c', 'copy'];
   info.audio.forEach((track, i) => {
     if (!track.broken) return;
     args.push(`-c:a:${i}`, 'aac', `-profile:a:${i}`, 'aac_low', `-b:a:${i}`, track.channels > 2 ? '384k' : '192k', `-filter:a:${i}`, LAYOUTS);
@@ -85,11 +110,12 @@ function verify(before, after) {
 async function convert({ ffmpegPath, ffprobePath }, input, output) {
   const before = await probe(ffprobePath, input);
   if (!before.audio.some(t => t.broken)) return { changed: false, before };
-  await run(ffmpegPath, buildArgs(input, output, before), 3 * 3600_000);
+  // carregado aqui para os dois arquivos não dependerem um do outro na carga
+  await require('./mediaWork').runFfmpeg(ffmpegPath, buildArgs(input, output, before));
   const after = await probe(ffprobePath, output);
   const problem = verify(before, after);
   if (problem) throw new Error('Arquivo novo recusado: ' + problem);
   return { changed: true, before, after };
 }
 
-module.exports = { LAYOUTS, channelConfigOf, parseProbe, probe, buildArgs, verify, convert };
+module.exports = { LAYOUTS, channelConfigOf, parseTrack, parseProbe, needsAudioFix, audioArgs, mapArgs, probe, buildArgs, verify, convert };

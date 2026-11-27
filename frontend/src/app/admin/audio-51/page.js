@@ -8,7 +8,7 @@ const STATUS = {
   broken: ['Com defeito', 'b_over'], queued: ['Na fila', 'b_pend'], converting: ['Convertendo', 'b_pend'],
   fixed: ['Consertado', 'b_paid'], ok: ['Já estava bom', 'b_ref'], error: ['Falhou', 'b_over'],
 };
-const channels = n => (n === 6 ? '5.1' : n === 8 ? '7.1' : n === 2 ? 'estéreo' : n === 1 ? 'mono' : `${n} canais`);
+const channels = n => (n === 6 ? '5.1' : n === 8 ? '7.1' : n === 2 ? 'estéreo' : n === 1 ? 'mono' : n ? `${n} canais` : 'canais não informados');
 const BASE = '/admin/audio-51';
 
 export default function Audio51Page() {
@@ -44,13 +44,18 @@ export default function Audio51Page() {
         <h2>1. Procurar</h2>
         <p className={s.hint}>
           Acha os arquivos .mp4 cujo áudio alguns celulares Android não conseguem tocar. Os arquivos bons não são alterados.
-          A busca é lenta de propósito (um arquivo por vez), para a Backblaze não bloquear os pedidos: pode levar algumas horas.
-          Ela começa pelos filmes e dá para parar e continuar depois.
+          Nada é baixado: só o índice de cada arquivo é lido, um por vez e devagar para a Backblaze não bloquear os pedidos
+          (alguns segundos por arquivo). Começa pelos filmes, dá para parar e continuar, e uma nova busca olha só o que ainda não foi conferido.
         </p>
         <div className={s.row}>
           <button className={s.btn} disabled={!!data.activity} onClick={() => post('/scan', {})}>
-            {data.cursor && !data.finished ? 'Continuar busca' : 'Procurar'}
+            {data.cursor && !data.finished ? 'Continuar busca' : data.finished ? 'Procurar nos novos' : 'Procurar'}
           </button>
+          {!data.activity && data.cursor > 0 && (
+            <button className={s.btn2} onClick={() => { if (window.confirm('Conferir todos os arquivos de novo?')) post('/scan', { restart: true }); }}>
+              Conferir tudo de novo
+            </button>
+          )}
           {data.activity && <button className={s.btn2} onClick={() => post('/stop')}>Parar depois do arquivo atual</button>}
         </div>
         <p className={s.hint}>

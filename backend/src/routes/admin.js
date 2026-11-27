@@ -1256,7 +1256,9 @@ const fs = require('fs');
 const { spawn: spawnProc } = require('child_process');
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 const ffprobePath = require('ffprobe-static').path;
-const { LAYOUTS } = require('../services/aacRepair');
+const { audioArgs, needsAudioFix, probe } = require('../services/aacRepair');
+const { inspect } = require('../services/mediaInspect');
+const { takeTurn, runFfmpeg, downloadFile } = require('../services/mediaWork');
 
 const AAC_OK    = new Set(['aac', 'mp3', 'opus', 'vorbis', 'flac', 'pcm_s16le', 'pcm_s24le']);
 const VIDEO_OK  = new Set(['h264', 'vp8', 'vp9', 'av1', 'theora']);
@@ -1266,71 +1268,23 @@ const audioFixJobs = new Map();
 const MOVIE_FIELDS = ['file_dubbing', 'file_subtitled', 'file_cinema', 'file_4k'];
 const EP_FIELDS    = ['file_dubbing', 'file_subtitled', 'file_cinema'];
 
-// Retorna {audioCodec, videoCodec, hasFaststart} de uma URL via ffprobe
-function probeFile(url) {
-  return new Promise((resolve) => {
-    execFile(ffprobePath, [
-      '-v', 'quiet', '-print_format', 'json',
-      '-show_streams', '-show_format', url,
-    ], { timeout: 30_000 }, (err, stdout) => {
-      if (err) return resolve({ audioCodec: null, videoCodec: null, hasFaststart: null, isMkv: false, isAvi: false, needsRemux: false });
-      try {
-        const data = JSON.parse(stdout);
-        const audio = data.streams?.find(s => s.codec_type === 'audio');
-        const video = data.streams?.find(s => s.codec_type === 'video');
-        const tags = data.format?.tags || {};
-        const hasFaststart = tags['major_brand'] !== undefined;
-        const fmt = data.format?.format_name || '';
-        const isMkv = fmt.includes('matroska') || fmt.includes('webm');
-        const isAvi = fmt.includes('avi');
-        const needsRemux = isMkv || isAvi;
-        resolve({
-          audioCodec: audio?.codec_name || null,
-          videoCodec: video?.codec_name || null,
-          hasFaststart,
-          isMkv, isAvi, needsRemux,
-        });
-      } catch { resolve({ audioCodec: null, videoCodec: null, hasFaststart: null, isMkv: false }); }
-    });
-  });
-}
-
-async function downloadToTemp(url, destPath) {
-  const axios = require('axios');
-  const writer = fs.createWriteStream(destPath);
-  const resp = await axios.get(url, { responseType: 'stream', timeout: 300_000 });
-  await new Promise((resolve, reject) => {
-    resp.data.pipe(writer);
-    writer.on('finish', resolve);
-    writer.on('error', reject);
-  });
-}
-
-function remuxFile(inputPath, tmpPath, { fixAudio, fixContainer }) {
-  const args = ['-hide_banner', '-loglevel', 'error', '-i', inputPath];
-  // Mapeia todos os streams de vídeo e áudio (preserva dual audio)
-  args.push('-map', '0:v', '-map', '0:a');
-  args.push('-c:v', 'copy');
-  if (fixAudio) {
-    // Surround vira o 5.1 padrão: o 5.1 "(side)" gerava AAC fora do padrão
-    // (channelConfig 0), que o decodificador de vários Androids recusa
-    args.push('-c:a', 'aac', '-profile:a', 'aac_low', '-b:a', '384k', '-filter:a', LAYOUTS);
-  } else {
-    args.push('-c:a', 'copy');
-  }
-  if (fixContainer) args.push('-f', 'mp4');
-  args.push('-movflags', '+faststart', '-y', tmpPath);
-  return new Promise((resolve, reject) => {
-    const ff = spawnProc(ffmpegPath, args);
-    let stderr = '';
-    ff.stderr.on('data', d => { stderr += d.toString(); });
-    ff.on('close', code => code === 0 ? resolve() : reject(new Error(`ffmpeg exit ${code}: ${stderr.slice(-400)}`)));
-    ff.on('error', reject);
-  });
+// Converte SÓ as faixas de áudio com problema; as boas (inclusive o 5.1) são copiadas
+async function remuxFile(inputPath, tmpPath, { fixContainer }) {
+  const { audio } = await probe(ffprobePath, inputPath);
+  await runFfmpeg(ffmpegPath, [
+    '-hide_banner', '-i', inputPath,
+    // todas as faixas de vídeo e áudio (preserva dual audio)
+    '-map', '0:v:0', '-map', '0:a', '-c:v', 'copy',
+    ...audioArgs(audio),
+    ...(fixContainer ? ['-f', 'mp4'] : []),
+    '-movflags', '+faststart', '-y', tmpPath,
+  ]);
 }
 
 // POST /admin/audio-fix/scan — inicia scan em background
 router.post('/audio-fix/scan', async (req, res) => {
+  const done = takeTurn('audio-fix');
+  if (!done) return res.status(409).json({ error: 'Outro conserto de vídeo está rodando no servidor. Espere ele terminar.' });
   const jobId = `audioscan_${Date.now()}`;
   const job = { total: 0, done: 0, running: true, needsFix: [], errors: 0 };
   audioScanJobs.set(jobId, job);
@@ -1359,45 +1313,45 @@ router.post('/audio-fix/scan', async (req, res) => {
         }
       }
 
-      job.total = items.length;
+      // o mesmo arquivo em dois campos é conferido uma vez só
+      const files = new Map();
+      for (const item of items) {
+        if (!files.has(item.url)) files.set(item.url, []);
+        files.get(item.url).push(item);
+      }
+      job.total = files.size;
 
-      const CONCURRENCY = 4;
-      for (let i = 0; i < items.length; i += CONCURRENCY) {
-        const batch = items.slice(i, i + CONCURRENCY);
-        await Promise.all(batch.map(async (item) => {
-          try {
-            const b2Name = CDN ? decodeURIComponent(item.url.replace(CDN + '/', '')) : item.url;
-            // Detecção rápida por extensão (não precisa de ffprobe)
-            const extLow = (item.url.split('?')[0].split('.').pop() || '').toLowerCase();
-            const extIsMkv = extLow === 'mkv' || extLow === 'webm';
-            const extIsAvi = extLow === 'avi';
-            const extNeedsRemux = extIsMkv || extIsAvi;
-
-            const { url: directUrl } = await getDirectDownloadInfo(b2Name);
-            const { audioCodec, videoCodec, isMkv, isAvi, needsRemux } = await probeFile(directUrl);
-            const finalNeedsRemux = needsRemux || extNeedsRemux;
-            // Se codec não detectado E arquivo precisa remux, assume áudio ruim (seguro converter para AAC)
-            const badAudio = audioCodec ? !AAC_OK.has(audioCodec) : finalNeedsRemux;
-            const badVideo = videoCodec && !VIDEO_OK.has(videoCodec);
-            if (badAudio || badVideo || finalNeedsRemux) {
-              job.needsFix.push({
-                ...item, b2Name,
-                audioCodec, videoCodec,
-                badAudio, badVideo,
-                isMkv: isMkv || extIsMkv,
-                isAvi: isAvi || extIsAvi,
-                needsRemux: finalNeedsRemux,
-                needsTranscode: badVideo && (videoCodec === 'hevc' || videoCodec === 'h265'),
-              });
-            }
-          } catch { job.errors++; }
-          job.done++;
-        }));
+      // Um por vez: pedidos em paralelo fizeram a Backblaze bloquear a conta
+      for (const [url, uses] of files) {
+        try {
+          const b2Name = CDN ? decodeURIComponent(url.replace(CDN + '/', '')) : url;
+          const ext = (url.split('?')[0].split('.').pop() || '').toLowerCase();
+          const isMkv = ext === 'mkv' || ext === 'webm';
+          const isAvi = ext === 'avi';
+          const needsRemux = isMkv || isAvi;
+          const info = await inspect(url, ffprobePath);
+          const bad = info.audio.find(needsAudioFix);
+          const videoCodec = info.videoCodec || null;
+          const badVideo = !!videoCodec && !VIDEO_OK.has(videoCodec);
+          if (bad || badVideo || needsRemux) {
+            job.needsFix.push({
+              ...uses[0], b2Name,
+              audioCodec: (bad || info.audio[0])?.codec || null, videoCodec,
+              badAudio: !!bad, badVideo, isMkv, isAvi, needsRemux,
+              needsTranscode: badVideo && (videoCodec === 'hevc' || videoCodec === 'h265'),
+            });
+          }
+        } catch (e) {
+          job.errors++;
+          if (e.status === 429) { console.error('[audio-fix scan] Backblaze limitou os pedidos; busca interrompida'); break; }
+        }
+        job.done++;
       }
     } catch (e) {
       console.error('[audio-fix scan]', e.message);
     } finally {
       job.running = false;
+      done();
     }
   })();
 });
@@ -1414,13 +1368,15 @@ router.post('/audio-fix/fix', async (req, res) => {
   if (!Array.isArray(items) || items.length === 0)
     return res.status(400).json({ error: 'Lista de itens obrigatória.' });
 
+  const done = takeTurn('audio-fix');
+  if (!done) return res.status(409).json({ error: 'Outro conserto de vídeo está rodando no servidor. Espere ele terminar.' });
   const jobId = `audiofix_${Date.now()}`;
   const job = { total: items.length, done: 0, errors: 0, skipped: 0, running: true, current: '', startTime: Date.now() };
   audioFixJobs.set(jobId, job);
   res.json({ ok: true, jobId, total: items.length });
 
   (async () => {
-    const { getDirectDownloadInfo, uploadFileFromPath, deleteFile, getLatestFileVersion } = require('../services/backblaze');
+    const { getDirectDownloadInfo, uploadFileFromPath } = require('../services/backblaze');
 
     // O mesmo arquivo dual aparece duas vezes na lista (Dublado e Legendado): converte uma vez só
     const converted = new Set();
@@ -1435,23 +1391,22 @@ router.post('/audio-fix/fix', async (req, res) => {
       const outputTmp = path.join(os.tmpdir(), `mediafix_out_${ts}_${baseName}${outExt}`);
       job.current = item.title;
       try {
-        const oldVer = await getLatestFileVersion(item.b2Name);
-
         // Usa URL do CDN (Cloudflare) para download — IP direto do B2 fica inacessível no container
         const downloadUrl = item.url.startsWith('http') ? item.url : (await getDirectDownloadInfo(item.b2Name)).url;
-        await downloadToTemp(downloadUrl, inputTmp);
+        await downloadFile(downloadUrl, inputTmp);
 
         // Remux: copia vídeo, converte áudio se necessário, força MP4 se era MKV/AVI
-        await remuxFile(inputTmp, outputTmp, { fixAudio: item.badAudio, fixContainer: item.needsRemux });
+        await remuxFile(inputTmp, outputTmp, { fixContainer: item.needsRemux });
+        fs.unlinkSync(inputTmp); // libera espaço antes de enviar
 
-        // Se houve remux de container, renomeia para .mp4 no B2 e atualiza o banco
+        // Nome sempre novo: com o mesmo nome o CDN continuaria entregando o antigo
         const newB2Name = item.needsRemux
           ? item.b2Name.replace(/\.(mkv|webm|avi)$/i, '.mp4')
-          : item.b2Name;
+          : item.b2Name.replace(/(\.[^.]+)$/, '.audio-ok$1');
 
         await uploadFileFromPath(outputTmp, newB2Name, 'video/mp4');
 
-        // Primeiro o banco, em todos os campos que usam este arquivo; só depois apaga o original
+        // Atualiza todos os campos que usam este arquivo. O original NÃO é apagado.
         if (newB2Name !== item.b2Name) {
           const CDN = process.env.CDN_BASE_URL || '';
           const newUrl = CDN + '/' + newB2Name.split('/').map(encodeURIComponent).join('/');
@@ -1460,8 +1415,6 @@ router.post('/audio-fix/fix', async (req, res) => {
           const { error } = await supabase.from(table).update({ [item.field]: newUrl }).eq('id', item.id);
           if (error) throw new Error(error.message);
         }
-        if (oldVer) await deleteFile(oldVer.fileId, oldVer.fileName);
-
         converted.add(item.url);
         job.done++;
       } catch (e) {
@@ -1474,6 +1427,7 @@ router.post('/audio-fix/fix', async (req, res) => {
     }
     job.running = false;
     job.current = '';
+    done();
   })();
 });
 

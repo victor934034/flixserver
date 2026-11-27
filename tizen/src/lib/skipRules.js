@@ -25,3 +25,19 @@ export function resumeFrom(progress, duration, completed) {
   if (!(progress > 5) || completed || (duration > 0 && progress >= duration * 0.9)) return 0;
   return progress;
 }
+
+// Marcações da lista de episódios, a partir do histórico (do mais recente pro mais
+// antigo): o que já foi visto, o que está pela metade e qual foi o último.
+export function episodeMarks(rows, seriesId) {
+  const marks = {};
+  let last = null;
+  for (const h of rows || []) {
+    if (h.content_type !== 'episode' || String(h.series_id) !== String(seriesId)) continue;
+    const id = String(h.episode_id || h.content_id);
+    const done = !!h.completed || (h.duration > 0 && h.progress >= h.duration * 0.9);
+    if (!marks[id]) marks[id] = { done, ratio: h.duration > 0 ? Math.min(h.progress / h.duration, 1) : 0 };
+    // o próximo episódio recém-aberto (1s) ainda não conta como assistido
+    if (!last && (done || h.progress > 5)) last = { id, done, season: h.season_number };
+  }
+  return { marks, last };
+}

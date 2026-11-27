@@ -5,6 +5,13 @@ export const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com
 
 export const CHANGELOG = [
   {
+    version: '1.4.0',
+    items: [
+      '✓ Nas séries: selo “Visto” nos episódios assistidos, barra nos que ficaram pela metade e aviso de qual foi o último.',
+      'Corrigido: o app pedia para entrar na conta de novo de tempos em tempos.',
+    ],
+  },
+  {
     version: '1.3.0',
     items: [
       'Corrigido: dezenas de filmes que não davam play no Dublado ou no Legendado.',

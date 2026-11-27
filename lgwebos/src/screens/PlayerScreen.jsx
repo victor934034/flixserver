@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useRef, useState, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useTogether } from '../lib/together.js';
 import { introVisible, creditsStart } from '../lib/skipRules.js';
@@ -187,7 +187,22 @@ function PanelOpt({ label, sub, active, focused, onClick }) {
   );
 }
 
+// Cada episódio ganha um player novo. Sem isso a tela era reaproveitada com o
+// estado do anterior (posição de retomada, áudio corrigido) e o progresso dele se
+// perdia. A pausa dá tempo de a TV liberar o decodificador de vídeo.
 export default function PlayerScreen() {
+  const { key } = useLocation();
+  const [shown, setShown] = useState(key);
+  useEffect(() => {
+    if (shown === key) return undefined;
+    const t = setTimeout(() => setShown(key), 400);
+    return () => clearTimeout(t);
+  }, [key, shown]);
+  if (shown !== key) return <div style={{ width: '100%', height: '100%', background: '#000' }} />;
+  return <Player key={shown} />;
+}
+
+function Player() {
   const navigate          = useNavigate();
   const { state }         = useLocation();
   const { activeProfile } = useAuth();
@@ -213,6 +228,7 @@ export default function PlayerScreen() {
   const bufferingRef     = useRef(false);
   const forcedPauseRef   = useRef(false);  // true quando pausamos manualmente para encher buffer
   const stallTimerRef    = useRef(null);
+  const stallSinceRef    = useRef(0);      // desde quando está pausado enchendo o buffer
   const initialPlayedRef = useRef(false);  // true após o primeiro v.play()
   const initPlayTimerRef = useRef(null);   // fallback timer para iniciar mesmo sem buffer ideal
   const lastTickRef      = useRef(0);      // throttle react state updates
@@ -377,7 +393,9 @@ export default function PlayerScreen() {
         break;
       }
     }
-    if (ahead >= MID_BUFFER_S) {
+    if (!stallSinceRef.current) stallSinceRef.current = Date.now();
+    if (ahead >= MID_BUFFER_S || Date.now() - stallSinceRef.current > 15000) {
+      stallSinceRef.current = 0;
       forcedPauseRef.current = false;
       bufferingRef.current = false;
       setBuffering(false);
@@ -485,9 +503,16 @@ export default function PlayerScreen() {
       if (videoRef.current) videoRef.current.currentTime = skipTimes.intro_end;
       setCurrentTime(skipTimes.intro_end);
     } else if (prompt === 'next') {
-      saveHistory();
-      navigate('/player', { state: nextEp, replace: true });
+      goEpisode(nextEp);
     }
+  }
+
+  // O progresso do atual é salvo ao sair; o novo entra já no "Continuar assistindo"
+  function goEpisode(ep) {
+    if (ep.contentMeta && ep.contentMeta.content_type === 'episode') {
+      historyAPI.save({ ...ep.contentMeta, progress: 1, duration: 0, only_if_new: true, profile_id: activeProfile ? activeProfile.id : null }).catch(() => {});
+    }
+    navigate('/player', { state: ep, replace: true });
   }
 
   const leftBtns = useMemo(() => {
@@ -573,9 +598,50 @@ export default function PlayerScreen() {
 
   useEffect(() => {
     if (!contentMeta) return;
-    const id = setInterval(saveHistory, 30000);
-    return () => { clearInterval(id); saveHistory(); };
+    const id = setInterval(saveHistory, 15000);
+    // Botão Home do controle: a TV pode encerrar o app sem avisar mais
+    const away = () => { if (document.hidden) saveHistory(); };
+    document.addEventListener('visibilitychange', away);
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', away); };
   }, [saveHistory, contentMeta, currentUrl]);
+
+  // Ao sair: salva e solta o vídeo. A TV não libera o decodificador só por a tela
+  // sumir, e abrir o próximo assim dava tela preta com som ou fechava o app.
+  const saveRef = useRef(saveHistory);
+  saveRef.current = saveHistory;
+  useLayoutEffect(() => {
+    const v = videoRef.current;
+    return () => {
+      saveRef.current();
+      if (!v) return;
+      v.pause();
+      v.removeAttribute('src');
+      v.load();
+    };
+  }, []);
+
+  // ── Vigias: carregando sem fim, ou som sem imagem ──
+  const reloadsRef = useRef(0);
+  useEffect(() => {
+    if (error || streamBlocked) return undefined;
+    let still = 0, blind = 0, last = -1;
+    const t = setInterval(() => {
+      const v = videoRef.current;
+      if (!v || document.hidden || reloadsRef.current >= 2) return;
+      const waiting = !initialPlayedRef.current || forcedPauseRef.current || !v.paused;
+      still = waiting && v.currentTime === last ? still + 5 : 0;
+      blind = !v.paused && v.currentTime !== last && v.videoWidth === 0 ? blind + 5 : 0;
+      last = v.currentTime;
+      if (still < (remuxActive ? 60 : 30) && blind < 10) return;
+      still = 0; blind = 0;
+      reloadsRef.current += 1;
+      const at = ctRef.current > 1 ? ctRef.current : switchPos.current;
+      resetPlayerState();
+      switchPos.current = at || null;
+      v.load();
+    }, 5000);
+    return () => clearInterval(t);
+  }, [error, streamBlocked, currentUrl, remuxActive]);
 
   function onCanPlay() {
     if (!wasLoaded.current) {
@@ -648,9 +714,9 @@ export default function PlayerScreen() {
     } else if (btn.id === 'fwd10') {
       if (v) v.currentTime = Math.min(v.duration || 0, v.currentTime + SEEK_S);
     } else if (btn.id === 'prev' && prevEp) {
-      navigate('/player', { state: prevEp, replace: true });
+      goEpisode(prevEp);
     } else if (btn.id === 'next' && nextEp) {
-      navigate('/player', { state: nextEp, replace: true });
+      goEpisode(nextEp);
     } else if (btn.id === 'audio') {
       setPanel(p => p === 'audio' ? null : 'audio'); setFocusedPanel(0);
     } else if (btn.id === 'cc') {
@@ -751,7 +817,7 @@ export default function PlayerScreen() {
           stallTimerRef.current = setTimeout(checkBuffer, 300);
         }}
         onPlaying={() => { forcedPauseRef.current = false; bufferingRef.current = false; setBuffering(false); }}
-        onEnded={() => { if (nextEp) navigate('/player', { state: nextEp, replace: true }); else navigate(-1); }}
+        onEnded={() => { if (nextEp) goEpisode(nextEp); else navigate(-1); }}
       >
         {subTracks.map(lang => (
           <track key={lang} kind="subtitles" label={SUB_META[lang]} srcLang={lang} src={subtitles[lang]} />

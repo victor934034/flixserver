@@ -1,8 +1,8 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
-import { Platform } from 'react-native';
-import api from '../lib/api';
+import { Platform, AppState } from 'react-native';
+import api, { onSessionExpired, renewSession } from '../lib/api';
 
 const AuthContext = createContext(null);
 
@@ -57,6 +57,22 @@ export function AuthProvider({ children }) {
       setLoading(false);
     })();
   }, []);
+
+  useEffect(() => onSessionExpired(() => setUser(null)), []);
+
+  // Renova ao abrir e ao voltar pro app (no máximo a cada 12 horas)
+  useEffect(() => {
+    if (!user?.id) return;
+    let last = 0;
+    const renew = () => {
+      if (Date.now() - last < 12 * 3600 * 1000) return;
+      last = Date.now();
+      renewSession();
+    };
+    renew();
+    const sub = AppState.addEventListener('change', s => { if (s === 'active') renew(); });
+    return () => sub.remove();
+  }, [user?.id]);
 
   const login = async (email, password) => {
     const res = await api.post('/auth/login', { email, password });

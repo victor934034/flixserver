@@ -16,6 +16,28 @@ router.get('/', async (req, res) => {
       .order('last_watched', { ascending: false })
       .limit(50);
 
+    // Página da série: precisa de todos os episódios já abertos, não só dos 50 mais recentes
+    const onlySeries = req.query.series_id || null;
+    if (onlySeries) {
+      const { data: eps, error: epsError } = await supabase
+        .from('episodes').select('id, season_number').eq('series_id', onlySeries).range(0, 999);
+      if (epsError) throw epsError;
+      const ids = (eps || []).map(e => e.id);
+      if (ids.length === 0) return res.json([]);
+      let mine = supabase.from('watch_history')
+        .select('id, content_type, content_id, series_id, progress, duration, completed, last_watched')
+        .eq('user_id', req.user.id);
+      mine = profileId ? mine.eq('profile_id', profileId) : mine.is('profile_id', null);
+      // Filtra pelas séries aqui: mil ids na URL estourariam o limite do banco
+      const { data: rows, error: rowsError } = await mine.eq('content_type', 'episode')
+        .order('last_watched', { ascending: false }).limit(1000);
+      if (rowsError) throw rowsError;
+      const seasonOf = new Map(eps.map(e => [String(e.id), e.season_number]));
+      return res.json((rows || [])
+        .filter(r => seasonOf.has(String(r.content_id)))
+        .map(r => ({ ...r, episode_id: r.content_id, series_id: onlySeries, season_number: seasonOf.get(String(r.content_id)) })));
+    }
+
     // Sem isso, quando profileId não vem, a query retorna o histórico de TODOS os
     // perfis da conta misturado (inclusive teria mostrado o de outro perfil).
     query = profileId ? query.eq('profile_id', profileId) : query.is('profile_id', null);
@@ -103,7 +125,7 @@ router.delete('/:id', async (req, res) => {
 });
 
 router.post('/', async (req, res) => {
-  const { content_type, content_id, episode_id, series_id, progress, duration, profile_id } = req.body;
+  const { content_type, content_id, episode_id, series_id, progress, duration, profile_id, only_if_new } = req.body;
   if (!content_type || !content_id) {
     return res.status(400).json({ error: 'content_type e content_id são obrigatórios' });
   }
@@ -127,7 +149,17 @@ router.post('/', async (req, res) => {
     const { data: existing } = await findQ.single();
 
     let result;
-    if (existing) {
+    if (existing && only_if_new) {
+      // Troca de episódio: leva a série para o topo do Continuar sem apagar o que já foi visto
+      const { data, error } = await supabase
+        .from('watch_history')
+        .update({ last_watched: new Date().toISOString() })
+        .eq('id', existing.id)
+        .select()
+        .single();
+      if (error) throw error;
+      result = data;
+    } else if (existing) {
       const { data, error } = await supabase
         .from('watch_history')
         .update({ progress, duration, completed, last_watched: new Date().toISOString() })

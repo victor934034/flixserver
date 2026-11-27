@@ -800,7 +800,7 @@ export default function HomeScreen({ navigation }) {
       setRecommendations(recs2);
 
       const continuing = hist2
-        .filter(h => !h.completed && h.progress > 0 && h.duration > 0 && h.title)
+        .filter(h => !h.completed && h.progress > 0 && h.title)
         .map(h => ({
           // Pra episódio, content_id é o ID do EPISÓDIO, não da série — a tela
           // de detalhes espera o ID da série (busca em /series/:id). Usar o

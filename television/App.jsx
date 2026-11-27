@@ -54,6 +54,13 @@ function AppNavigator() {
   const navRef = React.useRef(null);
   const [route, setRoute] = React.useState(null);
   const trackRoute = () => setRoute(navRef.current?.getCurrentRoute()?.name || null);
+  const wasLoggedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (user) { wasLoggedRef.current = true; return; }
+    if (!wasLoggedRef.current) return;
+    wasLoggedRef.current = false;
+    navRef.current?.reset({ index: 0, routes: [{ name: 'Login' }] });
+  }, [user]);
   if (loading) return null;
 
   return (

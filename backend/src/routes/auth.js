@@ -32,7 +32,7 @@ function signToken(user) {
   return jwt.sign(
     { id: user.id, email: user.email, is_admin: user.is_admin },
     process.env.JWT_SECRET,
-    { expiresIn: '30d' }
+    { expiresIn: '90d' }
   );
 }
 
@@ -302,6 +302,21 @@ router.post('/tutorial/seen', authMiddleware, async (req, res) => {
 });
 
 // GET /auth/me
+// POST /auth/refresh — os apps chamam ao abrir: quem usa não precisa entrar de
+// novo quando o token vence. Lê o usuário no banco (conta apagada não renova).
+router.post('/refresh', authMiddleware, async (req, res) => {
+  try {
+    const { data: user, error } = await supabase
+      .from('users').select('id, email, is_admin').eq('id', req.user.id).maybeSingle();
+    if (error) throw error;
+    if (!user) return res.status(401).json({ error: 'Conta não encontrada' });
+    res.json({ token: signToken(user) });
+  } catch (err) {
+    console.error('[auth] refresh:', err.message);
+    res.status(500).json({ error: 'Não foi possível renovar o acesso' });
+  }
+});
+
 router.get('/me', authMiddleware, async (req, res) => {
   try {
     let { data, error } = await supabase

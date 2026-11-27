@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  View, Text, TextInput, TouchableHighlight,
+  View, Text, TextInput, TouchableHighlight, Image,
   StyleSheet, ActivityIndicator, Dimensions, findNodeHandle,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';

@@ -5,6 +5,16 @@
 // REGRA: toda publicação com mudança para o usuário ganha entrada nova aqui.
 export const CHANGELOG = [
   {
+    version: '1.4.0',
+    items: [
+      '✓ Nas séries: selo “Visto” nos episódios assistidos, barra nos que ficaram pela metade e aviso de qual foi o último.',
+      'Janela flutuante só com o vídeo tocando no player, e o próximo episódio passa sozinho dentro dela.',
+      'Trocar de episódio ficou mais estável, e a série continua no “Continuar assistindo”.',
+      'Quando o vídeo trava carregando ou fica sem imagem, o player tenta recuperar sozinho.',
+      'Corrigido: o app pedia para entrar na conta de novo de tempos em tempos.',
+    ],
+  },
+  {
     version: '1.3.0',
     items: [
       'Corrigido: dezenas de filmes que não davam play no Dublado ou no Legendado.',

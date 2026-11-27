@@ -28,9 +28,15 @@ export function AuthProvider({ children }) {
             setUser(r.data);
             localStorage.setItem('user', JSON.stringify(r.data));
           }
+          // renova o acesso pra não ter que entrar de novo quando vencer
+          api.post('/api/auth/refresh').then(res => {
+            if (res.data && res.data.token && localStorage.getItem('token')) localStorage.setItem('token', res.data.token);
+          }).catch(() => {});
         })
-        .catch(() => {
-          // If token is invalid, clear everything
+        .catch(err => {
+          // Só sai da conta se o servidor recusar o acesso. Sem internet ou
+          // servidor fora do ar, continua logado.
+          if (!err || !err.response || err.response.status !== 401) return;
           localStorage.removeItem('token');
           localStorage.removeItem('user');
           localStorage.removeItem('profile');

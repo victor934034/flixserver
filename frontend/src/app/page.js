@@ -56,7 +56,7 @@ export default function Home() {
       fetches.push(
         api.get('/history', { params }).then(r =>
           (r.data || [])
-            .filter(h => h.progress > 0 && h.duration > 0 && !h.completed)
+            .filter(h => h.progress > 0 && !h.completed && (h.title || h.episode_title))
             // uma entrada por filme/série (fica a assistida por último)
             .filter((h, i, all) => all.findIndex(o => (o.series_id || o.content_id) === (h.series_id || h.content_id)) === i)
             .slice(0, 12)

@@ -532,7 +532,8 @@ export default function Configuracoes() {
               <div style={{ borderTop: '1px solid #2a2a2a', marginTop: 20, paddingTop: 16 }}>
                 <p style={{ color: '#fff', fontWeight: 600, margin: '0 0 4px', fontSize: 14 }}>Corrigir áudio destas séries</p>
                 <p style={{ color: '#888', fontSize: 12, margin: '0 0 12px' }}>
-                  Reencoda pra AAC estéreo qualquer episódio com áudio AC3/DTS/5.1/HE-AAC — muitas TVs Android
+                  Confere sem baixar e converte só as faixas com problema (AC3, DTS, HE-AAC, mais de 6 canais ou AAC com
+                  defeito); o 5.1 bom não é alterado. Muitas TVs Android
                   (sticks etc.) tocam o vídeo sem som nenhum e sem erro quando o áudio não é AAC, por não terem
                   decoder de hardware pra esses formatos. Usa as séries selecionadas acima.
                 </p>
@@ -1238,7 +1239,7 @@ export default function Configuracoes() {
         <h3 style={{ color: '#fff', marginBottom: 16 }}>Correção de Áudio (AAC)</h3>
         <div style={{ background: '#1a1a1a', borderRadius: 12, padding: 24, border: '1px solid #2a2a2a' }}>
           <p style={{ color: '#888', fontSize: 13, margin: '0 0 16px' }}>
-            Verifica o codec de áudio de todos os vídeos. Arquivos com AC3, DTS ou outros codecs incompatíveis com o navegador são remixados para AAC automaticamente no servidor, sem re-encodar o vídeo.
+            Lê só o índice de cada vídeo, um por vez, e lista os que têm problema. Na correção, só as faixas com problema viram AAC (o 5.1 é mantido), o vídeo não é re-encodado e o arquivo original continua guardado. Roda um conserto por vez.
           </p>
 
           {/* Botão de scan */}

@@ -272,5 +272,41 @@ const U = i => `00000000-0000-0000-0000-00000000000${i}`;
   assert.match(aac.verify(info, { ...good, audio: [{ ...good.audio[0], channels: 2, config: 2 }, good.audio[1]] }), /surround/);
   console.log('ok áudio 5.1: converte só a faixa com defeito e recusa arquivo diferente');
 
+  // Envios novos: AAC 5.1 bom passa direto; nada vira estéreo
+  const aac51 = { codec: 'aac', profile: 'LC', channels: 6, config: 6, broken: false };
+  assert.equal(aac.needsAudioFix(aac51), false);
+  assert.equal(aac.needsAudioFix({ ...aac51, codec: 'eac3', config: null }), true);
+  assert.equal(aac.needsAudioFix({ ...aac51, config: 0, broken: true }), true);
+  assert.equal(aac.needsAudioFix({ ...aac51, profile: 'HE-AAC' }), true);
+  assert.equal(aac.needsAudioFix({ ...aac51, channels: 8 }), true);
+  const sendArgs = aac.audioArgs([aac51, { ...aac51, codec: 'ac3' }]).join(' ');
+  assert.ok(sendArgs.startsWith('-c:a copy') && sendArgs.includes('-c:a:1 aac') && !sendArgs.includes('-c:a:0') && !sendArgs.includes('-ac '));
+  const uploadCode = require('fs').readFileSync(`${BE}/src/routes/upload.js`, 'utf8');
+  assert.ok(!uploadCode.includes("'-ac'"));
+  // toda etapa que reescreve o arquivo pede todas as faixas (faststart, otimização, correções)
+  assert.equal((uploadCode.match(/mapArgs\(/g) || []).length, 5);
+  assert.ok(aac.mapArgs('a.mp4').join(' ').includes('-map 0:a') && aac.mapArgs('a.mkv').includes('0:s?'));
+  console.log('ok envio: mantém o 5.1, converte só a faixa que precisa');
+
+  // Histórico da série, troca de episódio e renovação do login
+  db.episodes = [{ id: 'e1', series_id: U(5) }, { id: 'e2', series_id: U(5) }, { id: 'x1', series_id: U(6) }];
+  db.watch_history = [h(U(1), 'episode', 'e1', { completed: true }), h(U(1), 'episode', 'x1'), h(U(2), 'episode', 'e2')];
+  const ofSeries = (await call('GET', `/history?series_id=${U(5)}`, U(1))).body;
+  assert.deepEqual(ofSeries.map(r => r.episode_id), ['e1']);
+  const send = (id, extra) => call('POST', '/history', U(1), { content_type: 'episode', content_id: id, episode_id: id, progress: 1, duration: 0, ...extra });
+  db.watch_history = [h(U(1), 'episode', 'e1', { episode_id: 'e1', completed: true, progress: 900, last_watched: old })];
+  assert.equal((await send('e1', { only_if_new: true })).status, 200);
+  assert.deepEqual([db.watch_history[0].progress, db.watch_history[0].completed, db.watch_history[0].last_watched > old], [900, true, true]);
+  assert.equal((await send('e2', { only_if_new: true })).status, 200);
+  assert.deepEqual([db.watch_history[1].progress, db.watch_history[1].completed], [1, false]);
+  console.log('ok séries: histórico completo da série e próximo episódio sem apagar o já visto');
+
+  db.users = [{ id: U(1), email: 'a@b.c', is_admin: false }];
+  const renewed = await call('POST', '/auth/refresh', U(1));
+  assert.equal(jwt.verify(renewed.body.token, process.env.JWT_SECRET).id, U(1));
+  assert.equal((await call('POST', '/auth/refresh', U(9))).status, 401);
+  assert.equal((await call('POST', '/auth/refresh')).status, 401);
+  console.log('ok login: renova só conta que ainda existe');
+
   srv.close(); console.log('TODOS OS TESTES PASSARAM');
 })().catch(e => { console.error(e); process.exit(1); });

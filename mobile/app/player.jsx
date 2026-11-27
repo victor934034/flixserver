@@ -2,11 +2,11 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, PanResponder,
   ActivityIndicator, StatusBar, useWindowDimensions,
-  Animated, FlatList, Image, Platform, Linking, AppState, ScrollView,
+  Animated, FlatList, Image, Platform, Linking, AppState, ScrollView, BackHandler,
 } from 'react-native';
 import { VideoView, useVideoPlayer } from 'expo-video';
-import { useEvent } from 'expo';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useEvent, useEventListener } from 'expo';
+import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
 import { introVisible, creditsStart } from '../lib/skipRules';
 import { Ionicons } from '@expo/vector-icons';
 import * as ScreenOrientation from 'expo-screen-orientation';
@@ -157,19 +157,23 @@ function fmtMs(ms) {
 }
 
 export default function PlayerScreen() {
-  const params = useLocalSearchParams();
+  // Trocar de episódio/filme NÃO recria a tela: só os dados mudam. Recriar o
+  // vídeo quebrava a janela flutuante (travava no episódio antigo ou fechava o app).
+  const routeParams = useLocalSearchParams();
+  const [swapped, setSwapped] = useState(null);
+  const params = swapped || routeParams;
   const { title, id, type, seriesId, posterUrl } = params;
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
 
-  // Parse params (stable — route params don't change)
-  const versions = useRef(normalizeVersions(params.versions ? JSON.parse(params.versions) : { dubbing: params.url })).current;
-  const availVer = useRef(Object.keys(versions).filter(k => versions[k])).current;
+  // Só mudam quando se troca de episódio/filme
+  const versions = useMemo(() => normalizeVersions(params.versions ? JSON.parse(params.versions) : { dubbing: params.url }), [params.versions, params.url]);
+  const availVer = useMemo(() => Object.keys(versions).filter(k => versions[k]), [versions]);
   const initVer = useRef((params.currentVersion && versions[params.currentVersion]) ? params.currentVersion : availVer[0]).current;
-  const subtitles = useRef(params.subtitles ? JSON.parse(params.subtitles) : {}).current;
-  const availSubs = useRef(Object.entries(subtitles).filter(([, u]) => u)).current;
-  const paramNextEp = useRef(params.nextEpisode && params.nextEpisode !== 'undefined' ? JSON.parse(params.nextEpisode) : null).current;
+  const subtitles = useMemo(() => (params.subtitles ? JSON.parse(params.subtitles) : {}), [params.subtitles]);
+  const availSubs = useMemo(() => Object.entries(subtitles).filter(([, u]) => u), [subtitles]);
+  const paramNextEp = useMemo(() => (params.nextEpisode && params.nextEpisode !== 'undefined' ? JSON.parse(params.nextEpisode) : null), [params.nextEpisode]);
   const [episodes, setEpisodes] = useState([]);
   // Antes o "proximo episodio" dependia 100% do param de navegacao - qualquer
   // entrada que nao o passasse (Continuar Assistindo, notificacao, download)
@@ -208,6 +212,13 @@ export default function PlayerScreen() {
   const { isPlaying = false } = useEvent(player, 'playingChange', { isPlaying: false });
   const { status = 'idle', error: playerError } = useEvent(player, 'statusChange', { status: 'idle' });
 
+  // Entre pedir o próximo vídeo e ele carregar, posição e duração ainda são as
+  // do anterior: sem isso o novo seria dado como terminado na hora.
+  const [switching, setSwitching] = useState(false);
+  const switchingRef = useRef(false);
+  const sourceReadyRef = useRef(true);
+  const lastSaveRef = useRef(Date.now());
+
   // ─── Assistir juntos (sincronia + chat) ───────────────────────────────────
   const tg = useTogether(params.room ? String(params.room) : null);
   const applyingRemote = useRef(false);
@@ -229,15 +240,15 @@ export default function PlayerScreen() {
   // "proximo episodio", historico) passa a seguir a posicao da TV, nao a do
   // player local (que fica pausado no ponto onde a transmissao comecou).
   const localDur = player.duration || 0;
-  const durSec = isCasting ? (mediaStatus?.mediaInfo?.streamDuration || localDur) : localDur;
-  const posSec = isCasting ? (remotePosition ?? currentTime) : currentTime;
+  const durSec = switching ? 0 : (isCasting ? (mediaStatus?.mediaInfo?.streamDuration || localDur) : localDur);
+  const posSec = switching ? 0 : (isCasting ? (remotePosition ?? currentTime) : currentTime);
   const uiPlaying = isCasting ? remoteIsPlaying : isPlaying;
   const remainSec = Math.max(0, durSec - posSec);
   const progress = durSec > 0 ? posSec / durSec : 0;
   const isBuffering = isCasting ? remoteLoading : status === 'loading';
-  const isEnded = isCasting
+  const isEnded = !switching && (isCasting
     ? remoteFinished
-    : (!isPlaying && durSec > 0 && currentTime > 0 && remainSec < 1.5);
+    : (!isPlaying && durSec > 0 && currentTime > 0 && remainSec < 1.5));
   const showSkipIntro = introVisible(skipTimes, posSec, durSec);
   // Com os créditos conhecidos o aviso aparece na hora certa; sem eles, nos últimos 30s
   const creditsAt = creditsStart(skipTimes, durSec);
@@ -632,6 +643,8 @@ export default function PlayerScreen() {
   // Ref holds the latest save function so the interval never needs to restart
   const saveProgressRef = useRef(null);
   saveProgressRef.current = async () => {
+    if (switchingRef.current) return;
+    lastSaveRef.current = Date.now();
     const ct = isCasting ? lastRemotePosRef.current : player.currentTime;
     const dur = isCasting ? (durRef.current || 0) : (player.duration || 0);
     if (!id || ct < 5) return;
@@ -723,8 +736,14 @@ export default function PlayerScreen() {
   }, [tg.active, tg.isHost]);
 
   // Sessão encerrada pelo anfitrião: sai do player
-  useEffect(() => { if (tg.status === 'ended') router.back(); }, [tg.status]);
+  useEffect(() => { if (tg.status === 'ended') exitRef.current(); }, [tg.status]);
 
+
+  // Antes de recarregar: guarda onde estava, sem perder uma retomada ainda pendente
+  const keepPosition = () => {
+    const at = posSec > 1 ? posSec : null;
+    setSavedPosSec(prev => prev ?? at);
+  };
 
   // "Tentar novamente": cada toque tenta algo diferente em vez de repetir a
   // mesma URL que ja falhou -
@@ -746,7 +765,7 @@ export default function PlayerScreen() {
     if (retrying) return;
     setRetrying(true);
     setTimeout(() => setRetrying(false), 12000);
-    setSavedPosSec(currentTime);
+    keepPosition();
     retryCountRef.current += 1;
     let next = versions[activeVer];
     if (retryCountRef.current === 1) {
@@ -773,7 +792,7 @@ export default function PlayerScreen() {
     const alt = altMediaUrl(versions[activeVer]);
     if (!alt || alt === versions[activeVer]) return;
     autoAltTriedRef.current = true;
-    setSavedPosSec(currentTime);
+    keepPosition();
     player.replace({ uri: alt });
   }, [status]);
 
@@ -837,25 +856,63 @@ export default function PlayerScreen() {
 
   // Apaga o download quando o episodio termina (opcional).
   const autoDeletedRef = useRef(false);
-  useEffect(() => {
-    if (!isEnded || autoDeletedRef.current || type !== 'episode') return;
+  const deleteWatchedDownload = async () => {
+    if (autoDeletedRef.current || type !== 'episode') return;
     autoDeletedRef.current = true;
-    (async () => {
-      try {
-        if (!(await getPref('autoDeleteWatched'))) return;
-        if (getDownloadStatus(id, activeVer).state === 'done') deleteDownload(id, activeVer);
-      } catch {}
-    })();
-  }, [isEnded]);
+    try {
+      if (!(await getPref('autoDeleteWatched'))) return;
+      if (getDownloadStatus(id, activeVer).state === 'done') deleteDownload(id, activeVer);
+    } catch {}
+  };
+  useEffect(() => { if (isEnded) deleteWatchedDownload(); }, [isEnded]);
+
+  // Carrega outro vídeo nesta mesma tela
+  const swapTo = (navParams) => {
+    clearTimeout(nextCountRef.current);
+    setNextCountdown(null);
+    saveProgress();
+    switchingRef.current = true;
+    sourceReadyRef.current = false;
+    setSwitching(true);
+    autoDlNextRef.current = false;
+    autoDeletedRef.current = false;
+    autoAltTriedRef.current = false;
+    retryCountRef.current = 0;
+    stallCountRef.current = 0;
+    surfaceRetryRef.current = 0;
+    firstFrameRef.current = false;
+    lastRemotePosRef.current = 0;
+    setSavedPosSec(null);
+    setActiveSub(null);
+    setAudioTracks([]);
+    setActiveAudio(null);
+    setSubtitleCues([]);
+    setNextMovie(null);
+    setDragProgress(null);
+    setSheet(null);
+    setActiveVer(navParams.currentVersion);
+    setSwapped(navParams);
+    // Direto aqui, e não num efeito: na janela flutuante o app está em segundo plano
+    if (!isCasting) {
+      const next = normalizeVersions(JSON.parse(navParams.versions));
+      player.replace({ uri: next[navParams.currentVersion] });
+      player.play();
+    }
+  };
+  // Na TV (Chromecast) o envio espera a tela ter o título e as legendas novas
+  useEffect(() => {
+    if (swapped && isCasting) {
+      loadOnCast(castClient, versions[activeVer], 0);
+      switchingRef.current = false;
+      setSwitching(false);
+    }
+  }, [swapped]);
 
   // Abre qualquer episodio (proximo, anterior, lista) do mesmo jeito: salva o
   // progresso, mantem a versao de audio escolhida, usa o arquivo baixado se
   // existir e ja calcula o "proximo" do novo episodio.
   const openEpisode = (ep) => {
-    if (!ep || !epHasFile(ep)) return;
-    clearTimeout(nextCountRef.current);
-    setNextCountdown(null);
-    saveProgress();
+    if (!ep || !epHasFile(ep) || switchingRef.current) return;
     const vers = { dubbing: ep.file_dubbing || null, subtitled: ep.file_subtitled || null, cinema: ep.file_cinema || null, color: ep.file_color || null, bw: ep.file_bw || null };
     const ver = vers[activeVer] ? activeVer : Object.keys(vers).find(k => vers[k]);
     const dl = getDownloadStatus?.(ep.id, ver);
@@ -870,8 +927,15 @@ export default function PlayerScreen() {
       subtitles: JSON.stringify({ pt: ep.subtitle_pt || null, en: ep.subtitle_en || null, es: ep.subtitle_es || null }),
     };
     if (seriesId) navParams.seriesId = seriesId;
+    if (posterUrl) navParams.posterUrl = posterUrl;
     if (after) navParams.nextEpisode = JSON.stringify(buildNavEpParam(after));
-    router.replace({ pathname: '/player', params: navParams });
+    swapTo(navParams);
+    // O novo episódio entra já no "Continuar assistindo", mesmo se o app fechar em seguida
+    api.post('/history', {
+      content_type: 'episode', content_id: String(ep.id), episode_id: String(ep.id),
+      series_id: seriesId || undefined, progress: 1, duration: 0, only_if_new: true,
+      profile_id: activeProfile?.id || null,
+    }).catch(() => {});
   };
 
   const goNextEp = () => openEpisode(nextEp);
@@ -938,6 +1002,114 @@ export default function PlayerScreen() {
     openSheet('episodes');
   };
 
+  // ─── Eventos do player ────────────────────────────────────────────────────
+  // Vêm do lado nativo, por isso continuam chegando na janela flutuante, onde o
+  // Android congela os temporizadores do app.
+  const markSourceReady = () => { sourceReadyRef.current = true; };
+  useEventListener(player, 'sourceLoad', markSourceReady);
+  useEventListener(player, 'statusChange', e => { if (e.status === 'readyToPlay') markSourceReady(); });
+  useEventListener(player, 'timeUpdate', () => {
+    if (switchingRef.current) {
+      if (!sourceReadyRef.current) return;
+      switchingRef.current = false;
+      setSwitching(false);
+      return;
+    }
+    if (player.playing && Date.now() - lastSaveRef.current >= 15000) saveProgress();
+  });
+  useEventListener(player, 'playToEnd', () => {
+    if (switchingRef.current || isCasting) return;
+    saveProgress();
+    // Na janela flutuante não há contagem nem botão: passa direto pro próximo
+    if (AppState.currentState !== 'active' && nextEp && !tg.active) {
+      deleteWatchedDownload();
+      openEpisode(nextEp);
+    }
+  });
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', s => { if (s !== 'active') saveProgress(); });
+    return () => sub.remove();
+  }, []);
+
+  // ─── Janela flutuante (PiP) ───────────────────────────────────────────────
+  // Só com o vídeo tocando e o player na tela. Desligar antes de sair é o que
+  // impede o resto do app de virar janela quando a pessoa vai pro início do celular.
+  const navigation = useNavigation();
+  const [screenActive, setScreenActive] = useState(true);
+  const [pipOn, setPipOn] = useState(false);
+  useEffect(() => {
+    const subs = [
+      navigation.addListener('focus', () => setScreenActive(true)),
+      navigation.addListener('blur', () => setScreenActive(false)),
+      navigation.addListener('beforeRemove', () => setScreenActive(false)),
+    ];
+    return () => subs.forEach(off => off());
+  }, [navigation]);
+  const pipAllowed = screenActive && isPlaying && !isCasting && !streamBlocked && status !== 'error';
+  useEffect(() => {
+    if (!pipAllowed) { setPipOn(false); return; }
+    const t = setTimeout(() => setPipOn(true), 600);
+    return () => clearTimeout(t);
+  }, [pipAllowed]);
+
+  const exitingRef = useRef(false);
+  const exitPlayer = (go = () => router.back()) => {
+    if (exitingRef.current) return;
+    exitingRef.current = true;
+    saveProgress();
+    setScreenActive(false);
+    setPipOn(false);
+    // dá um instante pro Android receber o "sem janela flutuante" antes de a tela sumir
+    setTimeout(go, 80);
+  };
+  const exitRef = useRef(exitPlayer);
+  exitRef.current = exitPlayer;
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (!navigation.isFocused()) return false; // outra tela por cima: não é com o player
+      exitRef.current();
+      return true;
+    });
+    return () => sub.remove();
+  }, []);
+
+  // ─── Vigias ───────────────────────────────────────────────────────────────
+  // Som sem imagem: se o vídeo toca e nenhum quadro aparece, recria só a imagem
+  const [surfaceKey, setSurfaceKey] = useState(0);
+  const firstFrameRef = useRef(false);
+  const surfaceRetryRef = useRef(0);
+  useEffect(() => {
+    if (!isPlaying || switching || isCasting || status !== 'readyToPlay') return;
+    const t = setTimeout(() => {
+      if (firstFrameRef.current || surfaceRetryRef.current >= 2 || AppState.currentState !== 'active') return;
+      surfaceRetryRef.current += 1;
+      setSurfaceKey(k => k + 1);
+    }, 3000);
+    return () => clearTimeout(t);
+  }, [isPlaying, switching, isCasting, status, surfaceKey, id]);
+
+  // Carregando sem fim: recarrega sozinho (antes só saindo e entrando de novo)
+  const stallCountRef = useRef(0);
+  const [stallTick, setStallTick] = useState(0);
+  const stallRef = useRef(null);
+  stallRef.current = () => {
+    if (AppState.currentState !== 'active' || stallCountRef.current >= 2) return;
+    stallCountRef.current += 1;
+    setStallTick(n => n + 1);
+    if (stallCountRef.current === 1) {
+      keepPosition();
+      player.replace({ uri: versions[activeVer] });
+      player.play();
+    } else {
+      retryPlayback();
+    }
+  };
+  useEffect(() => {
+    if (status !== 'loading' || isCasting) return;
+    const t = setTimeout(() => stallRef.current(), 25000);
+    return () => clearTimeout(t);
+  }, [status, isCasting, id, activeVer, stallTick]);
+
   // ─── Render ───────────────────────────────────────────────────────────────
   // Overlay de limite de streams simultâneos
   if (streamBlocked) {
@@ -957,13 +1129,13 @@ export default function PlayerScreen() {
         </Text>
         <TouchableOpacity
           style={{ backgroundColor: '#E50914', paddingHorizontal: 32, paddingVertical: 14, borderRadius: 10, marginBottom: 14 }}
-          onPress={() => router.replace('/subscription')}
+          onPress={() => exitPlayer(() => router.replace('/subscription'))}
         >
           <Text style={{ color: '#fff', fontWeight: '700', fontSize: 16 }}>Ver planos</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={{ paddingHorizontal: 32, paddingVertical: 14 }}
-          onPress={() => router.back()}
+          onPress={() => exitPlayer()}
         >
           <Text style={{ color: '#888', fontSize: 15 }}>Voltar</Text>
         </TouchableOpacity>
@@ -976,6 +1148,8 @@ export default function PlayerScreen() {
 
       {/* ── Video ── */}
       <VideoView
+        key={surfaceKey}
+        onFirstFrameRender={() => { firstFrameRef.current = true; }}
         player={player}
         style={StyleSheet.absoluteFill}
         contentFit="contain"
@@ -984,7 +1158,7 @@ export default function PlayerScreen() {
         fullscreenOptions={{ isFullscreenSupported: false }}
         allowsExternalPlayback={true}
         allowsPictureInPicture
-        startsPictureInPictureAutomatically
+        startsPictureInPictureAutomatically={pipOn}
         requiresLinearPlayback={false}
         bufferOptions={{
           // Android (ExoPlayer): pré-carrega até 2 min para aguentar quedas de rede
@@ -1078,7 +1252,7 @@ export default function PlayerScreen() {
         >
           {/* TOP BAR */}
           <View style={[styles.topBar, { paddingTop: Math.max(insets.top, 10) }]}>
-            <TouchableOpacity style={styles.iconPad} onPress={() => { saveProgress(); router.back(); }}>
+            <TouchableOpacity style={styles.iconPad} onPress={() => exitPlayer()}>
               <Ionicons name="arrow-back" size={22} color="#fff" />
             </TouchableOpacity>
             <Text style={styles.titleText} numberOfLines={1}>{title}</Text>
@@ -1277,7 +1451,6 @@ export default function PlayerScreen() {
             {nextMovie.year && <Text style={styles.nextCountdown}>{nextMovie.year}</Text>}
           </View>
           <TouchableOpacity style={styles.nextPlayBtn} onPress={() => {
-            saveProgress();
             const versions = {};
             if (nextMovie.file_dubbing) versions.dubbing = nextMovie.file_dubbing;
             if (nextMovie.file_subtitled) versions.subtitled = nextMovie.file_subtitled;
@@ -1287,13 +1460,12 @@ export default function PlayerScreen() {
             if (nextMovie.file_bw) versions.bw = nextMovie.file_bw;
             const firstUrl = nextMovie.file_dubbing || nextMovie.file_subtitled || nextMovie.file_cinema || nextMovie.file_color || nextMovie.file_bw;
             if (!firstUrl) return;
-            router.replace({
-              pathname: '/player',
-              params: {
-                url: firstUrl, title: nextMovie.title, id: nextMovie.id, type: 'movie',
-                versions: JSON.stringify(versions),
-                subtitles: JSON.stringify({ pt: nextMovie.subtitle_pt || null, en: nextMovie.subtitle_en || null }),
-              },
+            swapTo({
+              url: firstUrl, title: nextMovie.title, id: String(nextMovie.id), type: 'movie',
+              currentVersion: Object.keys(versions).find(k => versions[k] === firstUrl),
+              posterUrl: nextMovie.poster_url || undefined,
+              versions: JSON.stringify(versions),
+              subtitles: JSON.stringify({ pt: nextMovie.subtitle_pt || null, en: nextMovie.subtitle_en || null }),
             });
           }}>
             <Ionicons name="play" size={15} color="#000" />
@@ -1308,7 +1480,7 @@ export default function PlayerScreen() {
         <View style={styles.errorOverlay}>
           <TouchableOpacity
             style={{ position: 'absolute', top: Math.max(insets.top, 12), left: 16, padding: 8 }}
-            onPress={() => { saveProgress(); router.back(); }}
+            onPress={() => exitPlayer()}
           >
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
@@ -1599,7 +1771,7 @@ export default function PlayerScreen() {
         </TouchableOpacity>
       )}
 
-      {tg.active && <TogetherOverlay tg={tg} visible={ctrlVisible} onLeave={() => router.back()} />}
+      {tg.active && <TogetherOverlay tg={tg} visible={ctrlVisible} onLeave={() => exitPlayer()} />}
     </View>
   );
 }

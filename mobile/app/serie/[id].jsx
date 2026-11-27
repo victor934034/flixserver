@@ -11,7 +11,8 @@ import api from '../../lib/api';
 import { startTogether } from '../../lib/togetherNav';
 import TogetherChooser from '../../components/TogetherChooser';
 import WatchedButton from '../../components/WatchedButton';
-import { resumeFrom } from '../../lib/skipRules';
+import { resumeFrom, episodeMarks } from '../../lib/skipRules';
+import { useWatched } from '../../lib/watched';
 import { useDownloads } from '../../contexts/DownloadContext';
 import { useParental } from '../../contexts/ParentalContext';
 import { useProfile } from '../../contexts/ProfileContext';
@@ -37,7 +38,10 @@ export default function SerieDetail() {
   const { checkAccess } = useParental();
   const { activeProfile } = useProfile();
   const [epSeconds, setEpSeconds] = useState({});
-  const [resumeEpId, setResumeEpId] = useState(null); // ep mais recente em andamento desta serie
+  const [epMarks, setEpMarks] = useState({}); // visto / pela metade, por episódio
+  const [lastEp, setLastEp] = useState(null); // último episódio assistido desta série
+  const seasonPickedRef = useRef(false);
+  const watched = useWatched();
 
   useEffect(() => {
     Promise.all([
@@ -119,27 +123,34 @@ export default function SerieDetail() {
     } catch {}
   };
 
-  // Fetch saved positions for all episodes (used when not coming from Continue Watching)
-  useEffect(() => {
+  // Histórico da série: atualiza também ao voltar do player
+  useFocusEffect(useCallback(() => {
     if (!id || !activeProfile?.id || episodes.length === 0) return;
-    api.get('/history', { params: { limit: 200, profile_id: activeProfile.id } })
+    let alive = true;
+    const load = () => api.get('/history', { params: { series_id: id, profile_id: activeProfile.id } })
       .then(r => {
+        if (!alive) return;
+        const rows = r.data || [];
         const map = {};
-        const inSeries = new Set(episodes.map(e => String(e.id)));
-        let resume = null;
-        // O historico vem do mais recente pro mais antigo: o primeiro
-        // episodio DESTA serie ainda em andamento e o que "continua".
-        (r.data || []).forEach(h => {
-          const epId = h.episode_id || (h.content_type === 'episode' ? h.content_id : null);
-          if (epId && resumeFrom(h.progress, h.duration, h.completed) > 0) {
-            map[String(epId)] = h.progress;
-            if (!resume && inSeries.has(String(epId))) resume = String(epId);
-          }
+        rows.forEach(h => {
+          const epId = String(h.episode_id || h.content_id);
+          const from = resumeFrom(h.progress, h.duration, h.completed);
+          if (h.content_type === 'episode' && from > 0 && !(epId in map)) map[epId] = from;
         });
+        const { marks, last } = episodeMarks(rows, id);
         setEpSeconds(map);
-        setResumeEpId(resume);
+        setEpMarks(marks);
+        setLastEp(last);
+        // abre direto na temporada em que a pessoa parou (só na primeira vez)
+        const found = last && episodes.find(e => String(e.id) === last.id);
+        if (found && !seasonPickedRef.current && !seasonNum) setSeason(found.season_number);
+        seasonPickedRef.current = true;
       }).catch(() => {});
-  }, [id, activeProfile?.id, episodes.length]);
+    load();
+    // o player grava a posição ao fechar, que pode chegar um pouco depois
+    const again = setTimeout(load, 1500);
+    return () => { alive = false; clearTimeout(again); };
+  }, [id, activeProfile?.id, episodes.length]));
 
   // Auto-play matching episode when coming from Continue Watching
   useEffect(() => {
@@ -338,10 +349,13 @@ export default function SerieDetail() {
 
         <View style={styles.actionRow}>
           {episodes.length > 0 && (() => {
-            const firstEp = [...episodes].sort((a, b) =>
+            const ordered = [...episodes].sort((a, b) =>
               a.season_number !== b.season_number ? a.season_number - b.season_number : a.episode_number - b.episode_number
-            )[0];
-            const resumeEp = resumeEpId ? episodes.find(e => String(e.id) === resumeEpId) : null;
+            );
+            const firstEp = ordered[0];
+            // parou no meio: continua nele; terminou: vai para o seguinte
+            const lastIdx = lastEp ? ordered.findIndex(e => String(e.id) === lastEp.id) : -1;
+            const resumeEp = lastIdx >= 0 ? (lastEp.done ? ordered[lastIdx + 1] : ordered[lastIdx]) || null : null;
             const target = resumeEp || firstEp;
             return (
               <TouchableOpacity style={styles.btnPlay} onPress={() => playEp(target, undefined, epSeconds[String(target.id)] || 0)}>
@@ -457,6 +471,10 @@ export default function SerieDetail() {
           const hasFile = ep.file_dubbing || ep.file_subtitled || ep.file_cinema || ep.file_color || ep.file_bw;
           const epVersion = ep.file_dubbing ? 'dubbing' : ep.file_subtitled ? 'subtitled' : ep.file_cinema ? 'cinema' : ep.file_color ? 'color' : 'bw';
           const dlSt = hasFile ? getStatus(ep.id, epVersion) : { state: 'none', progress: 0 };
+          const mark = epMarks[String(ep.id)];
+          const seen = !!mark?.done || watched.has('series', id);
+          const isLast = lastEp?.id === String(ep.id);
+          const minutes = Number(ep.duration) > 0 ? Math.round(ep.duration > 600 ? ep.duration / 60 : ep.duration) : 0;
           return (
             <View key={ep.id} style={styles.episodeWrap}>
               <TouchableOpacity
@@ -478,6 +496,17 @@ export default function SerieDetail() {
                       <Ionicons name="play-circle" size={28} color="#fff" />
                     </View>
                   )}
+                  {seen && (
+                    <View style={styles.epSeenBadge}>
+                      <Ionicons name="checkmark" size={11} color="#fff" />
+                      <Text style={styles.epSeenText}>Visto</Text>
+                    </View>
+                  )}
+                  {!seen && mark?.ratio > 0.01 && (
+                    <View style={styles.epBar}>
+                      <View style={[styles.epBarFill, { width: `${Math.round(mark.ratio * 100)}%` }]} />
+                    </View>
+                  )}
                   {dlSt.state === 'done' && (
                     <View style={styles.epDlBadge}>
                       <Ionicons name="checkmark-circle" size={14} color="#4CAF50" />
@@ -488,14 +517,15 @@ export default function SerieDetail() {
                   <Text style={styles.epNum}>
                     T{ep.season_number}E{String(ep.episode_number).padStart(2, '0')}
                   </Text>
+                  {isLast && <Text style={styles.epLast}>ÚLTIMO ASSISTIDO</Text>}
                   <Text style={styles.epTitle} numberOfLines={1}>
                     {ep.title || `Episódio ${ep.episode_number}`}
                   </Text>
                   {ep.synopsis && (
                     <Text style={styles.epSynopsis} numberOfLines={2}>{ep.synopsis}</Text>
                   )}
-                  {ep.duration && (
-                    <Text style={styles.epDuration}>{Math.floor(ep.duration / 60)}min</Text>
+                  {minutes > 0 && (
+                    <Text style={styles.epDuration}>{minutes}min</Text>
                   )}
                 </View>
               </TouchableOpacity>
@@ -644,6 +674,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.3)',
   },
   epInfo: { flex: 1 },
+  epBar: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 4, backgroundColor: 'rgba(255,255,255,0.3)' },
+  epBarFill: { height: '100%', backgroundColor: '#E50914' },
+  epSeenBadge: { position: 'absolute', top: 4, left: 4, flexDirection: 'row', alignItems: 'center', gap: 2, backgroundColor: '#16A34A', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 2 },
+  epSeenText: { color: '#fff', fontSize: 10, fontWeight: '800' },
+  epLast: { color: '#E50914', fontSize: 10, fontWeight: '800', letterSpacing: 0.5, marginBottom: 2 },
   epNum: { color: '#666', fontSize: 11, marginBottom: 3 },
   epTitle: { color: '#fff', fontSize: 14, fontWeight: '600', marginBottom: 4 },
   epSynopsis: { color: '#666', fontSize: 12, lineHeight: 16 },

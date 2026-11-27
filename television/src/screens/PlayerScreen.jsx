@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, Animated,
-  Dimensions, BackHandler, Pressable, findNodeHandle,
+  Dimensions, BackHandler, Pressable, findNodeHandle, AppState,
 } from 'react-native';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { useEvent } from 'expo';
@@ -149,7 +149,27 @@ const PlayBtn = React.forwardRef(function PlayBtn(
 });
 
 // ── PlayerScreen ───────────────────────────────────────────────────────────────
+// Muitas TVs têm um só decodificador de vídeo: abrir o próximo antes de soltar o
+// anterior fechava o app ou deixava a tela preta. Por isso o player antigo sai da
+// tela, e o novo só é criado um instante depois.
 export default function PlayerScreen({ navigation, route }) {
+  const wanted = `${route.params?.url}|${route.params?.room || ''}`;
+  const [shown, setShown] = useState(wanted);
+  useEffect(() => {
+    if (shown === wanted) return undefined;
+    const t = setTimeout(() => setShown(wanted), 400);
+    return () => clearTimeout(t);
+  }, [wanted, shown]);
+  if (shown !== wanted) return <View style={s.root} />;
+  return <Player key={shown} navigation={navigation} route={route} />;
+}
+
+// Troca o vídeo sem empilhar outra tela. Vão todos os campos, para nada sobrar do anterior.
+function openNext(navigation, params) {
+  navigation.setParams({ startAt: null, room: null, live: null, seriesContext: null, contentMeta: null, ...params });
+}
+
+function Player({ navigation, route }) {
   const { activeProfile } = useProfile();
   const {
     url:          initialUrl  = '',
@@ -218,11 +238,18 @@ export default function PlayerScreen({ navigation, route }) {
       try {
         const ch = live.list[ep.liveIndex];
         const { data } = await api.get(`/iptv/stream-url/${ch.stream_id}`, { params: { fmt: 'm3u8' } });
-        navigation.replace('Player', { url: data.url, title: ch.name, tracks: { dubbing: data.url }, subtitles: {}, contentMeta: null, live: { ...live, index: ep.liveIndex } });
+        openNext(navigation, { url: data.url, title: ch.name, tracks: { dubbing: data.url }, subtitles: {}, live: { ...live, index: ep.liveIndex } });
       } catch {}
       return;
     }
-    navigation.replace('Player', ep);
+    recordStart(ep);
+    openNext(navigation, ep);
+  };
+
+  // O episódio novo entra já no "Continuar assistindo", mesmo se o app fechar em seguida
+  const recordStart = (ep) => {
+    if (ep?.contentMeta?.content_type !== 'episode') return;
+    api.post('/history', { ...ep.contentMeta, progress: 1, duration: 0, only_if_new: true, profile_id: activeProfile?.id || null }).catch(() => {});
   };
 
   // ── Refs ────────────────────────────────────────────────────────────────────
@@ -330,6 +357,7 @@ export default function PlayerScreen({ navigation, route }) {
   const [grabNext,    setGrabNext]   = useState(false);
   const [remuxActive, setRemuxActive] = useState(false);
   const autoRemuxTriedRef = useRef(false);
+  const remuxSourceRef = useRef(null);
   const [, forceFocusRewire] = useState(0);
   const sessionIdRef = useRef(Math.random().toString(36).slice(2) + Date.now());
   const [streamBlocked, setStreamBlocked] = useState(false);
@@ -428,7 +456,7 @@ export default function PlayerScreen({ navigation, route }) {
   useEffect(() => {
     if (isEnded && !endedRef.current) {
       endedRef.current = true;
-      if (nextEp && !tg.active && !live) navigation.replace('Player', nextEp);
+      if (nextEp && !tg.active && !live) gotoEp(nextEp);
       else navigation.goBack();
     }
   }, [isEnded]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -455,6 +483,39 @@ export default function PlayerScreen({ navigation, route }) {
       }
     }
   }, [status]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Vigias ──────────────────────────────────────────────────────────────────
+  // Som sem imagem: recria a imagem; na segunda vez usa a outra forma de desenhar
+  const [surface, setSurface] = useState(0);
+  const firstFrameRef = useRef(false);
+  useEffect(() => {
+    if (!isPlaying || status !== 'readyToPlay' || surface >= 2) return undefined;
+    const t = setTimeout(() => {
+      if (!firstFrameRef.current && AppState.currentState === 'active') setSurface(n => n + 1);
+    }, 4000);
+    return () => clearTimeout(t);
+  }, [isPlaying, status, surface, trackKey]);
+
+  // Carregando sem fim: recarrega sozinho, até duas vezes
+  const [stalls, setStalls] = useState(0);
+  const stallRef = useRef(null);
+  stallRef.current = () => {
+    if (error || streamBlocked || AppState.currentState !== 'active') return;
+    // ficou pronto sem a tela ser avisada: só tira o "Abrindo vídeo"
+    if (player.status === 'readyToPlay') { wasLoadedRef.current = true; setLoaded(true); player.play(); return; }
+    setStalls(n => n + 1);
+    const at = positionRef.current || switchPosRef.current;
+    switchPosRef.current = at > 1000 ? at : null;
+    wasLoadedRef.current = false;
+    setLoaded(false);
+    player.replace(remuxActive ? remuxSourceRef.current : { uri: currentUrl });
+    player.play();
+  };
+  useEffect(() => {
+    if ((loaded && status !== 'loading') || stalls >= 2) return undefined;
+    const t = setTimeout(() => stallRef.current(), remuxActive ? 60000 : 25000);
+    return () => clearTimeout(t);
+  }, [loaded, status, stalls, remuxActive]);
 
   // ── Controls show / hide ────────────────────────────────────────────────────
   const showControls = useCallback(() => {
@@ -507,8 +568,10 @@ export default function PlayerScreen({ navigation, route }) {
         profile_id: activeProfile?.id || null,
       }).catch(() => {});
     };
-    const id = setInterval(save, 30000);
-    return () => { clearInterval(id); save(); };
+    const id = setInterval(save, 15000);
+    // Botão Início do controle: o sistema pode encerrar o app sem avisar mais
+    const away = AppState.addEventListener('change', st => { if (st !== 'active') save(); });
+    return () => { clearInterval(id); away.remove(); save(); };
   }, [contentMeta, currentUrl, activeProfile]);
 
   // ── Seek ────────────────────────────────────────────────────────────────────
@@ -549,6 +612,8 @@ export default function PlayerScreen({ navigation, route }) {
       setLoaded(false);
       setError(null);
       setTrackKey(key);
+      firstFrameRef.current = false;
+      setStalls(0);
       player.replace({ uri: tracks[key] });
     }
     closePanel('audio');
@@ -577,7 +642,8 @@ export default function PlayerScreen({ navigation, route }) {
     closePanel('audio');
     const token = await AsyncStorage.getItem('token');
     const remuxUrl = `${BASE_URL}/remux?url=${encodeURIComponent(currentUrl)}`;
-    player.replace({ uri: remuxUrl, headers: token ? { Authorization: `Bearer ${token}` } : undefined });
+    remuxSourceRef.current = { uri: remuxUrl, headers: token ? { Authorization: `Bearer ${token}` } : undefined };
+    player.replace(remuxSourceRef.current);
   }
 
   // Monta a cadeia de foco esquerda/direita da fileira de botoes inferior,
@@ -610,11 +676,13 @@ export default function PlayerScreen({ navigation, route }) {
     <View style={s.root}>
 
       <VideoView
+        key={surface}
+        onFirstFrameRender={() => { firstFrameRef.current = true; }}
         player={player}
         style={StyleSheet.absoluteFill}
         contentFit="contain"
         nativeControls={false}
-        surfaceType="textureView"
+        surfaceType={surface >= 2 ? 'surfaceView' : 'textureView'}
       />
 
       {tg.active && (

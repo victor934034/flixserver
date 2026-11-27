@@ -5,8 +5,12 @@ import { useAuth } from '../contexts/AuthContext.jsx';
 
 // Novidades mostradas na primeira abertura de cada versão.
 // A CADA versão com mudança para o usuário, troque VERSION e ITEMS.
-export const VERSION = '1.3.0';
+export const VERSION = '1.4.0';
 const ITEMS = [
+  'Passar de episódio ficou mais estável, e a série continua no Continuar assistindo.',
+  'Vídeo travado carregando ou sem imagem: o player tenta se recuperar sozinho.',
+  'Nas séries: selo “Visto” nos episódios assistidos, barra nos que ficaram pela metade e aviso de qual foi o último.',
+  'Corrigido: o app pedia para entrar na conta de novo de tempos em tempos.',
   'Corrigido: dezenas de filmes que não davam play no Dublado ou no Legendado.',
   'Passo a passo novo: veja em um minuto como usar o FlixHome.',
   'Para abrir: menu lateral, “Como usar o FlixHome”.',

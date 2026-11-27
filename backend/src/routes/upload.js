@@ -1,5 +1,9 @@
 const router = require('express').Router();
 const { replaceMediaUrl } = require('../services/mediaLinks');
+const { LAYOUTS, parseTrack, needsAudioFix, audioArgs, mapArgs } = require('../services/aacRepair');
+const { inspect } = require('../services/mediaInspect');
+const { takeTurn, runFfmpeg, downloadFile } = require('../services/mediaWork');
+const ffprobePath = require('ffprobe-static').path;
 const { fetchAll } = require('../services/supabase');
 const multer = require('multer');
 const { execFile } = require('child_process');
@@ -125,7 +129,7 @@ async function generateHLS(origName) {
       await execFileAsync(ffmpegPath, [
         '-i', b2AuthUrl,
         '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
-        '-c:a', 'aac', '-b:a', '128k',
+        '-c:a', 'aac', '-b:a', '128k', '-filter:a', LAYOUTS,
         '-hls_time', '4',
         '-hls_playlist_type', 'vod',
         '-hls_flags', 'independent_segments',
@@ -234,16 +238,22 @@ async function downloadPartial(url, destPath, maxBytes) {
   });
 }
 
+// codec/perfil/canais da primeira faixa (para a tela) + todas as faixas
+function audioSummary(streams) {
+  const tracks = (streams || []).map(parseTrack);
+  if (!tracks.length) return null;
+  const { codec, profile, channels } = tracks[0];
+  return { codec, profile, channels, tracks };
+}
+
 // Probe local (sempre funciona, sem depender do cliente HTTP do ffprobe)
 async function probeLocalFile(filePath) {
   try {
     const { stdout } = await execFileAsync('ffprobe', [
-      '-v', 'quiet', '-print_format', 'json', '-show_streams', '-select_streams', 'a',
+      '-v', 'quiet', '-print_format', 'json', '-show_streams', '-show_data', '-select_streams', 'a',
       filePath,
-    ], { timeout: 20_000 });
-    const stream = JSON.parse(stdout).streams?.[0];
-    if (!stream) return null;
-    return { codec: stream.codec_name, profile: stream.profile || '', channels: stream.channels || 0 };
+    ], { timeout: 20_000, maxBuffer: 10 * 1024 * 1024 });
+    return audioSummary(JSON.parse(stdout).streams);
   } catch (e) {
     console.error('[ffprobe] erro local:', e.message?.slice(0, 200));
     return null;
@@ -269,11 +279,7 @@ async function probeAudio(input) {
 }
 
 function needsRemux(info) {
-  if (!info) return false;
-  const p = info.profile.toLowerCase();
-  const heAac = p.includes('he') || p === 'lc+sbr' || p === 'lc+sbr+ps';
-  const badCodec = info.codec && info.codec !== 'aac';
-  return heAac || info.channels > 2 || badCodec;
+  return !!info && info.tracks.some(needsAudioFix);
 }
 
 // Containers que o <video> HTML5 não toca nativamente na maioria dos browsers
@@ -291,6 +297,7 @@ async function applyFaststart(inputPath, outputPath) {
   try {
     await execFileAsync(ffmpegPath, [
       '-i', inputPath,
+      ...mapArgs(outputPath), // todas as faixas de áudio: sem isso o dual perdia uma aqui
       '-c', 'copy',
       '-avoid_negative_ts', 'make_zero', // sem isso, remux de arquivo com audio/video
                                           // iniciando em timestamps diferentes podia
@@ -315,7 +322,7 @@ async function transcodeRealMediaToMp4(input, outputPath) {
     ...(isUrl ? ['-headers', hdrs] : []),
     '-i', input,
     '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
-    '-c:a', 'aac', '-profile:a', 'aac_low', '-ac', '2', '-b:a', '192k',
+    ...audioArgs(null),
     '-y', out,
   ];
   try {
@@ -327,7 +334,7 @@ async function transcodeRealMediaToMp4(input, outputPath) {
   }
 }
 
-async function remuxToWebAac(input, outputPath) {
+async function remuxToWebAac(input, outputPath, tracks) {
   const out = outputPath || input.replace(/(\.[^.]+)$/, '_fixed$1');
   const isUrl = /^https?:\/\//i.test(input);
   // ffmpeg aceita múltiplos headers via -headers "H1: v1\r\nH2: v2\r\n"
@@ -335,8 +342,9 @@ async function remuxToWebAac(input, outputPath) {
   const args = [
     ...(isUrl ? ['-headers', hdrs] : []),
     '-i', input,
+    ...mapArgs(out),
     '-c:v', 'copy',
-    '-c:a', 'aac', '-profile:a', 'aac_low', '-ac', '2', '-b:a', '192k',
+    ...audioArgs(tracks),
     '-y', out,
   ];
   try {
@@ -397,13 +405,13 @@ router.post('/video', upload.single('file'), async (req, res) => {
     }
 
     if (needsRemux(audioInfo) || badContainer) {
-      console.log(`[upload/video] ${isRealMedia ? 'RealMedia (' + ext + ') — reencode completo' : badContainer ? 'container incompatível (' + ext + ') + ' : ''}${isRealMedia ? '' : 'remuxando → AAC-LC estéreo' + (badContainer ? ' + mp4' : '')}…`);
+      console.log(`[upload/video] ${isRealMedia ? 'RealMedia (' + ext + ') — reencode completo' : badContainer ? 'container incompatível (' + ext + ') + ' : ''}${isRealMedia ? '' : 'remuxando → AAC-LC (mantém o 5.1)' + (badContainer ? ' + mp4' : '')}…`);
       const fixedPath = badContainer
         ? tmpInput.replace(/\.[^.]+$/, '_fixed.mp4')
         : tmpInput.replace(/(\.[^.]+)$/, '_fixed$1');
       tmpOutput = isRealMedia
         ? await transcodeRealMediaToMp4(tmpInput, fixedPath)
-        : await remuxToWebAac(tmpInput, fixedPath);
+        : await remuxToWebAac(tmpInput, fixedPath, audioInfo?.tracks);
       if (tmpOutput) {
         buffer = fs.readFileSync(tmpOutput);
         if (badContainer) {
@@ -617,13 +625,10 @@ router.post('/fix-audio', async (req, res) => {
         '-v', 'error',
         '-headers', b2AuthHdr,
         '-print_format', 'json',
-        '-show_streams', '-select_streams', 'a',
+        '-show_streams', '-show_data', '-select_streams', 'a',
         b2Url,
-      ], { timeout: 30_000 });
-      const stream = JSON.parse(stdout).streams?.[0];
-      if (stream) {
-        audioInfo = { codec: stream.codec_name, profile: stream.profile || '', channels: stream.channels || 0 };
-      }
+      ], { timeout: 30_000, maxBuffer: 10 * 1024 * 1024 });
+      audioInfo = audioSummary(JSON.parse(stdout).streams);
     } catch (fpErr) {
       console.error('[fix-audio] ffprobe direto falhou:', fpErr.message?.slice(0, 200));
     }
@@ -635,7 +640,7 @@ router.post('/fix-audio', async (req, res) => {
     }
 
     if (!needsRemux(audioInfo) && !badContainer) {
-      return res.json({ skipped: true, reason: 'Áudio já compatível (AAC-LC estéreo)', audioInfo });
+      return res.json({ skipped: true, reason: 'Áudio já compatível', audioInfo });
     }
 
     // Passo 2: remux com ffmpeg via URL direta B2 + token
@@ -648,8 +653,9 @@ router.post('/fix-audio', async (req, res) => {
     const ffArgs = [
       '-headers', b2AuthHdr,
       '-i', b2Url,
+      ...(isRealMedia ? [] : mapArgs(tmpOutput)),
       ...(isRealMedia ? ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20'] : ['-c:v', 'copy']),
-      '-c:a', 'aac', '-profile:a', 'aac_low', '-ac', '2', '-b:a', '192k',
+      ...audioArgs(isRealMedia ? null : audioInfo.tracks),
       ...(badContainer ? ['-avoid_negative_ts', 'make_zero', '-movflags', '+faststart'] : []),
       '-y', tmpOutput,
     ];
@@ -670,11 +676,13 @@ router.post('/fix-audio', async (req, res) => {
     // apontar pro .mp4 novo.
     const finalName = badContainer ? origName.replace(/\.[^.]+$/, '.mp4') : origName;
     const { uploadFileFromPath } = require('../services/backblaze');
-    const result = await uploadFileFromPath(tmpOutput, finalName, badContainer ? 'video/mp4' : 'video/x-matroska');
+    const result = await uploadFileFromPath(tmpOutput, finalName, badContainer ? 'video/mp4' : contentTypeFor(ext));
 
     // Passo 4: atualiza DB se movieId/field informados
     if (movieId && field) {
       const { supabase } = require('../services/supabase');
+      // o mesmo arquivo pode estar no Dublado e no Legendado
+      if (result.cdnUrl !== cdnUrl) await replaceMediaUrl(supabase, cdnUrl, result.cdnUrl);
       const table = movieType === 'series' ? 'episodes' : 'movies';
       await supabase.from(table).update({ [field]: result.cdnUrl }).eq('id', movieId);
     }
@@ -701,14 +709,12 @@ router.post('/check-audio', async (req, res) => {
       '-v', 'error',
       '-headers', `Authorization: ${b2Token}\r\nUser-Agent: ${UA}\r\n`,
       '-print_format', 'json',
-      '-show_streams', '-select_streams', 'a',
+      '-show_streams', '-show_data', '-select_streams', 'a',
       b2Url,
-    ], { timeout: 30_000 });
+    ], { timeout: 30_000, maxBuffer: 10 * 1024 * 1024 });
 
-    const stream = JSON.parse(stdout).streams?.[0];
-    if (!stream) return res.status(422).json({ error: 'Nenhuma faixa de áudio encontrada no arquivo.' });
-
-    const audioInfo = { codec: stream.codec_name, profile: stream.profile || '', channels: stream.channels || 0 };
+    const audioInfo = audioSummary(JSON.parse(stdout).streams);
+    if (!audioInfo) return res.status(422).json({ error: 'Nenhuma faixa de áudio encontrada no arquivo.' });
     const badContainer = BAD_CONTAINER_RE.test(filename) || REALMEDIA_RE.test(filename);
     res.json({ audioInfo, needsRemux: needsRemux(audioInfo) || badContainer, badContainer });
   } catch (err) {
@@ -799,6 +805,7 @@ function remuxArgsFor(ext, input, output, extraInputArgs = []) {
     '-hide_banner',
     ...extraInputArgs,
     '-i', input,
+    ...mapArgs(output),
     '-c', 'copy',
     '-avoid_negative_ts', 'make_zero',
     ...(isMkv ? ['-reserve_index_space', String(MKV_RESERVED_INDEX_BYTES)] : ['-movflags', '+faststart']),
@@ -1142,6 +1149,12 @@ router.post('/fix-series-audio', async (req, res) => {
     return res.json({ ok: true, jobId: null, total: 0, message: 'Nenhum episódio encontrado para essas séries.' });
   }
 
+  // o mesmo arquivo dual serve ao Dublado e ao Legendado: confere uma vez só
+  allItems = [...new Map(allItems.map(i => [i.cdnUrl, i])).values()];
+
+  const done = takeTurn('fix-series-audio');
+  if (!done) return res.status(409).json({ error: 'Outro conserto de vídeo está rodando no servidor. Espere ele terminar.' });
+
   const jobId = `fsa_${Date.now()}`;
   batchJobs.set(jobId, { total: allItems.length, done: 0, errors: 0, running: true, lastFile: '', lastError: '', skipped: 0 });
   res.json({ ok: true, jobId, total: allItems.length, message: `Verificando áudio de ${allItems.length} episódio(s).` });
@@ -1157,48 +1170,59 @@ router.post('/fix-series-audio', async (req, res) => {
         const isRealMedia = REALMEDIA_RE.test(origName);
         const badContainer = BAD_CONTAINER_RE.test(origName) || isRealMedia;
 
-        const { url: b2AuthUrl } = await getDirectDownloadInfo(origName);
+        // Primeiro confere SEM baixar; só os com problema são baixados
+        if (!badContainer) {
+          const online = await inspect(item.cdnUrl, ffprobePath);
+          if (!online.audio.some(needsAudioFix)) {
+            job.done++;
+            job.skipped++;
+            continue;
+          }
+        }
+
         const ts = Date.now();
         tmpIn = path.join(os.tmpdir(), `fh_fsa_in_${ts}${ext}`);
-
         console.log(`[fix-series-audio] baixando ${origName}...`);
-        await downloadB2File(b2AuthUrl, null, tmpIn, 5);
+        await downloadFile(item.cdnUrl, tmpIn);
 
-        const audioInfo = await probeLocalFile(tmpIn);
-        if (!needsRemux(audioInfo) && !badContainer) {
-          job.done++;
-          console.log(`[fix-series-audio] ${job.done}/${job.total} já compatível: ${origName}`);
-          continue;
-        }
+        const audioInfo = isRealMedia ? null : await probeLocalFile(tmpIn);
+        if (!isRealMedia && !audioInfo) throw new Error('Não foi possível ler o áudio do arquivo');
 
         const outExt = badContainer ? '.mp4' : ext;
         tmpOut = path.join(os.tmpdir(), `fh_fsa_${ts}${outExt}`);
-        await execFileAsync(ffmpegPath, [
+        await runFfmpeg(ffmpegPath, [
           '-hide_banner', '-i', tmpIn,
+          ...(isRealMedia ? [] : mapArgs(tmpOut)),
           ...(isRealMedia ? ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20'] : ['-c:v', 'copy']),
-          '-c:a', 'aac', '-profile:a', 'aac_low', '-ac', '2', '-b:a', '192k',
-          ...(badContainer ? ['-avoid_negative_ts', 'make_zero', '-movflags', '+faststart'] : []),
+          ...audioArgs(audioInfo?.tracks),
+          ...(badContainer ? ['-avoid_negative_ts', 'make_zero'] : []),
+          ...(outExt.toLowerCase() === '.mp4' ? ['-movflags', '+faststart'] : []),
           '-y', tmpOut,
-        ], { maxBuffer: 10 * 1024 * 1024, timeout: 7_200_000 });
+        ]);
+        fs.unlinkSync(tmpIn); // libera espaço antes de enviar
+        tmpIn = null;
 
-        const finalName = badContainer ? origName.replace(/\.[^.]+$/, '.mp4') : origName;
+        // Nome novo: com o mesmo nome o CDN continuaria entregando o arquivo antigo
+        const finalName = badContainer
+          ? origName.replace(/\.[^.]+$/, '.mp4')
+          : origName.replace(/(\.[^.]+)$/, '.audio-ok$1');
         const result = await uploadFileFromPath(tmpOut, finalName, badContainer ? 'video/mp4' : contentTypeFor(ext));
 
-        if (result.cdnUrl !== item.cdnUrl) {
-          await replaceMediaUrl(supabase, item.cdnUrl, result.cdnUrl);
-          await supabase.from('episodes').update({ [item.field]: result.cdnUrl }).eq('id', item.id);
-        }
+        await replaceMediaUrl(supabase, item.cdnUrl, result.cdnUrl);
+        await supabase.from('episodes').update({ [item.field]: result.cdnUrl }).eq('id', item.id);
         job.done++;
         console.log(`[fix-series-audio] ${job.done}/${job.total} corrigido: ${origName}`);
       } catch (e) {
         job.errors++;
         job.lastError = ffmpegErrTail(e);
         console.error(`[fix-series-audio] ERRO (episodes#${item.id} ${item.field}):`, e.stderr || e.message);
+        if (e.status === 429) { job.lastError = 'A Backblaze limitou os pedidos. Parado; tente mais tarde.'; break; }
       } finally {
         try { if (tmpIn)  fs.unlinkSync(tmpIn);  } catch {}
         try { if (tmpOut) fs.unlinkSync(tmpOut); } catch {}
       }
     }
+    done();
     job.running = false;
     console.log(`[fix-series-audio] Concluído: ${job.done} ok, ${job.errors} erros`);
   })();

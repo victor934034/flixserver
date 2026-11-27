@@ -4,18 +4,20 @@ const router = require('express').Router();
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const axios = require('axios');
-const { pipeline } = require('stream/promises');
+const crypto = require('crypto');
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 const ffprobePath = require('ffprobe-static').path;
 const { supabase, fetchAll } = require('../services/supabase');
 const { probe, convert } = require('../services/aacRepair');
+const { inspect } = require('../services/mediaInspect');
+const { takeTurn, busyWith, downloadFile, cleanLeftovers } = require('../services/mediaWork');
 const { replaceMediaUrl } = require('../services/mediaLinks');
 
 // "private" no nome: a rota pública /settings não expõe esta chave
 const KEY = 'private_audio_repair';
-// A Backblaze bloqueia a conta inteira com muitos pedidos: devagar, um de cada vez
-const PAUSE_MS = 2000;
+// A Backblaze bloqueia a conta inteira com muitos pedidos: um arquivo de cada vez
+// (o intervalo entre os pedidos fica no mediaInspect)
+const PAUSE_MS = 300;
 const RATE_WAIT_MS = 90_000;
 const FIELDS = {
   movies: ['file_dubbing', 'file_subtitled', 'file_cinema', 'file_4k', 'file_color', 'file_bw'],
@@ -23,7 +25,8 @@ const FIELDS = {
 };
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-let report = null; // { cursor, total, finished, unreadable, found: [] }
+// seen: arquivos já conferidos, para uma nova busca olhar só o que é novo
+let report = null; // { cursor, total, finished, unreadable, found: [], seen: [] }
 let activity = null; // null | 'scan' | 'fix'
 let message = '';
 let current = '';
@@ -35,6 +38,8 @@ async function loadReport() {
   const { data } = await supabase.from('system_settings').select('value').eq('key', KEY).maybeSingle();
   try { report = data?.value ? JSON.parse(data.value) : null; } catch { report = null; }
   report = report || { cursor: 0, total: 0, finished: false, unreadable: 0, found: [] };
+  report.seen = report.seen || [];
+  cleanLeftovers();
   return report;
 }
 
@@ -64,22 +69,23 @@ async function listFiles() {
   return [...out.values()];
 }
 
-async function httpStatus(url) {
-  try {
-    const r = await axios.get(url, { headers: { Range: 'bytes=0-0' }, timeout: 30_000, responseType: 'arraybuffer' });
-    return r.status;
-  } catch (e) { return e.response?.status || 0; }
-}
+const idOf = url => crypto.createHash('sha1').update(url).digest('hex').slice(0, 12);
 
 async function scan() {
   const files = await listFiles();
+  const seen = new Set(report.seen);
+  const pending = files.filter(f => !seen.has(idOf(f.url)));
   report.total = files.length;
+  report.cursor = files.length - pending.length;
+  report.finished = false;
+  report.unreadable = 0;
   let limited = 0;
-  while (report.cursor < files.length && !stopRequested) {
-    const file = files[report.cursor];
+  let sinceSave = 0;
+  for (let n = 0; n < pending.length && !stopRequested; n++) {
+    const file = pending[n];
     current = file.title;
     try {
-      const info = await probe(ffprobePath, file.url);
+      const info = await inspect(file.url, ffprobePath);
       limited = 0;
       message = '';
       if (info.audio.some(t => t.broken) && !report.found.some(f => f.url === file.url)) {
@@ -88,29 +94,25 @@ async function scan() {
           tracks: info.audio.map(t => ({ language: t.language, channels: t.channels, broken: t.broken })),
         });
       }
+      report.seen.push(idOf(file.url));
     } catch (e) {
-      if ((await httpStatus(file.url)) === 429) {
+      if (e.status === 429 || /429|too many requests/i.test(e.message)) {
         limited += 1;
         if (limited > 5) { message = 'A Backblaze limitou os pedidos. A busca parou; continue mais tarde.'; break; }
         message = 'A Backblaze pediu para esperar. Continuando em instantes...';
         await sleep(RATE_WAIT_MS * limited);
-        continue; // tenta o mesmo arquivo de novo
+        n -= 1; // tenta o mesmo arquivo de novo
+        continue;
       }
+      // não entra em "seen": a próxima busca tenta de novo
       report.unreadable += 1;
       console.warn('[audio-51] não leu', file.title, e.message.slice(0, 150));
     }
     report.cursor += 1;
-    if (report.cursor % 10 === 0) await saveReport();
+    if (++sinceSave >= 25) { sinceSave = 0; await saveReport(); }
     await sleep(PAUSE_MS);
   }
-  report.finished = report.cursor >= files.length;
-}
-
-async function download(url, dest) {
-  const resp = await axios.get(url, { responseType: 'stream', timeout: 300_000 });
-  await pipeline(resp.data, fs.createWriteStream(dest));
-  const expected = Number(resp.headers['content-length']) || 0;
-  if (expected && fs.statSync(dest).size !== expected) throw new Error('Download incompleto');
+  report.finished = !stopRequested && report.cursor >= files.length;
 }
 
 // O arquivo novo ganha outro nome (o cache do CDN guardaria o antigo) e o antigo NÃO é apagado
@@ -125,7 +127,7 @@ async function fixOne(item) {
   const output = path.join(os.tmpdir(), `aac_out_${stamp}.mp4`);
   try {
     item.step = 'baixando';
-    await download(item.url, input);
+    await downloadFile(item.url, input);
     item.step = 'convertendo o áudio';
     const result = await convert({ ffmpegPath, ffprobePath }, input, output);
     if (!result.changed) { item.status = 'ok'; return; }
@@ -133,7 +135,7 @@ async function fixOne(item) {
     item.step = 'enviando';
     const { cdnUrl } = await uploadFileFromPath(output, newName, 'video/mp4');
     item.step = 'conferindo o arquivo enviado';
-    const online = await probe(ffprobePath, cdnUrl);
+    const online = await inspect(cdnUrl, ffprobePath);
     if (online.audio.some(t => t.broken) || online.audio.length !== result.after.audio.length) {
       throw new Error('O arquivo enviado não passou na conferência');
     }
@@ -170,32 +172,36 @@ async function work() {
   report.found.forEach(f => { if (f.status === 'queued') f.status = 'broken'; });
 }
 
-function start(kind, task) {
+function start(kind, task, done) {
   activity = kind;
   stopRequested = false;
   message = '';
   task()
     .catch(e => { message = 'Erro: ' + e.message; console.error('[audio-51]', e.message); })
-    .finally(async () => { activity = null; current = ''; await saveReport(); });
+    .finally(async () => { activity = null; current = ''; done(); await saveReport(); });
 }
+const BUSY = 'Outro conserto de vídeo está rodando no servidor. Espere ele terminar.';
 
 router.get('/status', async (req, res) => {
   try {
     await loadReport();
     // um conserto interrompido por reinício do servidor volta a pendente
     if (!activity) report.found.forEach(f => { if (f.status === 'converting' || f.status === 'queued') f.status = 'broken'; });
-    res.json({ activity, current, message, ...report });
+    const { seen, ...visible } = report; // a lista interna não precisa ir para a tela
+    res.json({ activity, current, message, ...visible });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.post('/scan', async (req, res) => {
   if (activity) return res.status(409).json({ error: 'Já há uma tarefa em andamento.' });
   await loadReport();
-  if (req.body?.restart || report.finished) {
-    // mantém o histórico dos que já foram consertados
-    report = { cursor: 0, total: 0, finished: false, unreadable: 0, found: report.found.filter(f => f.status === 'fixed') };
+  const done = takeTurn('audio-51');
+  if (!done) return res.status(409).json({ error: BUSY });
+  if (req.body?.restart) {
+    // "conferir tudo de novo": mantém o histórico dos que já foram consertados
+    report = { cursor: 0, total: 0, finished: false, unreadable: 0, seen: [], found: report.found.filter(f => f.status === 'fixed') };
   }
-  start('scan', scan);
+  start('scan', scan, done);
   res.json({ ok: true });
 });
 
@@ -205,8 +211,11 @@ router.post('/fix', async (req, res) => {
   if (activity === 'scan') return res.status(409).json({ error: 'Pare a busca antes de converter.' });
   const items = report.found.filter(f => urls.includes(f.url) && (f.status === 'broken' || f.status === 'error'));
   if (!items.length) return res.status(400).json({ error: 'Nada para converter.' });
+  // já convertendo: só entra na fila
+  const done = activity ? null : takeTurn('audio-51');
+  if (!activity && !done) return res.status(409).json({ error: BUSY });
   items.forEach(f => { f.status = 'queued'; queue.push(f.url); });
-  if (!activity) start('fix', work);
+  if (done) start('fix', work, done);
   res.json({ ok: true, queued: items.length });
 });
 

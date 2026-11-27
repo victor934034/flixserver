@@ -128,7 +128,7 @@ export default function EditarFilme() {
       }
 
       // 2) precisa remux — avisa e aguarda confirmação implícita (botão já foi clicado)
-      setFixMsg(p => ({ ...p, [field]: `Remuxando (${desc}) → AAC-LC estéreo… pode demorar minutos` }));
+      setFixMsg(p => ({ ...p, [field]: `Remuxando (${desc}) → AAC (mantém o 5.1)… pode demorar minutos` }));
 
       const { data } = await api.post('/upload/fix-audio', {
         cdnUrl, movieId: id, movieType: 'movie', field,

@@ -8,6 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { startTogether, joinTogether } from '../lib/together';
 import TogetherChooser from '../components/TogetherChooser';
 import { useWatched } from '../lib/watched';
+import { episodeMarks, resumeFrom } from '../lib/skipRules';
 import api from '../lib/api';
 import { useProfile } from '../contexts/ProfileContext';
 
@@ -133,7 +134,7 @@ function SeasonDropdown({ seasons, season, onSelect }) {
 }
 
 // ─── Episode item ─────────────────────────────────────────────────────────────
-const EpisodeItem = React.forwardRef(function EpisodeItem({ ep, onPress }, ref) {
+const EpisodeItem = React.forwardRef(function EpisodeItem({ ep, onPress, mark, seen, isLast }, ref) {
   const [foc, setFoc] = useState(false);
   const hasFile = !!(ep.file_dubbing || ep.file_subtitled || ep.file_cinema);
 
@@ -164,6 +165,12 @@ const EpisodeItem = React.forwardRef(function EpisodeItem({ ep, onPress }, ref) 
               <Ionicons name="play-circle" size={r(44)} color="#fff" />
             </View>
           )}
+          {seen && (
+            <View style={s.epSeenBadge}><Text style={s.epSeenTxt}>✓ Visto</Text></View>
+          )}
+          {!seen && mark?.ratio > 0.01 && (
+            <View style={s.epBar}><View style={[s.epBarFill, { width: `${Math.round(mark.ratio * 100)}%` }]} /></View>
+          )}
           {!foc && (
             <View style={s.epDurBadge}>
               <Text style={s.epDurTxt}>{ep.duration ? `${ep.duration}m` : '—'}</Text>
@@ -177,6 +184,7 @@ const EpisodeItem = React.forwardRef(function EpisodeItem({ ep, onPress }, ref) 
             EP {String(ep.episode_number).padStart(2, '0')}
             {ep.air_date ? `  ·  ${ep.air_date.slice(0, 4)}` : ''}
           </Text>
+          {isLast && <Text style={s.epLast}>ÚLTIMO ASSISTIDO</Text>}
           <Text style={[s.epTitle, foc && s.epTitleFoc]} numberOfLines={2}>
             {ep.title || `Episódio ${ep.episode_number}`}
           </Text>
@@ -210,6 +218,8 @@ export default function DetailScreen({ navigation, route }) {
   const [continueId, setContinueId] = useState(null); // registro que mantém o título no "Continuar assistindo"
   const [chooser, setChooser] = useState(null); // params do "Assistir juntos" enquanto a pessoa escolhe
   const watched = useWatched();
+  const [history, setHistory] = useState({ marks: {}, last: null, seconds: {} });
+  const seasonPickedRef = useRef(false);
   const epListRef  = useRef(null);
   const firstEpRef = useRef(null);
   const [firstEpHandle, setFirstEpHandle] = useState(null);
@@ -278,6 +288,37 @@ export default function DetailScreen({ navigation, route }) {
       }
     }).finally(() => setLoading(false));
   }, [item.id]);
+
+  // Visto / pela metade em cada episódio; atualiza ao voltar do player
+  useEffect(() => {
+    if (!isSeries || !activeProfile?.id) return;
+    let alive = true;
+    let again;
+    const load = () => api.get('/history', { params: { series_id: item.id, profile_id: activeProfile.id } })
+      .then(r => {
+        if (!alive) return;
+        const rows = r.data || [];
+        const seconds = {};
+        rows.forEach(h => {
+          const epId = String(h.episode_id || h.content_id);
+          const from = resumeFrom(h.progress, h.duration, h.completed);
+          if (from > 0 && !(epId in seconds)) seconds[epId] = from;
+        });
+        setHistory({ ...episodeMarks(rows, item.id), seconds });
+      }).catch(() => {});
+    load();
+    const off = navigation.addListener('focus', () => { load(); again = setTimeout(load, 1500); });
+    return () => { alive = false; clearTimeout(again); off(); };
+  }, [item.id, activeProfile]);
+
+  // Abre direto na temporada do último episódio assistido (uma vez só)
+  useEffect(() => {
+    if (seasonPickedRef.current || !history.last) return;
+    const found = episodes.find(e => String(e.id) === history.last.id);
+    if (!found) return;
+    seasonPickedRef.current = true;
+    setSeason(found.season_number);
+  }, [history, episodes]);
 
   // After first episode mounts, capture its node handle for nextFocusRight
   useEffect(() => {
@@ -356,7 +397,7 @@ export default function DetailScreen({ navigation, route }) {
       seriesContext: {
         seriesTitle: detail.title || detail.name,
         backdropUrl: detail.backdrop_url,
-        episodes:    currentEps,
+        episodes:    [...episodes].sort((x, y) => x.season_number - y.season_number || x.episode_number - y.episode_number),
         currentEpId: ep.id,
       },
       contentMeta: { content_type: 'episode', content_id: ep.id, episode_id: ep.id, series_id: detail.id },
@@ -365,7 +406,8 @@ export default function DetailScreen({ navigation, route }) {
 
   function playEpisode(ep) {
     const p = buildEpisodeParams(ep);
-    if (p) navigation.navigate('Player', p);
+    const from = history.seconds[String(ep.id)];
+    if (p) navigation.navigate('Player', from > 0 ? { ...p, startAt: from } : p);
   }
 
   const versions = [];
@@ -591,11 +633,15 @@ export default function DetailScreen({ navigation, route }) {
                 keyExtractor={ep => String(ep.id)}
                 showsVerticalScrollIndicator={false}
                 removeClippedSubviews={false}
+                extraData={[history, watched]}
                 contentContainerStyle={{ paddingBottom: r(40) }}
                 renderItem={({ item: ep, index }) => (
                   <EpisodeItem
                     ref={index === 0 ? firstEpRef : null}
                     ep={ep}
+                    mark={history.marks[String(ep.id)]}
+                    seen={!!history.marks[String(ep.id)]?.done || watched.has('series', item.id)}
+                    isLast={history.last?.id === String(ep.id)}
                     onPress={playEpisode}
                   />
                 )}
@@ -610,6 +656,11 @@ export default function DetailScreen({ navigation, route }) {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
+  epBar: { position: 'absolute', left: 0, right: 0, bottom: 0, height: r(6), backgroundColor: 'rgba(255,255,255,0.3)' },
+  epBarFill: { height: '100%', backgroundColor: '#E50914' },
+  epSeenBadge: { position: 'absolute', top: r(6), left: r(6), backgroundColor: '#16A34A', borderRadius: r(4), paddingHorizontal: r(8), paddingVertical: r(3), zIndex: 2 },
+  epSeenTxt: { color: '#fff', fontSize: r(15), fontWeight: '800' },
+  epLast: { color: '#E50914', fontSize: r(15), fontWeight: '800', letterSpacing: 1, marginBottom: r(2) },
   root: { flex: 1, backgroundColor: '#000' },
   layout: { flex: 1, flexDirection: 'row' },
 

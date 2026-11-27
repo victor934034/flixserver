@@ -4,7 +4,7 @@ import api, { moviesAPI, seriesAPI, watchlistAPI, likesAPI } from '../api/index.
 import { startTogetherWeb, joinTogetherWeb } from '../lib/together.js';
 import TogetherChooser from '../components/TogetherChooser.jsx';
 import { useWatched } from '../lib/watched.js';
-import { resumeFrom } from '../lib/skipRules.js';
+import { resumeFrom, episodeMarks } from '../lib/skipRules.js';
 import { prefetchCache } from '../App.jsx';
 import { KEY, useKeyDown } from '../hooks/useNav.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
@@ -125,9 +125,9 @@ function SeasonDropdown({ seasons, season, focused, open, focIdx }) {
 }
 
 // ── Episode item ─────────────────────────────────────────────────────────────
-function EpisodeItem({ ep, focused, onClick, epProgress, innerRef }) {
+function EpisodeItem({ ep, focused, onClick, mark, seen, isLast, innerRef }) {
   const hasFile = !!(ep.file_dubbing || ep.file_subtitled || ep.file_cinema || ep.file_color || ep.file_bw);
-  const pct = epProgress > 0 ? Math.min(epProgress * 100, 100) : 0;
+  const pct = !seen && mark && mark.ratio > 0.01 ? Math.round(mark.ratio * 100) : 0;
   return (
     <div
       ref={innerRef}
@@ -156,6 +156,9 @@ function EpisodeItem({ ep, focused, onClick, epProgress, innerRef }) {
               <div style={{ height: '100%', width: pct + '%', background: ACCENT }} />
             </div>
           )}
+          {seen && (
+            <div style={{ position: 'absolute', top: 4, left: 4, background: '#16A34A', padding: '2px 7px', borderRadius: 4, fontSize: 11, color: '#fff', fontWeight: 800 }}>✓ Visto</div>
+          )}
           {focused && hasFile && (
             <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 34 }}>▶</div>
           )}
@@ -169,6 +172,7 @@ function EpisodeItem({ ep, focused, onClick, epProgress, innerRef }) {
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ color: '#555', fontSize: 11, fontWeight: 700, marginBottom: 3, letterSpacing: 0.5 }}>
             EP {String(ep.episode_number).padStart(2, '0')}
+            {isLast && <span style={{ color: ACCENT, marginLeft: 8 }}>ÚLTIMO ASSISTIDO</span>}
           </div>
           <div style={{
             color: focused ? '#fff' : '#bbb', fontSize: 14, fontWeight: focused ? 800 : 600, marginBottom: 4,
@@ -233,12 +237,14 @@ export default function DetailScreen() {
   const [wlItem,    setWlItem]    = useState(null);
   const [likeData,  setLikeData]  = useState({ likes: 0, dislikes: 0, userVote: null });
 
-  const [epProgress, setEpProgress] = useState({});
+  const [history, setHistory] = useState({ marks: {}, last: null });
+  const seasonPickedRef = useRef(false);
   const [epSeconds, setEpSeconds] = useState({});
   const [movieSeconds, setMovieSeconds] = useState(0);
   const [continueId, setContinueId] = useState(null); // registro que mantém o título no "Continuar assistindo"
 
   const autoPlayedRef = useRef(false);
+  const [allEpisodes, setAllEpisodes] = useState([]);
   // So trava a tela inteira no spinner na PRIMEIRA carga - trocar de
   // temporada depois reseta episodesLoaded, mas nao deve voltar a tela toda
   // pro spinner, so a lista de episodios atualiza quando estiver pronta.
@@ -280,6 +286,14 @@ export default function DetailScreen() {
       .finally(() => setEpisodesLoaded(true));
   }, [id, isSeries, season]);
 
+  // Lista completa, para o "Próximo" passar de uma temporada para a outra
+  useEffect(() => {
+    if (!id || !isSeries) return;
+    seriesAPI.episodes(id)
+      .then(r => setAllEpisodes([...(r.data || [])].sort((x, y) => x.season_number - y.season_number || x.episode_number - y.episode_number)))
+      .catch(() => {});
+  }, [id, isSeries]);
+
   useEffect(() => {
     if (!epId || !isSeries || autoPlayedRef.current) return;
     const ep = episodes.find(e => String(e.id) === String(epId));
@@ -293,17 +307,19 @@ export default function DetailScreen() {
     if (!id || !isSeries) return;
     const profileId = activeProfile && activeProfile.id;
     if (!profileId) return;
-    api.get('/api/history', { params: { profile_id: profileId, limit: 200 } })
+    api.get('/api/history', { params: { series_id: id, profile_id: profileId } })
       .then(r => {
-        const progressMap = {}, secondsMap = {};
+        const secondsMap = {};
         (r.data || []).forEach(h => {
-          if (h.episode_id && h.duration > 0) {
-            progressMap[h.episode_id] = h.progress / h.duration;
-            secondsMap[h.episode_id] = resumeFrom(h.progress, h.duration, h.completed);
-          }
+          const key = h.episode_id || h.content_id;
+          if (h.duration > 0 && !(key in secondsMap)) secondsMap[key] = resumeFrom(h.progress, h.duration, h.completed);
         });
-        setEpProgress(progressMap);
+        const next = episodeMarks(r.data, id);
+        setHistory(next);
         setEpSeconds(secondsMap);
+        // abre na temporada do último episódio assistido, só na primeira vez
+        if (!seasonPickedRef.current && !seasonNum && next.last && next.last.season) setSeason(next.last.season);
+        seasonPickedRef.current = true;
         const open = (r.data || []).find(h => h.series_id === id && !h.completed && h.progress > 0);
         setContinueId(open ? open.id : null);
       }).catch(() => {});
@@ -386,7 +402,7 @@ export default function DetailScreen() {
       seriesContext: {
         seriesTitle: detail ? (detail.title || detail.name || '') : '',
         backdropUrl: detail ? (detail.backdrop_url || null) : null,
-        episodes: currentEps,
+        episodes: allEpisodes.some(e => e.id === ep.id) ? allEpisodes : currentEps,
         currentEpId: ep.id,
       },
       contentMeta: {
@@ -423,7 +439,8 @@ export default function DetailScreen() {
         Object.keys(prefetchCache).forEach(k => { if (k.indexOf('profile:') === 0) delete prefetchCache[k]; });
         setContinueId(null);
         setMovieSeconds(0);
-        setEpProgress({});
+        // o que já foi concluído continua marcado como visto
+        setHistory(h => ({ marks: Object.fromEntries(Object.entries(h.marks).filter(([, m]) => m.done)), last: null }));
         setEpSeconds({});
         setSecIdx(i => Math.max(0, i - 1));
       } catch {}
@@ -654,7 +671,9 @@ export default function DetailScreen() {
                   ep={ep}
                   focused={section === 'episodes' && secIdx === ei}
                   onClick={() => playEpisode(ep, epSeconds[ep.id] || 0)}
-                  epProgress={epProgress[ep.id] || 0}
+                  mark={history.marks[String(ep.id)]}
+                  seen={!!(history.marks[String(ep.id)] || {}).done || watched.has('series', id)}
+                  isLast={!!history.last && history.last.id === String(ep.id)}
                 />
               ))}
             </div>
